@@ -1,2 +1,4 @@
+import           RIO
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = error "Test suite not yet implemented"

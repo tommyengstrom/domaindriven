@@ -21,6 +21,44 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 
 dependencies:
 - base >= 4.7 && < 5
+- rio
+- random
+- uuid
+- mtl
+- transformers
+- aeson
+
+default-extensions:
+- Arrows
+- ConstraintKinds
+- DataKinds
+- DeriveAnyClass
+- DeriveFunctor
+- DeriveGeneric
+- DeriveTraversable
+- DerivingStrategies
+- DuplicateRecordFields
+- FlexibleContexts
+- FunctionalDependencies
+- FlexibleInstances
+- GADTs
+- GeneralizedNewtypeDeriving
+- LambdaCase
+- MultiParamTypeClasses
+- MultiWayIf
+- NamedFieldPuns
+- NoImplicitPrelude
+- OverloadedLabels
+- OverloadedStrings
+- RankNTypes
+- ScopedTypeVariables
+- StandaloneDeriving
+- TupleSections
+- TypeApplications
+- TypeFamilies
+- TypeOperators
+- TypeSynonymInstances
+- ViewPatterns
 
 library:
   source-dirs: src

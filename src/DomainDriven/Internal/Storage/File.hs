@@ -1,8 +1,8 @@
 module DomainDriven.Internal.Storage.File where
 
 import           Data.Aeson
-import qualified Data.ByteString             as BS
-import qualified Data.ByteString.Lazy        as BL
+import qualified RIO.ByteString             as BS
+import qualified RIO.ByteString.Lazy        as BL
 import           DomainDriven.Internal.Class
 import           RIO
 import           RIO.Time
@@ -21,7 +21,7 @@ openFileEventStore path = do
                              $ BS.splitWith (== 10) file
 
             case errors of
-                (err:_) -> throwM $ StorageError err
+                (err:_) -> throwM . StorageError $ fromString err
                 _       -> pure as
         , storeEvent = \e -> do
             s <- toStored e

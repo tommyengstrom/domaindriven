@@ -9,7 +9,7 @@ import           RIO.Time
 import           System.Random
 
 data DDException
-    = StorageError String
+    = StorageError Text
     deriving (Show)
 
 instance Exception DDException
