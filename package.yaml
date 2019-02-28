@@ -25,7 +25,10 @@ dependencies:
 - random
 - uuid
 - mtl
+- containers
 - transformers
+- generic-lens
+- lens
 - aeson
 
 default-extensions:
