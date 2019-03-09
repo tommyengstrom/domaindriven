@@ -1,62 +1,69 @@
-{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PolyKinds #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
 import           Data.Aeson
+import           Data.Kind
 import           Data.UUID
 import           RIO
 import           RIO.Time
 import           System.Random
-import Data.Kind
 
-data DDException
-    = StorageError Text
-    deriving (Show)
+class Monad m => ESRunner m where
+    type Event m :: Type
+    type Model m :: Type
+    type Cmd m :: Type -> Type
+    readEvents :: m [Stored (Event m)]
+    persistEvent :: Event m -> m (Stored (Event m))
+    applyEvent :: Stored (Event m) -> m ()
+    evalCmd :: Cmd m a -> m (Event m, a)
 
-instance Exception DDException
-
-class DomainModel model cmd event | model -> cmd, model -> event where
-    initial :: model
-    applyEvent :: model -> Stored event -> model
-    evalCmd :: model -> cmd -> IO event
-
-data EventStore event = EventStore
-    { readEvents :: IO [Stored event]
-    , storeEvent :: event -> IO (Stored event)
-    } deriving Generic
-
-data DModel model cmd event = DModel
-    { initial'    :: model
-    , applyEvent' :: model -> Stored event -> model
-    , evalCmd'    :: model -> cmd -> IO event
-    } deriving Generic
+    runCmd :: Cmd m a -> m a
+    runCmd cmd = do
+        (ev, r) <- evalCmd cmd
+        applyEvent =<< persistEvent ev
+        pure r
 
 data Stored a = Stored
     { storedEvent     :: a
     , storedTimestamp :: UTCTime
     , storedUUID      :: UUID
-    } deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor)
-
-data STMState model cmd event = STMState
-    { store :: EventStore event
-    , model :: DModel model cmd event
-    , state :: MVar model
-    } deriving Generic
-
-class DomainDriven m where
-    type Model m :: *
-    type Event m :: *
-    type Cmd m :: *
-    loadEvents :: m ()
-    getProjection :: m (Model m)
-    runCmd :: Cmd m -> m [Stored (Event m)]
-
-
--- I want to be able to pick between just using CQRS and also using Event Sourcing
-class CQRS cmd where
-    type CqrsModel cmd :: Type
-    cqrsProjection :: Proxy cmd -> IO (CqrsModel cmd) -- The proxy shoudn't be there
-    cqrsCmd :: cmd -> IO () -- We must know the key of thing we insert!
+    } deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
 
 mkId :: MonadIO m =>  (UUID -> b) -> m b
 mkId c = c <$> liftIO randomIO
+
+-- Without a functional dep on EvenSourced (m -> model) model will have to be specified
+-- when running.
+toStored :: forall m. (MonadIO m, ESRunner m)
+         => Event m -> m (Stored (Event m))
+toStored e = Stored e <$> getCurrentTime <*> mkId id
+
+
+-- type family Ret (a :: k) :: Type
+--
+-- class Cqrs m cmd where
+--     cqrs :: Monad m => cmd -> m (Ret cmd)
+--     cqrs = undefined
+--
+-- type instance Ret 'MyDeleteHead = ()
+-- type instance Ret ('MyAppend _) = Int
+--
+-- data MyCmd
+--     = MyAppend Int
+--     | MyDeleteHead
+--
+-- instance Cqrs IO MyCmd where
+--     cqrs (MyAppend i) = pure i
+--     cqrs MyDeleteHead = pure ()
+--------------------
+--
+-- data Something
+--     = Bare
+--     | WithString String
+--
+-- type family F (a :: k) :: Type
+-- type instance F 'Bare = ()
+-- type instance F ('WithString t) = Int
+--

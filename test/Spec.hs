@@ -15,18 +15,11 @@ newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
 type ItemKey = Wrap "ItemKey" Int
 type Quantity = Wrap "Quantity" Int
 
-data StoreCmd
-    = BuyItem ItemKey Quantity
-    | Restock ItemKey Quantity
-    | AddItem ItemInfo
-    | RemoveItem ItemKey
-    deriving stock (Show, Eq, Ord, Generic)
-
--- can I use a GADT for the command and in it specify what it should return?
-data StoreCmd' a where
-    BuyItem' :: ItemKey -> Quantity -> StoreCmd' ()
-    Restock' :: ItemKey -> Quantity -> StoreCmd' ()
-    AddItem' :: ItemInfo -> StoreCmd' ItemKey
+data StoreCmd a where
+    BuyItem :: ItemKey -> Quantity -> StoreCmd ()
+    Restock :: ItemKey -> Quantity -> StoreCmd ()
+    AddItem :: ItemInfo -> StoreCmd ItemKey
+    RemoveItem :: ItemKey -> StoreCmd ()
 
 data StoreEvent
     = BoughtItem ItemKey Quantity
@@ -47,51 +40,75 @@ data Err
 instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
+data Apa = Apa
+    { model :: StoreModel
+    , events :: [Stored StoreEvent]
+    } deriving (Show, Eq, Ord, Generic)
 
--- Things to figure out
--- * How should I go about generating the client and server?
--- * How can I make a nice abstraction that allows CQRS with or without event sourcing?
---
------ How to generate the server and client
---
--- * Every constructor of the command corresponds to an endpoint
--- * The name of the constructor is the name of the endpoint
--- * All parameters of the constructor are contained in the request body
--- * the type of the parameter is used for the name. e.g.
--- `BuyItem 1 10` would be:
--- {Tag: BuyItem, ItemKey: Wrap 1, Quantity: Wrap 10}
--- * I need a type level association between command and event in order to be able to
--- return the right thing in my generated model
+newtype TestRunner a
+    = TestRunner (ReaderT (TVar Apa) IO a)
+    deriving newtype ( Functor, Applicative, Monad, MonadReader (TVar Apa), MonadIO
+                     , MonadThrow)
 
-instance DomainModel StoreModel StoreCmd StoreEvent where
-    initial = mempty
-    applyEvent m e = case storedEvent e of
-        BoughtItem iKey q ->
-            M.update (Just . over (field @"quantity") (\x -> x-q)) iKey m
-        Restocked iKey q ->
-            M.update (Just . over (field @"quantity") (+ q)) iKey m
-        AddedItem iKey info ->
-            M.insert iKey info m
-        RemovedItem iKey ->
-            M.delete iKey m
-    evalCmd m = \case
-        BuyItem iKey q -> do
-            let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-            when (available < q) $ throwM NotEnoughStock
-            pure $ BoughtItem iKey q
-        Restock iKey q -> do
-            when (M.notMember iKey m) $ throwM NoSuchItem
-            pure $ Restocked iKey q
-        AddItem info -> do
-            let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
-            pure $ AddedItem iKey info
-        RemoveItem iKey -> do
-            when (M.notMember iKey m) $ throwM NoSuchItem
-            pure $ RemovedItem iKey
+runTestRunner :: TestRunner a -> IO a
+runTestRunner (TestRunner m) = do
+    tvar <- newTVarIO $ Apa mempty mempty
+    runReaderT m tvar
+
+instance ESRunner TestRunner where
+    type Event TestRunner = StoreEvent
+    type Cmd TestRunner = StoreCmd
+    type Model TestRunner = StoreModel
+    readEvents = fmap (view (field @"events")) . readTVarIO =<< ask
+    applyEvent e = do
+        let f = case storedEvent e of
+                BoughtItem iKey q ->
+                    M.update (Just . over (field @"quantity") (\x -> x-q)) iKey
+                Restocked iKey q ->
+                    M.update (Just . over (field @"quantity") (+ q)) iKey
+                AddedItem iKey info ->
+                    M.insert iKey info
+                RemovedItem iKey ->
+                    M.delete iKey
+        tvar <- ask
+        atomically . modifyTVar tvar $ over (field @"model") f
+    persistEvent e = do
+        s <- toStored e -- :: TestRunner (Stored StoreEvent)
+        a <- ask
+        atomically . modifyTVar a $ over (field @"events") (s:)
+        pure s
+    evalCmd cmd = do
+        m <- fmap (view (field @"model")) . readTVarIO @_ @Apa =<< ask
+        case cmd of
+            BuyItem iKey q -> do
+                let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
+                when (available < q) $ throwM NotEnoughStock
+                pure (BoughtItem iKey q, ())
+            Restock iKey q -> do
+                when (M.notMember iKey m) $ throwM NoSuchItem
+                pure (Restocked iKey q, ())
+            AddItem info -> do
+                let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
+                pure (AddedItem iKey info, iKey)
+            RemoveItem iKey -> do
+                when (M.notMember iKey m) $ throwM NoSuchItem
+                pure (RemovedItem iKey, ())
+
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
     it "Can add item" $ do
-        applyEvent (mempty :: StoreModel) (Stored (AddedItem (Wrap 1) (ItemInfo 10 49)) undefined undefined)
+        r <- runTestRunner $ do
+            _ <- runCmd (AddItem (ItemInfo 10 49))
+            readTVarIO =<< ask
+        view (field @"model") r
             `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
+
+    it "Can add item and buy it" $ do
+        r <- runTestRunner $ do
+            iKey <- runCmd  $ AddItem (ItemInfo 10 49)
+            _ <- runCmd $ BuyItem iKey 7
+            readTVarIO =<< ask
+        view (field @"model") r
+            `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
 
