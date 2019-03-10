@@ -10,16 +10,16 @@ import           RIO
 import           RIO.Time
 import           System.Random
 
-class Monad m => ESRunner m where
-    type Event m :: Type
-    type Model m :: Type
-    type Cmd m :: Type -> Type
-    -- readEvents :: m [Stored (Event m)]
-    persistEvent :: Event m -> m (Stored (Event m))
-    applyEvent :: Stored (Event m) -> m ()
-    evalCmd :: Cmd m a -> m (Event m, a)
 
-    runCmd :: Cmd m a -> m a
+class EventSourced model where
+    type Event model :: Type
+    type Cmd model :: Type -> Type
+
+    persistEvent :: Event model -> ReaderT model IO (Stored (Event model))
+    applyEvent :: Stored (Event model) -> ReaderT model IO ()
+    evalCmd :: Cmd model a -> ReaderT model IO (Event model, a)
+
+    runCmd :: Cmd model a -> ReaderT model IO a
     runCmd cmd = do
         (ev, r) <- evalCmd cmd
         applyEvent =<< persistEvent ev
@@ -36,34 +36,11 @@ mkId c = c <$> liftIO randomIO
 
 -- Without a functional dep on EvenSourced (m -> model) model will have to be specified
 -- when running.
-toStored :: forall m. (MonadIO m, ESRunner m)
-         => Event m -> m (Stored (Event m))
+toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> getCurrentTime <*> mkId id
 
-
--- type family Ret (a :: k) :: Type
---
--- class Cqrs m cmd where
---     cqrs :: Monad m => cmd -> m (Ret cmd)
---     cqrs = undefined
---
--- type instance Ret 'MyDeleteHead = ()
--- type instance Ret ('MyAppend _) = Int
---
--- data MyCmd
---     = MyAppend Int
---     | MyDeleteHead
---
--- instance Cqrs IO MyCmd where
---     cqrs (MyAppend i) = pure i
---     cqrs MyDeleteHead = pure ()
---------------------
---
--- data Something
---     = Bare
---     | WithString String
---
--- type family F (a :: k) :: Type
--- type instance F 'Bare = ()
--- type instance F ('WithString t) = Int
---
+data STMState x = STMState
+    { writeEvent :: Stored (Event (STMState x)) -> IO ()
+    , readEvents :: IO [Event (STMState x)]
+    , currentState :: TVar x
+    }

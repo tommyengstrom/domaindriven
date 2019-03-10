@@ -38,3 +38,4 @@ module DomainDriven.Internal.Storage.File where
 --         toStored a = Stored a <$> getCurrentTime <*> randomIO
 --
 --
+

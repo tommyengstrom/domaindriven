@@ -40,26 +40,24 @@ data Err
 instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
-data Apa = Apa
-    { model :: StoreModel
-    , events :: [Stored StoreEvent]
-    } deriving (Show, Eq, Ord, Generic)
 
-newtype TestRunner a
-    = TestRunner (ReaderT (TVar Apa) IO a)
-    deriving newtype ( Functor, Applicative, Monad, MonadReader (TVar Apa), MonadIO
-                     , MonadThrow)
+runTestRunner :: ReaderT (STMState StoreModel) IO a -> IO a
+runTestRunner m = do
+    s <- mkState
+    runReaderT m s
 
-runTestRunner :: TestRunner a -> IO a
-runTestRunner (TestRunner m) = do
-    tvar <- newTVarIO $ Apa mempty mempty
-    runReaderT m tvar
+mkState :: IO (STMState StoreModel)
+mkState = do
+    tvar <- newTVarIO mempty
+    pure $ STMState
+        { writeEvent   = const $ pure ()
+        , readEvents   = pure []
+        , currentState = tvar
+        }
 
-instance ESRunner TestRunner where
-    type Event TestRunner = StoreEvent
-    type Cmd TestRunner = StoreCmd
-    type Model TestRunner = StoreModel
---     readEvents = fmap (view (field @"events")) . readTVarIO =<< ask
+instance EventSourced (STMState StoreModel) where
+    type Event (STMState StoreModel) = StoreEvent
+    type Cmd (STMState StoreModel) = StoreCmd
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
@@ -70,15 +68,16 @@ instance ESRunner TestRunner where
                     M.insert iKey info
                 RemovedItem iKey ->
                     M.delete iKey
-        tvar <- ask
-        atomically . modifyTVar tvar $ over (field @"model") f
+        tvar <- asks currentState
+        atomically $ modifyTVar tvar f
+
     persistEvent e = do
-        s <- toStored e -- :: TestRunner (Stored StoreEvent)
-        a <- ask
-        atomically . modifyTVar a $ over (field @"events") (s:)
+        s <- toStored e
+        w <- asks writeEvent
+        liftIO $ w s
         pure s
     evalCmd cmd = do
-        m <- fmap (view (field @"model")) . readTVarIO @_ @Apa =<< ask
+        m <- readTVarIO =<< asks currentState
         case cmd of
             BuyItem iKey q -> do
                 let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
@@ -100,15 +99,14 @@ main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- runTestRunner $ do
             _ <- runCmd (AddItem (ItemInfo 10 49))
-            readTVarIO =<< ask
-        view (field @"model") r
-            `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
+            s <- asks currentState
+            readTVarIO s
+        r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
 
     it "Can add item and buy it" $ do
         r <- runTestRunner $ do
             iKey <- runCmd  $ AddItem (ItemInfo 10 49)
             _ <- runCmd $ BuyItem iKey 7
-            readTVarIO =<< ask
-        view (field @"model") r
-            `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
+            readTVarIO =<< asks currentState
+        r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
 
