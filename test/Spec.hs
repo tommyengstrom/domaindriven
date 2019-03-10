@@ -59,7 +59,7 @@ instance ESRunner TestRunner where
     type Event TestRunner = StoreEvent
     type Cmd TestRunner = StoreCmd
     type Model TestRunner = StoreModel
-    readEvents = fmap (view (field @"events")) . readTVarIO =<< ask
+--     readEvents = fmap (view (field @"events")) . readTVarIO =<< ask
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->

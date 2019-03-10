@@ -14,7 +14,7 @@ class Monad m => ESRunner m where
     type Event m :: Type
     type Model m :: Type
     type Cmd m :: Type -> Type
-    readEvents :: m [Stored (Event m)]
+    -- readEvents :: m [Stored (Event m)]
     persistEvent :: Event m -> m (Stored (Event m))
     applyEvent :: Stored (Event m) -> m ()
     evalCmd :: Cmd m a -> m (Event m, a)
