@@ -1,5 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE PolyKinds #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
@@ -11,18 +9,26 @@ import           RIO.Time
 import           System.Random
 
 
-class EventSourced model where
-    type Event model :: Type
-    type Cmd model :: Type -> Type
+data STMState x = STMState
+    { writeEvent :: Stored (Event x) -> IO ()
+    , readEvents :: IO [Event x]
+    , currentState :: TVar x
+    }
 
-    persistEvent :: Event model -> ReaderT model IO (Stored (Event model))
-    applyEvent :: Stored (Event model) -> ReaderT model IO ()
-    evalCmd :: Cmd model a -> ReaderT model IO (Event model, a)
+class EventSourced a where
+    type Event a :: Type
+    type Cmd a :: Type -> Type
 
-    runCmd :: Cmd model a -> ReaderT model IO a
+    applyEvent :: Stored (Event a) -> ReaderT (STMState a) IO ()
+    evalCmd :: Cmd a r -> ReaderT (STMState a) IO (Event a, r)
+
+    runCmd :: Cmd a r -> ReaderT (STMState a) IO r
     runCmd cmd = do
         (ev, r) <- evalCmd cmd
-        applyEvent =<< persistEvent ev
+        f <- asks writeEvent
+        s <- toStored ev
+        liftIO $ f s
+        applyEvent s
         pure r
 
 data Stored a = Stored
@@ -39,8 +45,3 @@ mkId c = c <$> liftIO randomIO
 toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> getCurrentTime <*> mkId id
 
-data STMState x = STMState
-    { writeEvent :: Stored (Event (STMState x)) -> IO ()
-    , readEvents :: IO [Event (STMState x)]
-    , currentState :: TVar x
-    }

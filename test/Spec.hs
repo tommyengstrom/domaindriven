@@ -55,9 +55,9 @@ mkState = do
         , currentState = tvar
         }
 
-instance EventSourced (STMState StoreModel) where
-    type Event (STMState StoreModel) = StoreEvent
-    type Cmd (STMState StoreModel) = StoreCmd
+instance EventSourced StoreModel where
+    type Event StoreModel = StoreEvent
+    type Cmd StoreModel = StoreCmd
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
@@ -71,11 +71,6 @@ instance EventSourced (STMState StoreModel) where
         tvar <- asks currentState
         atomically $ modifyTVar tvar f
 
-    persistEvent e = do
-        s <- toStored e
-        w <- asks writeEvent
-        liftIO $ w s
-        pure s
     evalCmd cmd = do
         m <- readTVarIO =<< asks currentState
         case cmd of
