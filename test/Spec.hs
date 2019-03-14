@@ -15,11 +15,42 @@ newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
 type ItemKey = Wrap "ItemKey" Int
 type Quantity = Wrap "Quantity" Int
 
-data StoreCmd a where
-    BuyItem :: ItemKey -> Quantity -> StoreCmd ()
-    Restock :: ItemKey -> Quantity -> StoreCmd ()
-    AddItem :: ItemInfo -> StoreCmd ItemKey
-    RemoveItem :: ItemKey -> StoreCmd ()
+-- The commands
+data BuyItem    = BuyItem ItemKey Quantity
+data Restock    = Restock ItemKey Quantity
+data AddItem    = AddItem ItemInfo
+data RemoveItem = RemoveItem ItemKey
+
+type StoreCmds = Command BuyItem ()
+             :|| Command Restock ()
+             :|| Command AddItem ItemKey
+             :|| Command RemoveItem ()
+
+buyItem :: BuyItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
+buyItem (BuyItem iKey q) = do
+    m <- readTVarIO =<< asks currentState
+    let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
+    when (available < q) $ throwM NotEnoughStock
+    pure (BoughtItem iKey q, ())
+
+
+restock :: Restock -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
+restock (Restock iKey q) = do
+    m <- readTVarIO =<< asks currentState
+    when (M.notMember iKey m) $ throwM NoSuchItem
+    pure (Restocked iKey q, ())
+
+addItem :: AddItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ItemKey)
+addItem (AddItem info) = do
+    m <- readTVarIO =<< asks currentState
+    let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
+    pure (AddedItem iKey info, iKey)
+
+removeItem :: RemoveItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
+removeItem (RemoveItem iKey) = do
+    m <- readTVarIO =<< asks currentState
+    when (M.notMember iKey m) $ throwM NoSuchItem
+    pure (RemovedItem iKey, ())
 
 data StoreEvent
     = BoughtItem ItemKey Quantity
@@ -41,7 +72,8 @@ instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
 
-runTestRunner :: ReaderT (StmState StoreModel) IO a -> IO a
+runTestRunner :: (EventSourced m, m ~ StoreModel)
+              => ReaderT (StmState m) IO a -> IO a
 runTestRunner m = do
     s <- mkState
     runReaderT m s
@@ -57,7 +89,7 @@ mkState = do
 
 instance EventSourced StoreModel where
     type Event StoreModel = StoreEvent
-    type Cmd StoreModel = StoreCmd
+    type Cmds StoreModel = StoreCmds
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
@@ -71,29 +103,13 @@ instance EventSourced StoreModel where
         tvar <- asks currentState
         atomically $ modifyTVar tvar f
 
-    evalCmd cmd = do
-        m <- readTVarIO =<< asks currentState
-        case cmd of
-            BuyItem iKey q -> do
-                let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-                when (available < q) $ throwM NotEnoughStock
-                pure (BoughtItem iKey q, ())
-            Restock iKey q -> do
-                when (M.notMember iKey m) $ throwM NoSuchItem
-                pure (Restocked iKey q, ())
-            AddItem info -> do
-                let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
-                pure (AddedItem iKey info, iKey)
-            RemoveItem iKey -> do
-                when (M.notMember iKey m) $ throwM NoSuchItem
-                pure (RemovedItem iKey, ())
-
+    cmdHandlers = buyItem :|| restock :|| addItem :|| removeItem
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- runTestRunner $ do
-            _ <- runCmd (AddItem (ItemInfo 10 49))
+            _ <- runCmd $ AddItem (ItemInfo 10 49)
             s <- asks currentState
             readTVarIO s
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
@@ -104,36 +120,4 @@ main = hspec . describe "Store model" $ do
             _ <- runCmd $ BuyItem iKey 7
             readTVarIO =<< asks currentState
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
-
-type Key = Int
-data CreateNew = CreateNew Text deriving (Show, Eq, Ord, Generic)
-data UpdateIt  = UpdateIt Text deriving (Show, Eq, Ord, Generic)
-
-data KukenEvent = KukenAdd Text
-
-instance HasCmd [Text] CreateNew where
-    type Event'  CreateNew = KukenEvent
-    type Return' CreateNew = Key
-    applyEvent' (Stored (KukenAdd t) _ _) =
-        asks currentState >>= atomically . flip modifyTVar (t:)
-    evalCmd' (CreateNew t) = pure (KukenAdd t, 66)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

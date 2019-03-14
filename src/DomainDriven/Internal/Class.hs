@@ -73,15 +73,3 @@ mkId c = c <$> liftIO randomIO
 toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> getCurrentTime <*> mkId id
 
-
--- I think this approach may actually work out okay. Though I'm not quite sure about
--- how I could generate a server from this. I guess I need template haskell anyway.
---
--- The upside is that now each command can be a record and I have the structures already,
--- so the only thing I need template haskell for is to fetch the class instances (I think)
-class HasCmd model cmd where
-    type Event' cmd :: Type
-    type Return' cmd :: Type
-    applyEvent' :: Stored (Event' cmd) -> ReaderT (StmState model) IO ()
-    evalCmd' :: cmd -> ReaderT (StmState model) IO (Event' cmd, Return' cmd)
-
