@@ -10,7 +10,6 @@ import           Data.UUID
 import           RIO
 import           RIO.Time
 import           System.Random
-import GHC.TypeLits
 
 data StmState x = StmState
     { writeEvent :: Stored (Event x) -> IO ()
@@ -22,10 +21,9 @@ data a :|| b = a :|| b
     deriving (Show)
 infixr 8 :||
 
-data Command i r
-    = Command i r
-    -- = Command (i -> ReaderT (StmState m) IO (Event m r)
-    deriving (Show)
+data Command i r = Command
+    { getCommand :: forall m . EventSourced m => i
+                 -> ReaderT (StmState m) IO (Event m, r)}
 
 type family CmdRunner m a :: Type where
     CmdRunner m (Command i r) = i -> ReaderT (StmState m) IO (Event m, r)
@@ -53,17 +51,13 @@ class EventSourced a where
     applyEvent :: Stored (Event a) -> ReaderT (StmState a) IO ()
     cmdHandlers :: CmdRunner a (Cmds a)
 
-    runCmd :: Command i r -> ReaderT (StmState a) IO (Event a, r)
-
---     evalCmd :: Cmd a r -> ReaderT (StmState a) IO (Event a, r)
---     runCmd :: Cmd a r -> ReaderT (StmState a) IO r
---     runCmd cmd = do
---         (ev, r) <- evalCmd cmd
---         f <- asks writeEvent
---         s <- toStored ev
---         liftIO $ f s
---         applyEvent s
---         pure r
+    runCmd :: forall i r. HasCmdHandler i r (CmdRunner a (Cmds a))
+           => i -> ReaderT (StmState a) IO r
+    runCmd i = do
+        (ev, r) <- getCommand (getHandler (cmdHandlers @a) (Proxy @(Command i r))) i
+        s <- toStored ev
+        applyEvent s
+        pure r
 
 data Stored a = Stored
     { storedEvent     :: a
