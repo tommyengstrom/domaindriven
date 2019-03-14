@@ -41,15 +41,15 @@ instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
 
-runTestRunner :: ReaderT (STMState StoreModel) IO a -> IO a
+runTestRunner :: ReaderT (StmState StoreModel) IO a -> IO a
 runTestRunner m = do
     s <- mkState
     runReaderT m s
 
-mkState :: IO (STMState StoreModel)
+mkState :: IO (StmState StoreModel)
 mkState = do
     tvar <- newTVarIO mempty
-    pure $ STMState
+    pure $ StmState
         { writeEvent   = const $ pure ()
         , readEvents   = pure []
         , currentState = tvar
@@ -104,4 +104,36 @@ main = hspec . describe "Store model" $ do
             _ <- runCmd $ BuyItem iKey 7
             readTVarIO =<< asks currentState
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
+
+type Key = Int
+data CreateNew = CreateNew Text deriving (Show, Eq, Ord, Generic)
+data UpdateIt  = UpdateIt Text deriving (Show, Eq, Ord, Generic)
+
+data KukenEvent = KukenAdd Text
+
+instance HasCmd [Text] CreateNew where
+    type Event'  CreateNew = KukenEvent
+    type Return' CreateNew = Key
+    applyEvent' (Stored (KukenAdd t) _ _) =
+        asks currentState >>= atomically . flip modifyTVar (t:)
+    evalCmd' (CreateNew t) = pure (KukenAdd t, 66)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
