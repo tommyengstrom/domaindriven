@@ -1,4 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE PolyKinds #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
@@ -8,7 +10,7 @@ import           Data.UUID
 import           RIO
 import           RIO.Time
 import           System.Random
-
+import GHC.TypeLits
 
 data StmState x = StmState
     { writeEvent :: Stored (Event x) -> IO ()
@@ -16,21 +18,52 @@ data StmState x = StmState
     , currentState :: TVar x
     }
 
+data a :|| b = a :|| b
+    deriving (Show)
+infixr 8 :||
+
+data Command i r
+    = Command i r
+    -- = Command (i -> ReaderT (StmState m) IO (Event m r)
+    deriving (Show)
+
+type family CmdRunner m a :: Type where
+    CmdRunner m (Command i r) = i -> ReaderT (StmState m) IO (Event m, r)
+    CmdRunner m (a :|| b)   = CmdRunner m a :|| CmdRunner m b
+
+class HasCmdHandler i r cmds where
+    getCmdHandler :: cmds -> Command i r
+
+instance HasCmdHandler i r (Command i r) where
+    getCmdHandler = id
+
+instance {-# Overlapping #-} HasCmdHandler i r (Command i r :|| b) where
+    getCmdHandler (a :|| _) = a
+
+instance HasCmdHandler i r b => HasCmdHandler i r (a :|| b) where
+    getCmdHandler (_ :|| b) = getCmdHandler b
+
+getHandler :: HasCmdHandler i r cmds => cmds -> Proxy (Command i r) -> Command i r
+getHandler cmds _ = getCmdHandler cmds
+
 class EventSourced a where
     type Event a :: Type
-    type Cmd a :: Type -> Type
+    type Cmds a :: Type  -- Something built using `:||` and `Command i r`
 
     applyEvent :: Stored (Event a) -> ReaderT (StmState a) IO ()
-    evalCmd :: Cmd a r -> ReaderT (StmState a) IO (Event a, r)
+    cmdHandlers :: CmdRunner a (Cmds a)
 
-    runCmd :: Cmd a r -> ReaderT (StmState a) IO r
-    runCmd cmd = do
-        (ev, r) <- evalCmd cmd
-        f <- asks writeEvent
-        s <- toStored ev
-        liftIO $ f s
-        applyEvent s
-        pure r
+    runCmd :: Command i r -> ReaderT (StmState a) IO (Event a, r)
+
+--     evalCmd :: Cmd a r -> ReaderT (StmState a) IO (Event a, r)
+--     runCmd :: Cmd a r -> ReaderT (StmState a) IO r
+--     runCmd cmd = do
+--         (ev, r) <- evalCmd cmd
+--         f <- asks writeEvent
+--         s <- toStored ev
+--         liftIO $ f s
+--         applyEvent s
+--         pure r
 
 data Stored a = Stored
     { storedEvent     :: a
