@@ -21,35 +21,22 @@ data a :|| b = a :|| b
     deriving (Show)
 infixr 8 :||
 
-data Command cmd = Command
-    { getCommand :: forall m . (EventSourced m) => cmd
-                 -> ReaderT (StmState m) IO (Event m, Returns cmd)}
 
-type family Returns a :: Type
+class EventSourced model => IsCmd cmd model returns | cmd -> model, cmd -> returns where
+    cmdHandler :: cmd -> ReaderT (StmState model) IO (Event model, returns)
 
--- class EventSourced model => Cmd cmd model | cmd -> model where
---     type Return cmd :: Type
---     cmdRunner :: cmd -> ReaderT (StmState model) IO (Event model, Return cmd)
+class EventSourced model where
+    type Event model :: Type
 
-type family CmdRunner m a :: Type where
-    CmdRunner m (Command i) = i -> ReaderT (StmState m) IO (Event m, Returns i)
-    CmdRunner m (a :|| b)   = CmdRunner m a :|| CmdRunner m b
+    applyEvent :: Stored (Event model) -> ReaderT (StmState model) IO ()
 
-class EventSourced a where
-    type Event a :: Type
-    type Cmds a :: Type  -- Something built using `:||` and `Command i r`
-
-    applyEvent :: Stored (Event a) -> ReaderT (StmState a) IO ()
-    cmdHandlers :: CmdRunner a (Cmds a)
-
-    runCmd :: forall i. PickType (Command i) (CmdRunner a (Cmds a))
-           => i -> ReaderT (StmState a) IO (Returns i)
-    runCmd i = do
-        -- (ev, r) <- getCommand (pickType (cmdHandlers @a) :: i -> ReaderT (StmState a) IO (Event a, Returns i)) i
-        (ev, r) <- getCommand (pickType (cmdHandlers @a) :: Command i) i
-        s <- toStored ev
-        applyEvent s
-        pure r
+runCmd :: (IsCmd cmd model returns, EventSourced model)
+       => cmd -> ReaderT (StmState model) IO returns
+runCmd cmd = do
+    (ev, r) <- cmdHandler cmd
+    s <- toStored ev
+    applyEvent s
+    pure r
 
 data Stored a = Stored
     { storedEvent     :: a
@@ -60,21 +47,5 @@ data Stored a = Stored
 mkId :: MonadIO m =>  (UUID -> b) -> m b
 mkId c = c <$> liftIO randomIO
 
--- Without a functional dep on EvenSourced (m -> model) model will have to be specified
--- when running.
 toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> getCurrentTime <*> mkId id
-
-
-class PickType t ts where
-    pickType :: ts -> t
-
-instance PickType t t where
-    pickType = id
-
-instance {-# Overlapping #-} PickType t (t :|| ts) where
-    pickType (a :|| _) = a
-
-instance PickType t ts => PickType t (a :|| ts) where
-    pickType (_ :|| ts) = pickType ts
-

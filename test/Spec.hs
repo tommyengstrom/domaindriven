@@ -21,41 +21,32 @@ data Restock    = Restock ItemKey Quantity
 data AddItem    = AddItem ItemInfo
 data RemoveItem = RemoveItem ItemKey
 
-type instance Returns BuyItem = ()
-type instance Returns Restock = ()
-type instance Returns AddItem = ItemKey
-type instance Returns RemoveItem = ()
 
-type StoreCmds = Command BuyItem
-             :|| Command Restock
-             :|| Command AddItem
-             :|| Command RemoveItem
-
-buyItem :: BuyItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
-buyItem (BuyItem iKey q) = do
-    m <- readTVarIO =<< asks currentState
-    let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-    when (available < q) $ throwM NotEnoughStock
-    pure (BoughtItem iKey q, ())
+instance IsCmd BuyItem StoreModel () where
+    cmdHandler (BuyItem iKey q) = do
+        m <- readTVarIO =<< asks currentState
+        let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
+        when (available < q) $ throwM NotEnoughStock
+        pure (BoughtItem iKey q, ())
 
 
-restock :: Restock -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
-restock (Restock iKey q) = do
-    m <- readTVarIO =<< asks currentState
-    when (M.notMember iKey m) $ throwM NoSuchItem
-    pure (Restocked iKey q, ())
+instance IsCmd Restock StoreModel () where
+    cmdHandler (Restock iKey q) = do
+        m <- readTVarIO =<< asks currentState
+        when (M.notMember iKey m) $ throwM NoSuchItem
+        pure (Restocked iKey q, ())
 
-addItem :: AddItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ItemKey)
-addItem (AddItem info) = do
-    m <- readTVarIO =<< asks currentState
-    let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
-    pure (AddedItem iKey info, iKey)
+instance IsCmd AddItem StoreModel ItemKey where
+    cmdHandler (AddItem info) = do
+        m <- readTVarIO =<< asks currentState
+        let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
+        pure (AddedItem iKey info, iKey)
 
-removeItem :: RemoveItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
-removeItem (RemoveItem iKey) = do
-    m <- readTVarIO =<< asks currentState
-    when (M.notMember iKey m) $ throwM NoSuchItem
-    pure (RemovedItem iKey, ())
+instance IsCmd RemoveItem StoreModel () where
+    cmdHandler (RemoveItem iKey) = do
+        m <- readTVarIO =<< asks currentState
+        when (M.notMember iKey m) $ throwM NoSuchItem
+        pure (RemovedItem iKey, ())
 
 data StoreEvent
     = BoughtItem ItemKey Quantity
@@ -94,16 +85,6 @@ mkState = do
 
 instance EventSourced StoreModel where
     type Event StoreModel = StoreEvent
-    type Cmds StoreModel = Command BuyItem
-                       :|| Command Restock
-                       :|| Command AddItem
-                       :|| Command RemoveItem
-
-    cmdHandlers = buyItem
-              :|| restock
-              :|| addItem
-              :|| removeItem
-
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
@@ -122,7 +103,7 @@ main :: IO ()
 main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- runTestRunner $ do
-            runCmd $ AddItem (ItemInfo 10 49)
+            _ <- runCmd $ AddItem (ItemInfo 10 49)
             s <- asks currentState
             readTVarIO s
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
