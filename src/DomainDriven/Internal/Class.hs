@@ -21,28 +21,19 @@ data a :|| b = a :|| b
     deriving (Show)
 infixr 8 :||
 
-data Command i r = Command
-    { getCommand :: forall m . EventSourced m => i
-                 -> ReaderT (StmState m) IO (Event m, r)}
+data Command cmd = Command
+    { getCommand :: forall m . (EventSourced m) => cmd
+                 -> ReaderT (StmState m) IO (Event m, Returns cmd)}
+
+type family Returns a :: Type
+
+-- class EventSourced model => Cmd cmd model | cmd -> model where
+--     type Return cmd :: Type
+--     cmdRunner :: cmd -> ReaderT (StmState model) IO (Event model, Return cmd)
 
 type family CmdRunner m a :: Type where
-    CmdRunner m (Command i r) = i -> ReaderT (StmState m) IO (Event m, r)
+    CmdRunner m (Command i) = i -> ReaderT (StmState m) IO (Event m, Returns i)
     CmdRunner m (a :|| b)   = CmdRunner m a :|| CmdRunner m b
-
-class HasCmdHandler i r cmds where
-    getCmdHandler :: cmds -> Command i r
-
-instance HasCmdHandler i r (Command i r) where
-    getCmdHandler = id
-
-instance {-# Overlapping #-} HasCmdHandler i r (Command i r :|| b) where
-    getCmdHandler (a :|| _) = a
-
-instance HasCmdHandler i r b => HasCmdHandler i r (a :|| b) where
-    getCmdHandler (_ :|| b) = getCmdHandler b
-
-getHandler :: HasCmdHandler i r cmds => cmds -> Proxy (Command i r) -> Command i r
-getHandler cmds _ = getCmdHandler cmds
 
 class EventSourced a where
     type Event a :: Type
@@ -51,10 +42,11 @@ class EventSourced a where
     applyEvent :: Stored (Event a) -> ReaderT (StmState a) IO ()
     cmdHandlers :: CmdRunner a (Cmds a)
 
-    runCmd :: forall i r. HasCmdHandler i r (CmdRunner a (Cmds a))
-           => i -> ReaderT (StmState a) IO r
+    runCmd :: forall i. PickType (Command i) (CmdRunner a (Cmds a))
+           => i -> ReaderT (StmState a) IO (Returns i)
     runCmd i = do
-        (ev, r) <- getCommand (getHandler (cmdHandlers @a) (Proxy @(Command i r))) i
+        -- (ev, r) <- getCommand (pickType (cmdHandlers @a) :: i -> ReaderT (StmState a) IO (Event a, Returns i)) i
+        (ev, r) <- getCommand (pickType (cmdHandlers @a) :: Command i) i
         s <- toStored ev
         applyEvent s
         pure r
@@ -72,4 +64,17 @@ mkId c = c <$> liftIO randomIO
 -- when running.
 toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> getCurrentTime <*> mkId id
+
+
+class PickType t ts where
+    pickType :: ts -> t
+
+instance PickType t t where
+    pickType = id
+
+instance {-# Overlapping #-} PickType t (t :|| ts) where
+    pickType (a :|| _) = a
+
+instance PickType t ts => PickType t (a :|| ts) where
+    pickType (_ :|| ts) = pickType ts
 

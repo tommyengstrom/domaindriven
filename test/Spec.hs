@@ -21,10 +21,15 @@ data Restock    = Restock ItemKey Quantity
 data AddItem    = AddItem ItemInfo
 data RemoveItem = RemoveItem ItemKey
 
-type StoreCmds = Command BuyItem ()
-             :|| Command Restock ()
-             :|| Command AddItem ItemKey
-             :|| Command RemoveItem ()
+type instance Returns BuyItem = ()
+type instance Returns Restock = ()
+type instance Returns AddItem = ItemKey
+type instance Returns RemoveItem = ()
+
+type StoreCmds = Command BuyItem
+             :|| Command Restock
+             :|| Command AddItem
+             :|| Command RemoveItem
 
 buyItem :: BuyItem -> ReaderT (StmState StoreModel) IO (StoreEvent, ())
 buyItem (BuyItem iKey q) = do
@@ -89,7 +94,16 @@ mkState = do
 
 instance EventSourced StoreModel where
     type Event StoreModel = StoreEvent
-    type Cmds StoreModel = StoreCmds
+    type Cmds StoreModel = Command BuyItem
+                       :|| Command Restock
+                       :|| Command AddItem
+                       :|| Command RemoveItem
+
+    cmdHandlers = buyItem
+              :|| restock
+              :|| addItem
+              :|| removeItem
+
     applyEvent e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
@@ -103,13 +117,12 @@ instance EventSourced StoreModel where
         tvar <- asks currentState
         atomically $ modifyTVar tvar f
 
-    cmdHandlers = buyItem :|| restock :|| addItem :|| removeItem
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- runTestRunner $ do
-            _ <- runCmd $ AddItem (ItemInfo 10 49)
+            runCmd $ AddItem (ItemInfo 10 49)
             s <- asks currentState
             readTVarIO s
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
@@ -117,7 +130,7 @@ main = hspec . describe "Store model" $ do
     it "Can add item and buy it" $ do
         r <- runTestRunner $ do
             iKey <- runCmd  $ AddItem (ItemInfo 10 49)
-            _ <- runCmd $ BuyItem iKey 7
+            runCmd $ BuyItem iKey 7
             readTVarIO =<< asks currentState
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
 
