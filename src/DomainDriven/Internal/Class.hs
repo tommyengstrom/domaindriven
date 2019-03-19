@@ -5,38 +5,37 @@ module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
 import           Data.Aeson
-import           Data.Kind
 import           Data.UUID
 import           RIO
 import           RIO.Time
 import           System.Random
+import Data.Kind
 
-data StmState x = StmState
-    { writeEvent :: Stored (Event x) -> IO ()
-    , readEvents :: IO [Event x]
-    , currentState :: TVar x
-    }
-
-data a :|| b = a :|| b
-    deriving (Show)
-infixr 8 :||
-
-
-class EventSourced model => IsCmd cmd model returns | cmd -> model, cmd -> returns where
-    cmdHandler :: cmd -> ReaderT (StmState model) IO (Event model, returns)
-
-class EventSourced model where
+class ReadModel model where
     type Event model :: Type
+    applyEvent :: Stored (Event model) -> ReaderT (TVar model) IO ()
+    readEvents :: IO [Event x]
 
-    applyEvent :: Stored (Event model) -> ReaderT (StmState model) IO ()
+class ReadModel model => Query query model ret | query -> model, query -> ret where
+    runQuery :: query -> ReaderT (TVar model) IO ret
 
-runCmd :: (IsCmd cmd model returns, EventSourced model)
-       => cmd -> ReaderT (StmState model) IO returns
+class ReadModel model => DomainModel model where
+    persistEvent :: Stored (Event x) -> IO ()
+
+class DomainModel model => Command cmd model ret | cmd -> model, cmd -> ret where
+    cmdHandler :: cmd -> ReaderT (TVar model) IO (Event model, ret)
+    -- runCommand :: cmd -> ReaderT (TVar model) IO (Event model)
+    -- returnValue :: Event model -> ret
+
+runCmd :: (Command cmd model ret, DomainModel model)
+       => cmd -> ReaderT (TVar model) IO ret
 runCmd cmd = do
     (ev, r) <- cmdHandler cmd
+    -- ev <- runCommand cmd
     s <- toStored ev
     applyEvent s
     pure r
+    -- pure $ returnValue s
 
 data Stored a = Stored
     { storedEvent     :: a
