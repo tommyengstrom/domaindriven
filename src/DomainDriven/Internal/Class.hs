@@ -17,7 +17,7 @@ class ReadModel model where
     readEvents :: MonadIO m => m [Event x]
 
 class ReadModel model => Query query model ret | query -> model, query -> ret where
-    runQuery :: MonadIO m => TVar model -> query -> m ret
+    runQuery :: (MonadThrow m, MonadIO m) => TVar model -> query -> m ret
 
 class ReadModel model => DomainModel model where
     persistEvent :: MonadIO m => Stored (Event x) -> m ()
