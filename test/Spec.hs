@@ -23,28 +23,28 @@ data RemoveItem = RemoveItem ItemKey
 
 
 instance Command BuyItem StoreModel () where
-    cmdHandler (BuyItem iKey q) = do
-        m <- readTVarIO =<< ask
+    cmdHandler tvar (BuyItem iKey q) = do
+        m <- readTVarIO tvar
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
         when (available < q) $ throwM NotEnoughStock
         pure (BoughtItem iKey q, ())
 
 
 instance Command Restock StoreModel () where
-    cmdHandler (Restock iKey q) = do
-        m <- readTVarIO =<< ask
+    cmdHandler tvar (Restock iKey q) = do
+        m <- readTVarIO tvar
         when (M.notMember iKey m) $ throwM NoSuchItem
         pure (Restocked iKey q, ())
 
 instance Command AddItem StoreModel ItemKey where
-    cmdHandler (AddItem info) = do
-        m <- readTVarIO =<< ask
+    cmdHandler tvar (AddItem info) = do
+        m <- readTVarIO tvar
         let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
         pure (AddedItem iKey info, iKey)
 
 instance Command RemoveItem StoreModel () where
-    cmdHandler (RemoveItem iKey) = do
-        m <- readTVarIO =<< ask
+    cmdHandler tvar (RemoveItem iKey) = do
+        m <- readTVarIO tvar
         when (M.notMember iKey m) $ throwM NoSuchItem
         pure (RemovedItem iKey, ())
 
@@ -52,8 +52,8 @@ instance Command RemoveItem StoreModel () where
 data ProductCount = ProductCount
 
 instance Query ProductCount StoreModel Int where
-    runQuery ProductCount = do
-        m <- readTVarIO =<< ask
+    runQuery tvar ProductCount = do
+        m <- readTVarIO tvar
         pure . length $ M.elems $ M.filter ((> Wrap 0) . view (typed @Quantity)) m
 
 data StoreEvent
@@ -85,7 +85,7 @@ runTestRunner m = do
 instance ReadModel StoreModel where
     type Event StoreModel = StoreEvent
     readEvents = pure [] -- nothing is persisted in the tests
-    applyEvent e = do
+    applyEvent tvar e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
                     M.update (Just . over (field @"quantity") (\x -> x-q)) iKey
@@ -95,7 +95,6 @@ instance ReadModel StoreModel where
                     M.insert iKey info
                 RemovedItem iKey ->
                     M.delete iKey
-        tvar <- ask
         atomically $ modifyTVar tvar f
 
 instance DomainModel StoreModel where
@@ -105,23 +104,25 @@ instance DomainModel StoreModel where
 main :: IO ()
 main = hspec . describe "Store model" $ do
     it "Can add item" $ do
-        r <- runTestRunner $ do
-            _ <- runCmd $ AddItem (ItemInfo 10 49)
-            s <- ask
-            readTVarIO s
+        r <- do
+            tvar <- newTVarIO mempty
+            _ <- runCmd tvar $ AddItem (ItemInfo 10 49)
+            readTVarIO tvar
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
 
     it "Can add item and buy it" $ do
-        r <- runTestRunner $ do
-            iKey <- runCmd  $ AddItem (ItemInfo 10 49)
-            runCmd $ BuyItem iKey 7
-            readTVarIO =<< ask
+        r <- do
+            tvar <- newTVarIO mempty
+            iKey <- runCmd tvar $ AddItem (ItemInfo 10 49)
+            runCmd tvar $ BuyItem iKey 7
+            readTVarIO tvar
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
 
     it "Can run query" $ do
-        r <- runTestRunner $ do
-            _ <- runCmd  $ AddItem (ItemInfo 10 49)
-            _ <- runCmd  $ AddItem (ItemInfo 1 732)
-            _ <- runCmd  $ AddItem (ItemInfo 22 14)
-            runQuery ProductCount
+        r <- do
+            tvar <- newTVarIO mempty
+            _ <- runCmd tvar $ AddItem (ItemInfo 10 49)
+            _ <- runCmd tvar $ AddItem (ItemInfo 1 732)
+            _ <- runCmd tvar $ AddItem (ItemInfo 22 14)
+            runQuery tvar ProductCount
         r `shouldBe` 3

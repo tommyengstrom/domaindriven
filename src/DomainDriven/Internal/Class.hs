@@ -13,29 +13,25 @@ import Data.Kind
 
 class ReadModel model where
     type Event model :: Type
-    applyEvent :: Stored (Event model) -> ReaderT (TVar model) IO ()
-    readEvents :: IO [Event x]
+    applyEvent :: MonadIO m => TVar model -> Stored (Event model) -> m ()
+    readEvents :: MonadIO m => m [Event x]
 
 class ReadModel model => Query query model ret | query -> model, query -> ret where
-    runQuery :: query -> ReaderT (TVar model) IO ret
+    runQuery :: MonadIO m => TVar model -> query -> m ret
 
 class ReadModel model => DomainModel model where
-    persistEvent :: Stored (Event x) -> IO ()
+    persistEvent :: MonadIO m => Stored (Event x) -> m ()
 
 class DomainModel model => Command cmd model ret | cmd -> model, cmd -> ret where
-    cmdHandler :: cmd -> ReaderT (TVar model) IO (Event model, ret)
-    -- runCommand :: cmd -> ReaderT (TVar model) IO (Event model)
-    -- returnValue :: Event model -> ret
+    cmdHandler :: (MonadThrow m, MonadIO m) => TVar model -> cmd -> m (Event model, ret)
 
-runCmd :: (Command cmd model ret, DomainModel model)
-       => cmd -> ReaderT (TVar model) IO ret
-runCmd cmd = do
-    (ev, r) <- cmdHandler cmd
-    -- ev <- runCommand cmd
+runCmd :: (Command cmd model ret, DomainModel model, MonadIO m, MonadThrow m)
+       => TVar model -> cmd -> m ret
+runCmd tvar cmd = do
+    (ev, r) <- cmdHandler tvar cmd
     s <- toStored ev
-    applyEvent s
+    applyEvent tvar s
     pure r
-    -- pure $ returnValue s
 
 data Stored a = Stored
     { storedEvent     :: a
