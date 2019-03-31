@@ -11,24 +11,36 @@ import           RIO.Time
 import           System.Random
 import Data.Kind
 
-class ReadModel model where
+class EventSourced model where
     type Event model :: Type
     applyEvent :: MonadIO m => TVar model -> Stored (Event model) -> m ()
     readEvents :: MonadIO m => m [Event x]
-
-class ReadModel model => Query query model ret | query -> model, query -> ret where
-    runQuery :: (MonadThrow m, MonadIO m) => TVar model -> query -> m ret
-
-class ReadModel model => DomainModel model where
     persistEvent :: MonadIO m => Stored (Event x) -> m ()
 
-class DomainModel model => Command cmd model ret | cmd -> model, cmd -> ret where
-    cmdHandler :: (MonadThrow m, MonadIO m) => TVar model -> cmd -> m (Event model, ret)
+class Query query where
+    type QueryDeps query :: Type
+    type QueryReturn query :: Type
 
-runCmd :: (Command cmd model ret, DomainModel model, MonadIO m, MonadThrow m)
-       => TVar model -> cmd -> m ret
-runCmd tvar cmd = do
-    (ev, r) <- cmdHandler tvar cmd
+    runQuery :: (MonadThrow m, MonadIO m)
+             => (query -> m (QueryDeps query)) -> query -> m (QueryReturn query)
+
+class EventSourced model => Command cmd model | cmd -> model where
+    type CmdDeps cmd :: Type
+    type CmdReturn cmd :: Type
+    cmdHandler :: (MonadThrow m, MonadIO m)
+             => (cmd -> m (CmdDeps cmd))
+             -> TVar model
+             -> cmd
+             -> m (Event model, CmdReturn cmd)
+
+
+runCmd :: (EventSourced model, Command cmd model, MonadIO m, MonadThrow m)
+       => (cmd -> m (CmdDeps cmd))
+       -> TVar model
+       -> cmd
+       -> m (CmdReturn cmd)
+runCmd deps tvar cmd = do
+    (ev, r) <- cmdHandler deps tvar cmd
     s <- toStored ev
     applyEvent tvar s
     pure r

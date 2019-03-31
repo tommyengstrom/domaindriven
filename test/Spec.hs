@@ -22,28 +22,44 @@ data AddItem    = AddItem ItemInfo
 data RemoveItem = RemoveItem ItemKey
 
 
-instance Command BuyItem StoreModel () where
-    cmdHandler tvar (BuyItem iKey q) = do
+--instance Command BuyItem StoreModel () where
+--    type Deps StoreModel = ()
+--    cmdHandler _ tvar (BuyItem iKey q) = do
+--        m <- readTVarIO tvar
+--        let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
+--        when (available < q) $ throwM NotEnoughStock
+--        pure (BoughtItem iKey q, ())
+
+instance Command BuyItem StoreModel where
+    type CmdDeps BuyItem = ()
+    type CmdReturn BuyItem = ()
+    cmdHandler _ tvar (BuyItem iKey q) = do
         m <- readTVarIO tvar
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
         when (available < q) $ throwM NotEnoughStock
         pure (BoughtItem iKey q, ())
 
 
-instance Command Restock StoreModel () where
-    cmdHandler tvar (Restock iKey q) = do
+instance Command Restock StoreModel where
+    type CmdDeps Restock = ()
+    type CmdReturn Restock = ()
+    cmdHandler _ tvar (Restock iKey q) = do
         m <- readTVarIO tvar
         when (M.notMember iKey m) $ throwM NoSuchItem
         pure (Restocked iKey q, ())
 
-instance Command AddItem StoreModel ItemKey where
-    cmdHandler tvar (AddItem info) = do
+instance Command AddItem StoreModel where
+    type CmdDeps AddItem = ()
+    type CmdReturn AddItem = ItemKey
+    cmdHandler _ tvar (AddItem info) = do
         m <- readTVarIO tvar
         let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
         pure (AddedItem iKey info, iKey)
 
-instance Command RemoveItem StoreModel () where
-    cmdHandler tvar (RemoveItem iKey) = do
+instance Command RemoveItem StoreModel where
+    type CmdDeps RemoveItem = ()
+    type CmdReturn RemoveItem = ()
+    cmdHandler _ tvar (RemoveItem iKey) = do
         m <- readTVarIO tvar
         when (M.notMember iKey m) $ throwM NoSuchItem
         pure (RemovedItem iKey, ())
@@ -51,9 +67,11 @@ instance Command RemoveItem StoreModel () where
 -- Queries
 data ProductCount = ProductCount
 
-instance Query ProductCount StoreModel Int where
-    runQuery tvar ProductCount = do
-        m <- readTVarIO tvar
+instance Query ProductCount where
+    type QueryDeps ProductCount = StoreModel
+    type QueryReturn ProductCount = Int
+    runQuery getModel ProductCount = do
+        m <- getModel ProductCount
         pure . length $ M.elems $ M.filter ((> Wrap 0) . view (typed @Quantity)) m
 
 data StoreEvent
@@ -76,13 +94,13 @@ instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
 
-runTestRunner :: (DomainModel m, m ~ StoreModel)
+runTestRunner :: (EventSourced m, m ~ StoreModel)
               => ReaderT (TVar m) IO a -> IO a
 runTestRunner m = do
     s <- newTVarIO mempty
     runReaderT m s
 
-instance ReadModel StoreModel where
+instance EventSourced StoreModel where
     type Event StoreModel = StoreEvent
     readEvents = pure [] -- nothing is persisted in the tests
     applyEvent tvar e = do
@@ -97,7 +115,6 @@ instance ReadModel StoreModel where
                     M.delete iKey
         atomically $ modifyTVar tvar f
 
-instance DomainModel StoreModel where
     persistEvent _ = pure () -- Nothing is persisted
 
 
@@ -106,23 +123,23 @@ main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- do
             tvar <- newTVarIO mempty
-            _ <- runCmd tvar $ AddItem (ItemInfo 10 49)
+            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
             readTVarIO tvar
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
 
     it "Can add item and buy it" $ do
         r <- do
             tvar <- newTVarIO mempty
-            iKey <- runCmd tvar $ AddItem (ItemInfo 10 49)
-            runCmd tvar $ BuyItem iKey 7
+            iKey <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
+            runCmd (const $ pure ()) tvar $ BuyItem iKey 7
             readTVarIO tvar
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
 
-    it "Can run query" $ do
+    it "Can run Query" $ do
         r <- do
             tvar <- newTVarIO mempty
-            _ <- runCmd tvar $ AddItem (ItemInfo 10 49)
-            _ <- runCmd tvar $ AddItem (ItemInfo 1 732)
-            _ <- runCmd tvar $ AddItem (ItemInfo 22 14)
-            runQuery tvar ProductCount
+            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
+            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 1 732)
+            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 22 14)
+            runQuery (const $ readTVarIO tvar) ProductCount
         r `shouldBe` 3
