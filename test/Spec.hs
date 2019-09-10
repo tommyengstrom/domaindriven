@@ -1,12 +1,15 @@
 import           RIO
-import qualified RIO.List as L
-import DomainDriven
-import Data.Aeson
-import Data.Generics.Product
-import GHC.TypeLits
-import GHC.Enum
-import qualified Data.Map as M
-import Test.Hspec
+import qualified RIO.List                      as L
+import           DomainDriven
+import           Data.Aeson
+import           Data.Generics.Product
+import           GHC.TypeLits
+import           GHC.Enum
+import qualified Data.Map                      as M
+import           Test.Hspec
+import           Data.UUID.V1
+import           Data.UUID                      ( nil )
+import           RIO.Time
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -94,8 +97,7 @@ instance Exception Err
 
 type StoreModel = Map ItemKey ItemInfo
 
-runTestRunner :: (EventSourced m, m ~ StoreModel)
-              => ReaderT (TVar m) IO a -> IO a
+runTestRunner :: (EventSourced m, m ~ StoreModel) => ReaderT (TVar m) IO a -> IO a
 runTestRunner m = do
     s <- newTVarIO mempty
     runReaderT m s
@@ -106,16 +108,16 @@ instance EventSourced StoreModel where
     applyEvent tvar e = do
         let f = case storedEvent e of
                 BoughtItem iKey q ->
-                    M.update (Just . over (field @"quantity") (\x -> x-q)) iKey
-                Restocked iKey q ->
-                    M.update (Just . over (field @"quantity") (+ q)) iKey
-                AddedItem iKey info ->
-                    M.insert iKey info
-                RemovedItem iKey ->
-                    M.delete iKey
+                    M.update (Just . over (field @"quantity") (\x -> x - q)) iKey
+                Restocked iKey q -> M.update (Just . over (field @"quantity") (+ q)) iKey
+                AddedItem iKey info -> M.insert iKey info
+                RemovedItem iKey -> M.delete iKey
         atomically $ modifyTVar tvar f
 
-    persistEvent _ = pure () -- Nothing is persisted
+    persistEvent e = do
+        ts   <- getCurrentTime
+        uuid <- fromMaybe nil <$> liftIO nextUUID
+        pure $ Stored e ts uuid
 
 
 main :: IO ()
@@ -123,7 +125,7 @@ main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         r <- do
             tvar <- newTVarIO mempty
-            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
+            _    <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
             readTVarIO tvar
         r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
 
@@ -138,8 +140,8 @@ main = hspec . describe "Store model" $ do
     it "Can run Query" $ do
         r <- do
             tvar <- newTVarIO mempty
-            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
-            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 1 732)
-            _ <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 22 14)
+            _    <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 10 49)
+            _    <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 1 732)
+            _    <- runCmd (const $ pure ()) tvar $ AddItem (ItemInfo 22 14)
             runQuery (const $ readTVarIO tvar) ProductCount
         r `shouldBe` 3

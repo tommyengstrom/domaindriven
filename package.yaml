@@ -30,6 +30,7 @@ dependencies:
 - generic-lens
 - lens
 - aeson
+- stm
 
 default-extensions:
 - Arrows
