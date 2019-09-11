@@ -21,32 +21,73 @@ class EventSourced model where
 ------------------------------------------------------------
 ------------- Idea of what it should look like -------------
 ------------------------------------------------------------
-data EventError = EventError404 Text | EventError401
+-- data EventError = EventError404 Text | EventError401
 
-class EventSourced' model where
-    type Event' model :: Type
-    applyEvent' :: model -> Stored (Event' model) -> Either EventError model
+--class EventSourced' model where
+--    type Event' model :: Type
+--    applyEvent' :: model -> Stored (Event' model) -> model
 
+type family EvType model :: Type
+
+data ESModel model = ESModel
+    { persistance :: PersistanceMethods model
+    , appEvent :: model -> Stored (EvType model) -> model
+    , model :: TVar model
+    }
+
+data ESView model = ESView
+    { evantChan :: TChan (Stored (EvType model)) -- Would be nice to express that things
+                                                 -- can not be put in
+    , appEvent :: model -> Stored (EvType model) -> model
+    , model :: TVar model
+    }
 
 -- These methods should be replaced with streams down the line
-data PersistanceMethods x = PersistanceMethods
-    { readEvents' :: MonadIO m => m [Stored(Event' x)]
-    , persistEvent' :: MonadIO m => Event' x -> m (Stored(Event' x))
+data PersistanceMethods model = PersistanceMethods
+    { readEvents' :: IO [Stored(EvType model)]
+    -- , persistEvent' :: EvType model -> IO (Stored(EvType model))
+    , persistEvent' :: Stored (EvType model) -> IO ()
     }
 
 filePersistance :: (ToJSON e, FromJSON e) => FilePath -> PersistanceMethods e
-filePersistance fp = PersistanceMethods
-    { readEvents' = undefined -- read the file and interpret each row as json
-    , persistEvent' = undefined -- persist a new json row in the file
-    }
+filePersistance fp =
+    PersistanceMethods { readEvents' = undefined fp, persistEvent' = undefined fp }
 
+noPersistance :: PersistanceMethods e
+noPersistance =
+    PersistanceMethods { readEvents' = pure [], persistEvent' = const $ pure () }
 
--- What must it do?
--- [*] Apply new events
--- [ ] Get the model out
--- [ ] Update the model
--- [*] Read previously persisted events
--- [*] Persist new events
+-- Things to handle/answer
+-- [*] Persistance
+-- [*] Accessing the model
+-- [*] Broadcasting events to other views (only one write model)
+-- [ ] How are commands specified?
+--
+-- Command, what I want
+-- * One ADT
+-- * ADT specifies return value
+-- * Ability to generate a servant API and server from the ADT
+
+data MyEvent =
+    MyEv1 | MyEv2 Int | MyEv3
+    deriving (Show, Eq, Ord, Generic)
+
+data MyCmd return where
+    AddUser ::Text -> MyCmd Int
+    DelUser ::Int -> MyCmd ()
+
+runMyCmd :: MyCmd r -> IO ([MyEvent], r)
+runMyCmd = \case
+    AddUser _ -> pure ([], 8)
+    DelUser _ -> pure ([], ())
+
+data MyQuery return where
+    GetUser ::Int -> MyQuery [Text]
+
+runMyQuery :: MyQuery r -> IO r
+runMyQuery = \case
+    GetUser _ -> pure ["Hulk Hogan"]
+
 ------------------------------------------------------------
 -----------------------End of idea--------------------------
 ------------------------------------------------------------
