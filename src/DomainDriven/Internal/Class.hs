@@ -10,6 +10,7 @@ import           RIO
 import           RIO.Time
 import           System.Random
 import           Data.Kind
+import           GHC.IO.Unsafe                  ( unsafePerformIO )
 
 class EventSourced model where
     type Event model :: Type
@@ -21,7 +22,11 @@ class EventSourced model where
 ------------------------------------------------------------
 ------------- Idea of what it should look like -------------
 ------------------------------------------------------------
--- data EventError = EventError404 Text | EventError401
+data EventError
+    = EventError404 Text
+    | EventError401
+    deriving (Show, Eq, Ord, Typeable)
+instance Exception EventError
 
 --class EventSourced' model where
 --    type Event' model :: Type
@@ -30,7 +35,7 @@ class EventSourced model where
 type family EvType model :: Type
 
 data ESModel model = ESModel
-    { persistance :: PersistanceMethods model
+    { persistance :: Persistance model
     , appEvent :: model -> Stored (EvType model) -> model
     , model :: TVar model
     }
@@ -43,19 +48,18 @@ data ESView model = ESView
     }
 
 -- These methods should be replaced with streams down the line
-data PersistanceMethods model = PersistanceMethods
+data Persistance model = Persistance
     { readEvents' :: IO [Stored(EvType model)]
     -- , persistEvent' :: EvType model -> IO (Stored(EvType model))
     , persistEvent' :: Stored (EvType model) -> IO ()
     }
 
-filePersistance :: (ToJSON e, FromJSON e) => FilePath -> PersistanceMethods e
+filePersistance :: (ToJSON e, FromJSON e) => FilePath -> Persistance e
 filePersistance fp =
-    PersistanceMethods { readEvents' = undefined fp, persistEvent' = undefined fp }
+    Persistance { readEvents' = undefined fp, persistEvent' = undefined fp }
 
-noPersistance :: PersistanceMethods e
-noPersistance =
-    PersistanceMethods { readEvents' = pure [], persistEvent' = const $ pure () }
+noPersistance :: Persistance e
+noPersistance = Persistance { readEvents' = pure [], persistEvent' = const $ pure () }
 
 -- Things to handle/answer
 -- [*] Persistance
@@ -88,6 +92,27 @@ runMyQuery :: MyQuery r -> IO r
 runMyQuery = \case
     GetUser _ -> pure ["Hulk Hogan"]
 
+
+
+runCmd
+    :: (MonadIO m, MonadThrow m)
+    => ESModel model
+    -> (cmd a -> m (TVar model -> STM (a, [EvType model])))
+    -> cmd a
+    -> m a
+runCmd (ESModel pm appE tvar) runner cmd = do
+    runnerTrans <- runner cmd
+    (r, evs)    <- atomically $ do
+        m        <- readTVar tvar
+        (r, evs) <- runnerTrans tvar
+        let storedEvs = fmap (unsafePerformIO . toStored) evs
+            newModel  = foldl' appE m storedEvs
+        writeTVar tvar newModel
+        pure (r, storedEvs)
+    traverse_ (liftIO . persistEvent' pm) evs
+    pure r
+
+
 ------------------------------------------------------------
 -----------------------End of idea--------------------------
 ------------------------------------------------------------
@@ -109,13 +134,13 @@ class EventSourced model => Command cmd model | cmd -> model where
              -> m (Event model, CmdReturn cmd)
 
 
-runCmd
+runCmd'
     :: (EventSourced model, Command cmd model, MonadIO m, MonadThrow m)
     => (cmd -> m (CmdDeps cmd))
     -> TVar model
     -> cmd
     -> m (CmdReturn cmd)
-runCmd deps tvar cmd = do
+runCmd' deps tvar cmd = do
     (ev, r) <- cmdHandler deps tvar cmd
     s       <- toStored ev
     applyEvent tvar s
