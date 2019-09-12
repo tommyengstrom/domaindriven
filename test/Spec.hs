@@ -10,6 +10,7 @@ import           Test.Hspec
 import           Data.UUID.V1
 import           Data.UUID                      ( nil )
 import           RIO.Time
+import           Control.Monad.Except
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -47,24 +48,22 @@ type StoreModel = Map ItemKey ItemInfo
 type instance EvType StoreModel = StoreEvent
 
 handleStoreCmd
-    :: (MonadThrow m, MonadIO m) => Cmd a -> m (TVar StoreModel -> STM (a, [StoreEvent]))
+    :: (MonadThrow m, MonadIO m)
+    => Cmd a
+    -> m (StoreModel -> Either Err (a, [StoreEvent]))
 handleStoreCmd = \case
-    BuyItem iKey q -> pure $ \tvar -> do
-        m <- readTVar tvar
+    BuyItem iKey q -> pure $ \m -> runExcept $ do
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-        when (available < q) $ throwM NotEnoughStock
+        when (available < q) $ throwError NotEnoughStock
         pure ((), [BoughtItem iKey q])
-    Restock iKey q -> pure $ \tvar -> do
-        m <- readTVar tvar
-        when (M.notMember iKey m) $ throwM NoSuchItem
+    Restock iKey q -> pure $ \m -> runExcept $ do
+        when (M.notMember iKey m) $ throwError NoSuchItem
         pure ((), [Restocked iKey q])
-    AddItem iInfo -> pure $ \tvar -> do
-        m <- readTVar tvar
+    AddItem iInfo -> pure $ \m -> runExcept $ do
         let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
         pure (iKey, [AddedItem iKey iInfo])
-    RemoveItem iKey -> pure $ \tvar -> do
-        m <- readTVar tvar
-        when (M.notMember iKey m) $ throwM NoSuchItem
+    RemoveItem iKey -> pure $ \m -> runExcept $ do
+        when (M.notMember iKey m) $ throwError NoSuchItem
         pure ((), [RemovedItem iKey])
 
 applyStoreEvent :: StoreModel -> Stored StoreEvent -> StoreModel

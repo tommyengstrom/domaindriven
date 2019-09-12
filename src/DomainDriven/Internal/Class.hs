@@ -95,16 +95,16 @@ runMyQuery = \case
 
 
 runCmd
-    :: (MonadIO m, MonadThrow m)
+    :: (MonadIO m, MonadThrow m, Exception err)
     => ESModel model
-    -> (cmd a -> m (TVar model -> STM (a, [EvType model])))
+    -> (cmd a -> m (model -> Either err (a, [EvType model])))
     -> cmd a
     -> m a
 runCmd (ESModel pm appE tvar) runner cmd = do
     runnerTrans <- runner cmd
     (r, evs)    <- atomically $ do
         m        <- readTVar tvar
-        (r, evs) <- runnerTrans tvar
+        (r, evs) <- either throwM pure $ runnerTrans m
         let storedEvs = fmap (unsafePerformIO . toStored) evs
             newModel  = foldl' appE m storedEvs
         writeTVar tvar newModel
