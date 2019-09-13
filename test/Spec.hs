@@ -7,9 +7,6 @@ import           GHC.TypeLits
 import           GHC.Enum
 import qualified Data.Map                                     as M
 import           Test.Hspec
-import           Data.UUID.V1
-import           Data.UUID                      ( nil )
-import           RIO.Time
 import           Safe                           ( headNote )
 import           Control.Monad.Except
 
@@ -46,12 +43,8 @@ data StoreError
 instance Exception StoreError
 
 type StoreModel = Map ItemKey ItemInfo
-type instance EvType StoreModel = StoreEvent
 
-handleStoreCmd
-    :: (MonadThrow m, MonadIO m)
-    => StoreCmd a
-    -> m (StoreModel -> Either StoreError (a, [StoreEvent]))
+handleStoreCmd :: StoreCmd a -> IO (StoreModel -> Either StoreError (a, [StoreEvent]))
 handleStoreCmd = \case
     BuyItem iKey q -> pure $ \m -> runExcept $ do
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
@@ -76,11 +69,13 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkStoreModel :: IO (ESModel StoreModel)
-mkStoreModel = ESModel noPersistance applyStoreEvent <$> newTVarIO mempty
+mkStoreModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkStoreModel = ESModel noPersistance applyStoreEvent handleStoreCmd <$> newTVarIO mempty
 
-getModel :: ESModel StoreModel -> IO StoreModel
-getModel = readTVarIO . view typed
+
+-- | Number of unique products in stock
+productCount :: StoreModel -> Int
+productCount = length . M.keys . M.filter ((> 0) . view (typed @Quantity))
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
@@ -88,105 +83,20 @@ main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         let item :: ItemInfo
             item = ItemInfo 10 49
-        iKey <- runCmd es handleStoreCmd $ AddItem item
+        iKey <- runCmd es $ AddItem item
         getModel es `shouldReturn` M.singleton iKey item
------------------------------------
+
     it "Can buy item" $ do
         iKey <- headNote "Ops" . M.keys <$> getModel es
-        runCmd es handleStoreCmd $ BuyItem iKey 7
+        runCmd es $ BuyItem iKey 7
         getModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
 
+
     it "Can run Query" $ do
-        r <- do
-            tvar <- newTVarIO mempty
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 1 732)
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 22 14)
-            runQuery (const $ readTVarIO tvar) ProductCount
-        r `shouldBe` 3
+        runQuery es productCount `shouldReturn` 1
 
-------------------------------------------------------------------------------------------
-------------------------------------The old shit------------------------------------------
-------------------------------------------------------------------------------------------
--- The commands
-data BuyItem'    = BuyItem' ItemKey Quantity
-data Restock'    = Restock' ItemKey Quantity
-data AddItem'    = AddItem' ItemInfo
-data RemoveItem' = RemoveItem' ItemKey
+        let item :: ItemInfo
+            item = ItemInfo 4 33
+        _ <- runCmd es $ AddItem item
 
-
-
---instance Command BuyItem' StoreModel () where
---    type Deps StoreModel = ()
---    cmdHandler _ tvar (BuyItem' iKey q) = do
---        m <- readTVarIO tvar
---        let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
---        when (available < q) $ throwM NotEnoughStock
---        pure (BoughtItem iKey q, ())
-
-instance Command BuyItem' StoreModel where
-    type CmdDeps BuyItem' = ()
-    type CmdReturn BuyItem' = ()
-    cmdHandler _ tvar (BuyItem' iKey q) = do
-        m <- readTVarIO tvar
-        let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-        when (available < q) $ throwM NotEnoughStock
-        pure (BoughtItem iKey q, ())
-
-
-instance Command Restock' StoreModel where
-    type CmdDeps Restock' = ()
-    type CmdReturn Restock' = ()
-    cmdHandler _ tvar (Restock' iKey q) = do
-        m <- readTVarIO tvar
-        when (M.notMember iKey m) $ throwM NoSuchItem
-        pure (Restocked iKey q, ())
-
-instance Command AddItem' StoreModel where
-    type CmdDeps AddItem' = ()
-    type CmdReturn AddItem' = ItemKey
-    cmdHandler _ tvar (AddItem' info) = do
-        m <- readTVarIO tvar
-        let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
-        pure (AddedItem iKey info, iKey)
-
-instance Command RemoveItem' StoreModel where
-    type CmdDeps RemoveItem' = ()
-    type CmdReturn RemoveItem' = ()
-    cmdHandler _ tvar (RemoveItem' iKey) = do
-        m <- readTVarIO tvar
-        when (M.notMember iKey m) $ throwM NoSuchItem
-        pure (RemovedItem iKey, ())
-
--- Queries
-data ProductCount = ProductCount
-
-instance Query ProductCount where
-    type QueryDeps ProductCount = StoreModel
-    type QueryReturn ProductCount = Int
-    runQuery getModel ProductCount = do
-        m <- getModel ProductCount
-        pure . length $ M.elems $ M.filter ((> Wrap 0) . view (typed @Quantity)) m
-
-
-runTestRunner :: (EventSourced m, m ~ StoreModel) => ReaderT (TVar m) IO a -> IO a
-runTestRunner m = do
-    s <- newTVarIO mempty
-    runReaderT m s
-
-instance EventSourced StoreModel where
-    type Event StoreModel = StoreEvent
-    readEvents = pure [] -- nothing is persisted in the tests
-    applyEvent tvar e = do
-        let f = case storedEvent e of
-                BoughtItem iKey q ->
-                    M.update (Just . over (field @"quantity") (\x -> x - q)) iKey
-                Restocked iKey q -> M.update (Just . over (field @"quantity") (+ q)) iKey
-                AddedItem iKey info -> M.insert iKey info
-                RemovedItem iKey -> M.delete iKey
-        atomically $ modifyTVar tvar f
-
-    persistEvent e = do
-        ts   <- getCurrentTime
-        uuid <- fromMaybe nil <$> liftIO nextUUID
-        pure $ Stored e ts uuid
+        runQuery es productCount `shouldReturn` 2
