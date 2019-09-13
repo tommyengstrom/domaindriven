@@ -10,6 +10,7 @@ import           Test.Hspec
 import           Data.UUID.V1
 import           Data.UUID                      ( nil )
 import           RIO.Time
+import           Safe                           ( headNote )
 import           Control.Monad.Except
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
@@ -20,11 +21,11 @@ type ItemKey = Wrap "ItemKey" Int
 type Quantity = Wrap "Quantity" Int
 
 -- Command
-data Cmd a where
-    BuyItem    ::ItemKey -> Quantity -> Cmd ()
-    Restock    ::ItemKey -> Quantity -> Cmd ()
-    AddItem    ::ItemInfo -> Cmd ItemKey
-    RemoveItem ::ItemKey -> Cmd ()
+data StoreCmd a where
+    BuyItem    ::ItemKey -> Quantity -> StoreCmd ()
+    Restock    ::ItemKey -> Quantity -> StoreCmd ()
+    AddItem    ::ItemInfo -> StoreCmd ItemKey
+    RemoveItem ::ItemKey -> StoreCmd ()
 
 data StoreEvent
     = BoughtItem ItemKey Quantity
@@ -38,19 +39,19 @@ data ItemInfo = ItemInfo
     , price :: Int
     } deriving (Show, Eq, Ord, Generic, ToJSON, FromJSON)
 
-data Err
+data StoreError
     = NotEnoughStock
     | NoSuchItem
     deriving (Show, Eq, Ord, Typeable)
-instance Exception Err
+instance Exception StoreError
 
 type StoreModel = Map ItemKey ItemInfo
 type instance EvType StoreModel = StoreEvent
 
 handleStoreCmd
     :: (MonadThrow m, MonadIO m)
-    => Cmd a
-    -> m (StoreModel -> Either Err (a, [StoreEvent]))
+    => StoreCmd a
+    -> m (StoreModel -> Either StoreError (a, [StoreEvent]))
 handleStoreCmd = \case
     BuyItem iKey q -> pure $ \m -> runExcept $ do
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
@@ -73,11 +74,46 @@ applyStoreEvent m (Stored e _ _) = case e of
     AddedItem  iKey info -> M.insert iKey info m
     RemovedItem iKey     -> M.delete iKey m
 
+
+
+mkStoreModel :: IO (ESModel StoreModel)
+mkStoreModel = ESModel noPersistance applyStoreEvent <$> newTVarIO mempty
+
+getModel :: ESModel StoreModel -> IO StoreModel
+getModel = readTVarIO . view typed
+
+main :: IO ()
+main = hspec . describe "Store model" $ do
+    es <- runIO mkStoreModel
+    it "Can add item" $ do
+        let item :: ItemInfo
+            item = ItemInfo 10 49
+        iKey <- runCmd es handleStoreCmd $ AddItem item
+        getModel es `shouldReturn` M.singleton iKey item
+-----------------------------------
+    it "Can buy item" $ do
+        iKey <- headNote "Ops" . M.keys <$> getModel es
+        runCmd es handleStoreCmd $ BuyItem iKey 7
+        getModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
+
+    it "Can run Query" $ do
+        r <- do
+            tvar <- newTVarIO mempty
+            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
+            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 1 732)
+            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 22 14)
+            runQuery (const $ readTVarIO tvar) ProductCount
+        r `shouldBe` 3
+
+------------------------------------------------------------------------------------------
+------------------------------------The old shit------------------------------------------
+------------------------------------------------------------------------------------------
 -- The commands
 data BuyItem'    = BuyItem' ItemKey Quantity
 data Restock'    = Restock' ItemKey Quantity
 data AddItem'    = AddItem' ItemInfo
 data RemoveItem' = RemoveItem' ItemKey
+
 
 
 --instance Command BuyItem' StoreModel () where
@@ -154,40 +190,3 @@ instance EventSourced StoreModel where
         ts   <- getCurrentTime
         uuid <- fromMaybe nil <$> liftIO nextUUID
         pure $ Stored e ts uuid
-
-
-newStoreModel :: IO (ESModel StoreModel)
-newStoreModel = ESModel noPersistance applyStoreEvent <$> newTVarIO mempty
-
-main :: IO ()
-main = hspec . describe "Store model" $ do
-    it "Can add item" $ do
-        r <- do
-            tvar <- newTVarIO mempty
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
-            readTVarIO tvar
-        r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
------------------------------------
-    it "Can add item" $ do
-        r <- do
-            tvar <- newTVarIO mempty
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
-            readTVarIO tvar
-        r `shouldBe` M.singleton (Wrap 1) (ItemInfo 10 49)
-
-    it "Can add item and buy it" $ do
-        r <- do
-            tvar <- newTVarIO mempty
-            iKey <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
-            runCmd' (const $ pure ()) tvar $ BuyItem' iKey 7
-            readTVarIO tvar
-        r `shouldBe` M.singleton (Wrap 1) (ItemInfo 3 49)
-
-    it "Can run Query" $ do
-        r <- do
-            tvar <- newTVarIO mempty
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 10 49)
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 1 732)
-            _    <- runCmd' (const $ pure ()) tvar $ AddItem' (ItemInfo 22 14)
-            runQuery (const $ readTVarIO tvar) ProductCount
-        r `shouldBe` 3

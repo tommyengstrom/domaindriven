@@ -38,21 +38,21 @@ data ESModel model = ESModel
     { persistance :: Persistance model
     , appEvent :: model -> Stored (EvType model) -> model
     , model :: TVar model
-    }
+    } deriving Generic
 
 data ESView model = ESView
     { evantChan :: TChan (Stored (EvType model)) -- Would be nice to express that things
                                                  -- can not be put in
     , appEvent :: model -> Stored (EvType model) -> model
     , model :: TVar model
-    }
+    } deriving Generic
 
 -- These methods should be replaced with streams down the line
 data Persistance model = Persistance
     { readEvents' :: IO [Stored(EvType model)]
     -- , persistEvent' :: EvType model -> IO (Stored(EvType model))
     , persistEvent' :: Stored (EvType model) -> IO ()
-    }
+    } deriving Generic
 
 filePersistance :: (ToJSON e, FromJSON e) => FilePath -> Persistance e
 filePersistance fp =
