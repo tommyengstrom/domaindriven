@@ -1,4 +1,4 @@
-name:                domain-driven
+nderiving Genericame:                domain-driven
 version:             0.1.0.0
 github:              "tommyengstrom/domain-driven"
 license:             BSD3
@@ -36,6 +36,7 @@ dependencies:
 - safe
 - directory
 - text
+- monad-loops
 
 default-extensions:
 - Arrows

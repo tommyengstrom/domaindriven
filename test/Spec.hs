@@ -9,6 +9,8 @@ import qualified Data.Map                                     as M
 import           Test.Hspec
 import           Safe                           ( headNote )
 import           Control.Monad.Except
+import System.Directory
+import System.Mem
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -30,6 +32,7 @@ data StoreEvent
     | AddedItem ItemKey ItemInfo
     | RemovedItem ItemKey
     deriving stock (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSON, ToJSON)
 
 data ItemInfo = ItemInfo
     { quantity :: Quantity
@@ -69,9 +72,15 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkStoreModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
-mkStoreModel = ESModel noPersistance applyStoreEvent handleStoreCmd <$> newTVarIO mempty
+mkForgetfullModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkForgetfullModel = do
+    p <- noPersistance
+    createESModel p applyStoreEvent handleStoreCmd mempty
 
+mkPersistedModel :: FilePath ->  IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkPersistedModel fp = do
+    p <- filePersistance fp
+    createESModel p applyStoreEvent handleStoreCmd mempty
 
 -- | Number of unique products in stock
 productCount :: StoreModel -> Int
@@ -79,7 +88,9 @@ productCount = length . M.keys . M.filter ((> 0) . view (typed @Quantity))
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
-    es <- runIO mkStoreModel
+    es <- runIO mkForgetfullModel
+    let fp = "/tmp/persisted-model.events"
+
     it "Can add item" $ do
         let item :: ItemInfo
             item = ItemInfo 10 49
@@ -100,3 +111,18 @@ main = hspec . describe "Store model" $ do
         _ <- runCmd es $ AddItem item
 
         runQuery es productCount `shouldReturn` 2
+
+    it "File storage works" $ do
+        removeFile fp
+        esp <- mkPersistedModel fp
+        let item :: ItemInfo
+            item = ItemInfo 32 7
+        iKey <- runCmd esp $ AddItem item
+        getModel esp `shouldReturn` M.singleton iKey item
+
+    it "File storage rembers" $ do
+        performMajorGC
+        threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
+        esp <- mkPersistedModel fp
+        m <- getModel esp
+        m `shouldSatisfy` (== 1) . M.size
