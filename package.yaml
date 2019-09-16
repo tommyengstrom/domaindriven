@@ -1,4 +1,4 @@
-nderiving Genericame:                domain-driven
+name:                domain-driven
 version:             0.1.0.0
 github:              "tommyengstrom/domain-driven"
 license:             BSD3
