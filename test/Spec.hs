@@ -9,8 +9,8 @@ import qualified Data.Map                                     as M
 import           Test.Hspec
 import           Safe                           ( headNote )
 import           Control.Monad.Except
-import System.Directory
-import System.Mem
+import           System.Directory
+import           System.Mem
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -77,7 +77,7 @@ mkForgetfullModel = do
     p <- noPersistance
     createESModel p applyStoreEvent handleStoreCmd mempty
 
-mkPersistedModel :: FilePath ->  IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkPersistedModel :: FilePath -> IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
 mkPersistedModel fp = do
     p <- filePersistance fp
     createESModel p applyStoreEvent handleStoreCmd mempty
@@ -113,7 +113,8 @@ main = hspec . describe "Store model" $ do
         runQuery es productCount `shouldReturn` 2
 
     it "File storage works" $ do
-        removeFile fp
+        fileExists <- doesFileExist fp
+        when fileExists $ removeFile fp
         esp <- mkPersistedModel fp
         let item :: ItemInfo
             item = ItemInfo 32 7
@@ -124,5 +125,5 @@ main = hspec . describe "Store model" $ do
         performMajorGC
         threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
         esp <- mkPersistedModel fp
-        m <- getModel esp
+        m   <- getModel esp
         m `shouldSatisfy` (== 1) . M.size
