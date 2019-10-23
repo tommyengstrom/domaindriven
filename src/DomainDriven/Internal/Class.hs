@@ -11,7 +11,7 @@ import qualified RIO.ByteString.Lazy                          as BL
 import qualified RIO.ByteString                               as BS
 import           Data.Char                      ( ord )
 import           System.Directory               ( doesFileExist )
-import Control.Monad.Loops (whileM_)
+import           Control.Monad.Loops            ( whileM_ )
 -- import Data.Kind
 
 data ESModel model event cmd err m = ESModel
@@ -23,23 +23,25 @@ data ESModel model event cmd err m = ESModel
     }
 
 type CmdHandler model event cmd err m
-    = forall a . (Exception err, MonadIO m, MonadThrow m)
-                 => cmd a -> m (model -> Either err (a, [event]))
+    =  forall a
+     . (Exception err, MonadIO m, MonadThrow m)
+    => cmd a
+    -> m (model -> Either err (a, [event]))
 
 type EventHandler model event = model -> Stored event -> model
 
-createESModel :: (MonadIO m)
-              => PersistanceModel event
-              -> EventHandler model event
-              -> CmdHandler model event cmd err m
-              -> model -- ^ initial model
-              -> m (ESModel model event cmd err m)
+createESModel
+    :: PersistanceModel event
+    -> EventHandler model event
+    -> CmdHandler model event cmd err m
+    -> model -- ^ initial model
+    -> IO (ESModel model event cmd err m)
 createESModel p@(PersistanceModel chan) apply h m0 = do
     tvar <- newTVarIO m0
     whileM_ (atomically . fmap not $ isEmptyTChan chan) . atomically $ do
-            m <- readTVar tvar
-            e <- readTChan chan
-            writeTVar tvar $ apply m e
+        m <- readTVar tvar
+        e <- readTChan chan
+        writeTVar tvar $ apply m e
     pure $ ESModel p apply h tvar
 
 data ESView model event = ESView
