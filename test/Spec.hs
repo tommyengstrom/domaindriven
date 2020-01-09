@@ -72,12 +72,12 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkForgetfullModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkForgetfullModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError)
 mkForgetfullModel = do
     p <- noPersistance
     createESModel p applyStoreEvent handleStoreCmd mempty
 
-mkPersistedModel :: FilePath -> IO (ESModel StoreModel StoreEvent StoreCmd StoreError IO)
+mkPersistedModel :: FilePath -> IO (ESModel StoreModel StoreEvent StoreCmd StoreError)
 mkPersistedModel fp = do
     p <- filePersistance fp
     createESModel p applyStoreEvent handleStoreCmd mempty
