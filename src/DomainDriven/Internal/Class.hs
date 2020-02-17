@@ -14,28 +14,26 @@ import           System.Directory               ( doesFileExist )
 import           Control.Monad.Loops            ( whileM_ )
 -- import Data.Kind
 
-data ESModel model event cmd err m = ESModel
+-- | Event sourced model
+data ESModel model event cmd err = ESModel
     { persistance :: PersistanceModel event
     , applyEvent :: model -> Stored event -> model
-    , cmdHandler :: forall a . (Exception err, MonadIO m, MonadThrow m)
-                 => cmd a -> m (model -> Either err (a, [event]))
+    , cmdHandler :: forall a . Exception err
+                 => cmd a -> IO (model -> Either err (a, [event]))
     , esModel :: TVar model
     }
 
-type CmdHandler model event cmd err m
-    =  forall a
-     . (Exception err, MonadIO m, MonadThrow m)
-    => cmd a
-    -> m (model -> Either err (a, [event]))
+type CmdHandler model event cmd err
+    = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
 
 type EventHandler model event = model -> Stored event -> model
 
 createESModel
     :: PersistanceModel event
     -> EventHandler model event
-    -> CmdHandler model event cmd err m
+    -> CmdHandler model event cmd err
     -> model -- ^ initial model
-    -> IO (ESModel model event cmd err m)
+    -> IO (ESModel model event cmd err)
 createESModel p@(PersistanceModel chan) apply h m0 = do
     tvar <- newTVarIO m0
     whileM_ (atomically . fmap not $ isEmptyTChan chan) . atomically $ do
@@ -89,11 +87,7 @@ filePersistance fp = do
 noPersistance :: forall e . IO (PersistanceModel e)
 noPersistance = PersistanceModel <$> newTChanIO
 
-runCmd
-    :: (Exception err, MonadIO m, MonadThrow m)
-    => ESModel model event cmd err m
-    -> cmd a
-    -> m a
+runCmd :: Exception err => ESModel model event cmd err -> cmd a -> IO a
 runCmd (ESModel pm appEvent cmdRunner tvar) cmd = do
     cmdTransaction <- cmdRunner cmd
     atomically $ do
@@ -107,7 +101,7 @@ runCmd (ESModel pm appEvent cmdRunner tvar) cmd = do
 class HasModel es model | es -> model where
     getModel :: MonadIO m => es -> m model
 
-instance HasModel (ESModel model e c err m) model where
+instance HasModel (ESModel model e c err) model where
     getModel = liftIO . readTVarIO . esModel
 
 instance HasModel (ESView model event) model where
