@@ -15,34 +15,48 @@ import           Control.Monad.Loops            ( whileM_ )
 -- import Data.Kind
 
 -- | Event sourced model
-data ESModel model event cmd err = ESModel
+data Model model event = Model
     { persistance :: PersistanceModel event
     , applyEvent :: model -> Stored event -> model
-    , cmdHandler :: forall a . Exception err
-                 => cmd a -> IO (model -> Either err (a, [event]))
     , esModel :: TVar model
     }
+
+--    , cmdHandler :: forall a . Exception err
+--                 => cmd a -> IO (model -> Either err (a, [event]))
 
 type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
 
-type EventHandler model event = model -> Stored event -> model
-
-createESModel
-    :: PersistanceModel event
-    -> EventHandler model event
+runCmd
+    :: Exception err
+    => Model model event
     -> CmdHandler model event cmd err
+    -> cmd a
+    -> IO a
+runCmd (Model pm appEvent tvar) cmdRunner cmd = do
+    cmdTransaction <- cmdRunner cmd
+    atomically $ do
+        m         <- readTVar tvar
+        (r, evs)  <- either throwM pure $ cmdTransaction m
+        storedEvs <- traverse (persistEvent pm) evs
+        let newModel = foldl' appEvent m storedEvs
+        writeTVar tvar newModel
+        pure r
+
+createModel
+    :: PersistanceModel event
+    -> (model -> Stored event -> model)
     -> model -- ^ initial model
-    -> IO (ESModel model event cmd err)
-createESModel p@(PersistanceModel chan) apply h m0 = do
+    -> IO (Model model event)
+createModel p@(PersistanceModel chan) apply m0 = do
     tvar <- newTVarIO m0
     whileM_ (atomically . fmap not $ isEmptyTChan chan) . atomically $ do
         m <- readTVar tvar
         e <- readTChan chan
         writeTVar tvar $ apply m e
-    pure $ ESModel p apply h tvar
+    pure $ Model p apply tvar
 
-data ESView model event = ESView
+data ViewModel model event = ViewModel
     { evantChan :: TChan (Stored event)
     , applyEvent :: model -> Stored event -> model
     , esvModel :: TVar model
@@ -87,30 +101,13 @@ filePersistance fp = do
 noPersistance :: forall e . IO (PersistanceModel e)
 noPersistance = PersistanceModel <$> newTChanIO
 
-runCmd :: Exception err => ESModel model event cmd err -> cmd a -> IO a
-runCmd (ESModel pm appEvent cmdRunner tvar) cmd = do
-    cmdTransaction <- cmdRunner cmd
-    atomically $ do
-        m         <- readTVar tvar
-        (r, evs)  <- either throwM pure $ cmdTransaction m
-        storedEvs <- traverse (persistEvent pm) evs
-        let newModel = foldl' appEvent m storedEvs
-        writeTVar tvar newModel
-        pure r
-
-class HasModel es model | es -> model where
-    getModel :: MonadIO m => es -> m model
-
-instance HasModel (ESModel model e c err) model where
-    getModel = liftIO . readTVarIO . esModel
-
-instance HasModel (ESView model event) model where
-    getModel = liftIO . readTVarIO . esvModel
+getModel :: Model model event -> IO model
+getModel = readTVarIO . esModel
 
 -- | runQuery is reall just readTVar and apply the function...
 -- But we will likely want to not export the TVar containing the model, in order to
 -- enfore the library is being used correctly.
-runQuery :: (HasModel es model, MonadIO m) => es -> (model -> a) -> m a
+runQuery :: Model model event -> (model -> a) -> IO a
 runQuery es f = f <$> getModel es
 
 data Stored a = Stored
@@ -119,8 +116,8 @@ data Stored a = Stored
     , storedUUID      :: UUID
     } deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON)
 
-mkId :: MonadIO m => (UUID -> b) -> m b
-mkId c = c <$> liftIO randomIO
+mkId :: MonadIO m => m UUID
+mkId = liftIO randomIO
 
 toStored :: MonadIO m => e -> m (Stored e)
-toStored e = Stored e <$> getCurrentTime <*> mkId id
+toStored e = Stored e <$> getCurrentTime <*> mkId
