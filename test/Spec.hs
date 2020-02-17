@@ -42,12 +42,12 @@ data ItemInfo = ItemInfo
 data StoreError
     = NotEnoughStock
     | NoSuchItem
-    deriving (Show, Eq, Ord, Typeable)
-instance Exception StoreError
+    deriving (Show, Eq, Ord, Typeable, Exception)
 
 type StoreModel = Map ItemKey ItemInfo
 
-handleStoreCmd :: StoreCmd a -> IO (StoreModel -> Either StoreError (a, [StoreEvent]))
+-- handleStoreCmd :: StoreCmd a -> IO (StoreModel -> Either StoreError (a, [StoreEvent]))
+handleStoreCmd :: CmdHandler StoreModel StoreEvent StoreCmd StoreError
 handleStoreCmd = \case
     BuyItem iKey q -> pure $ \m -> runExcept $ do
         let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
@@ -72,15 +72,15 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkForgetfullModel :: IO (ESModel StoreModel StoreEvent StoreCmd StoreError)
+mkForgetfullModel :: IO (Model StoreModel StoreEvent)
 mkForgetfullModel = do
     p <- noPersistance
-    createESModel p applyStoreEvent handleStoreCmd mempty
+    createModel p applyStoreEvent mempty
 
-mkPersistedModel :: FilePath -> IO (ESModel StoreModel StoreEvent StoreCmd StoreError)
+mkPersistedModel :: FilePath -> IO (Model StoreModel StoreEvent)
 mkPersistedModel fp = do
     p <- filePersistance fp
-    createESModel p applyStoreEvent handleStoreCmd mempty
+    createModel p applyStoreEvent mempty
 
 -- | Number of unique products in stock
 productCount :: StoreModel -> Int
@@ -94,12 +94,12 @@ main = hspec . describe "Store model" $ do
     it "Can add item" $ do
         let item :: ItemInfo
             item = ItemInfo 10 49
-        iKey <- runCmd es $ AddItem item
+        iKey <- runCmd es handleStoreCmd $ AddItem item
         getModel es `shouldReturn` M.singleton iKey item
 
     it "Can buy item" $ do
         iKey <- headNote "Ops" . M.keys <$> getModel es
-        runCmd es $ BuyItem iKey 7
+        runCmd es handleStoreCmd $ BuyItem iKey 7
         getModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
 
 
@@ -108,7 +108,7 @@ main = hspec . describe "Store model" $ do
 
         let item :: ItemInfo
             item = ItemInfo 4 33
-        _ <- runCmd es $ AddItem item
+        _ <- runCmd es handleStoreCmd $ AddItem item
 
         runQuery es productCount `shouldReturn` 2
 
@@ -118,7 +118,7 @@ main = hspec . describe "Store model" $ do
         esp <- mkPersistedModel fp
         let item :: ItemInfo
             item = ItemInfo 32 7
-        iKey <- runCmd esp $ AddItem item
+        iKey <- runCmd esp handleStoreCmd $ AddItem item
         getModel esp `shouldReturn` M.singleton iKey item
 
     it "File storage rembers" $ do
