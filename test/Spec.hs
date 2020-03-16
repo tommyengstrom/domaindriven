@@ -72,12 +72,12 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkForgetfullModel :: IO (Model StoreModel StoreEvent)
+mkForgetfullModel :: IO (Domain StoreModel StoreEvent)
 mkForgetfullModel = do
     p <- noPersistance
     createModel p applyStoreEvent mempty
 
-mkPersistedModel :: FilePath -> IO (Model StoreModel StoreEvent)
+mkPersistedModel :: FilePath -> IO (Domain StoreModel StoreEvent)
 mkPersistedModel fp = do
     p <- filePersistance fp
     createModel p applyStoreEvent mempty

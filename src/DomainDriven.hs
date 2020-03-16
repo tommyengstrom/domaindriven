@@ -1,5 +1,5 @@
 module DomainDriven
-    ( Model
+    ( Domain
     , ViewModel
     , createModel
     , CmdHandler

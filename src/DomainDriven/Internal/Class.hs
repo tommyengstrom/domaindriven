@@ -15,10 +15,10 @@ import           Control.Monad.Loops            ( whileM_ )
 -- import Data.Kind
 
 -- | Event sourced model
-data Model model event = Model
+data Domain model event = Domain
     { persistance :: PersistanceModel event
     , applyEvent :: model -> Stored event -> model
-    , esModel :: TVar model
+    , model :: TVar model
     }
 
 --    , cmdHandler :: forall a . Exception err
@@ -29,11 +29,11 @@ type CmdHandler model event cmd err
 
 runCmd
     :: Exception err
-    => Model model event
+    => Domain model event
     -> CmdHandler model event cmd err
     -> cmd a
     -> IO a
-runCmd (Model pm appEvent tvar) cmdRunner cmd = do
+runCmd (Domain pm appEvent tvar) cmdRunner cmd = do
     cmdTransaction <- cmdRunner cmd
     atomically $ do
         m         <- readTVar tvar
@@ -47,14 +47,14 @@ createModel
     :: PersistanceModel event
     -> (model -> Stored event -> model)
     -> model -- ^ initial model
-    -> IO (Model model event)
+    -> IO (Domain model event)
 createModel p@(PersistanceModel chan) apply m0 = do
     tvar <- newTVarIO m0
     whileM_ (atomically . fmap not $ isEmptyTChan chan) . atomically $ do
         m <- readTVar tvar
         e <- readTChan chan
         writeTVar tvar $ apply m e
-    pure $ Model p apply tvar
+    pure $ Domain p apply tvar
 
 data ViewModel model event = ViewModel
     { evantChan :: TChan (Stored event)
@@ -101,13 +101,13 @@ filePersistance fp = do
 noPersistance :: forall e . IO (PersistanceModel e)
 noPersistance = PersistanceModel <$> newTChanIO
 
-getModel :: Model model event -> IO model
-getModel = readTVarIO . esModel
+getModel :: Domain model event -> IO model
+getModel = readTVarIO . model
 
 -- | runQuery is reall just readTVar and apply the function...
 -- But we will likely want to not export the TVar containing the model, in order to
 -- enfore the library is being used correctly.
-runQuery :: Model model event -> (model -> a) -> IO a
+runQuery :: Domain model event -> (model -> a) -> IO a
 runQuery es f = f <$> getModel es
 
 data Stored a = Stored
