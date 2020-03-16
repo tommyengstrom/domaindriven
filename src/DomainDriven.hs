@@ -1,9 +1,8 @@
 module DomainDriven
     ( Domain
-    , ViewModel
     , createModel
     , CmdHandler
-    , PersistanceModel
+    , Persistance
     , filePersistance
     , noPersistance
     , Stored(..)
@@ -15,4 +14,3 @@ module DomainDriven
 where
 
 import           DomainDriven.Internal.Class
--- import           DomainDriven.Internal.Storage.File as X

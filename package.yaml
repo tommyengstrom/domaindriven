@@ -37,6 +37,8 @@ dependencies:
 - directory
 - text
 - monad-loops
+- servant
+- servant-server
 
 default-extensions:
 - Arrows
