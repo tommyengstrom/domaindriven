@@ -1,15 +1,17 @@
 module DomainDriven
-    ( Domain
+    ( CmdHandler
+    , CmdRunner
     , createModel
-    , CmdHandler
-    , Persistance
+    , Domain
     , filePersistance
-    , noPersistance
-    , Stored(..)
-    , runQuery
-    , runCmd
-    , mkId
     , getModel
+    , mkId
+    , noPersistance
+    , Persistance
+    , QueryRunner
+    , runCmd
+    , runQuery
+    , Stored(..)
     )
 where
 
