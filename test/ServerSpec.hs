@@ -7,4 +7,4 @@ import           DomainDriven.Server
 import           Prelude
 import           Servant
 
-$(mkEndpoints ''StoreCmd)
+$(mkApiDec ''StoreCmd)

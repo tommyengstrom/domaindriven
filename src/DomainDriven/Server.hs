@@ -19,45 +19,13 @@ import           Servant
 --
 --
 data StoreCmd a where
-    BuyItem    ::String -> Int -> StoreCmd ()
--------------------------------------------------
--------------  The expected info
--------------------------------------------------
---TyConI
---  (DataD
---     []
---     DomainDriven.Server.StoreCmd
---     [KindedTV a_6989586621679127356 StarT]
---     Nothing
---     [ GadtC
---         [DomainDriven.Server.BuyItem]
---         [ (Bang NoSourceUnpackedness NoSourceStrictness, ConT GHC.Base.String)
---         , (Bang NoSourceUnpackedness NoSourceStrictness, ConT GHC.Types.Int)
---         ]
---         (AppT (ConT DomainDriven.Server.StoreCmd) (TupleT 0))
---     ]
---     [])
--------------------------------------------------
--------------  The Dec it contains
--------------------------------------------------
--- DataD
---   []
---   DomainDriven.Server.StoreCmd
---   [KindedTV a_6989586621679127607 StarT]
---   Nothing
---   [ GadtC
---       [DomainDriven.Server.BuyItem]
---       [ (Bang NoSourceUnpackedness NoSourceStrictness, ConT GHC.Base.String)
---       , (Bang NoSourceUnpackedness NoSourceStrictness, ConT GHC.Types.Int)
---       ]
---       (AppT (ConT DomainDriven.Server.StoreCmd) (TupleT 0))
---   ]
---   []
+    AddToCart    ::String -> Int -> StoreCmd ()
+    RemoveFromCart ::String -> StoreCmd ()
 
 getDec :: Name -> Q Dec
 getDec cmdName = do
     cmdType <- reify cmdName
-    let errMsg = error "Type must be GADT with one parameter (return type)"
+    let errMsg = error "Must be GADT with one parameter, representing return type."
     case cmdType of
         TyConI dec       -> pure dec
         ClassI _ _       -> errMsg
@@ -72,6 +40,7 @@ getDec cmdName = do
 
 data Endpoint = Endpoint
     { epName :: String
+    , epTypeAliasName :: String
     , epArgs :: [Type]
     , epReturn :: Type
     } deriving Show
@@ -93,48 +62,41 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
         (x , '.' : rest) -> Just (x, rest)
         (x , rest      ) -> Just (x, rest)
 
-getParameters :: Con -> Q Endpoint
-getParameters = \case
-    GadtC [name] bangArgs retType -> pure Endpoint { epName = show $ unqualifiedName name
-                                                   , epArgs = fmap snd bangArgs
-                                                   , epReturn = retType
-                                                   }
-    _ -> error "That's dog shit" -- FIXME: Write nice error messages!
+toEndpoint :: Con -> Q Endpoint
+toEndpoint = \case
+    GadtC [name] bangArgs retType -> do
+        let baseName = show $ unqualifiedName name
+        pure Endpoint { epName          = baseName
+                      , epTypeAliasName = "Ep" <> baseName
+                      , epArgs          = fmap snd bangArgs
+                      , epReturn        = retType
+                      }
+    _ -> error "Expected a GATD constructor representing an endpoint"
 
+-- | Create the type aliases representing the endpoints
+mkEndpointDecs :: Name -> Q [Dec]
+mkEndpointDecs =
+    traverse mkEndpointDec <=< traverse toEndpoint <=< getConstructors <=< getDec
 
-mkEndpoints :: Name -> Q [Dec]
-mkEndpoints =
-    traverse mkEndpoint <=< traverse getParameters <=< getConstructors <=< getDec
--- runQ $ [d| type EP = "endpoint" :> Get '[JSON] Int |]
---
--- [ TySynD
---     EP_0
---     []
---     (AppT
---        (AppT (ConT Servant.API.Sub.:>) (LitT (StrTyLit "endpoint")))
---        (AppT
---           (AppT
---              (ConT Servant.API.Verbs.Get)
---              (AppT
---                 (AppT PromotedConsT (ConT Servant.API.ContentTypes.JSON))
---                 PromotedNilT))
---           (ConT GHC.Types.Int)))
--- ]
+getEndpoints :: Name -> Q [Endpoint]
+getEndpoints = traverse toEndpoint <=< getConstructors <=< getDec
 
--- | The name of the type alias representing the endpoint
-epTypeName :: Endpoint -> Name
-epTypeName = mkName . mappend "Ep" . epName
+-- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
+-- and a type `Api` that represents the full API.
+mkApiDec :: Name -> Q [Dec]
+mkApiDec name = do
+    endpoints    <- getEndpoints name
+    endpointDecs <- traverse mkEndpointDec endpoints
+    serverDec    <- TySynD (mkName "Api") [] <$> mkApiType endpoints
+    pure $ serverDec : endpointDecs
 
---runQ [t| "BuyBook" :> Post '[JSON] NoContent |]
---AppT
---  (AppT (ConT Servant.API.Sub.:>) (LitT (StrTyLit "BuyBook")))
---  (AppT
---     (AppT
---        (ConT Servant.API.Verbs.Post)
---        (AppT
---           (AppT PromotedConsT (ConT Servant.API.ContentTypes.JSON))
---           PromotedNilT))
---     (ConT Servant.API.ContentTypes.NoContent))
+mkApiType :: [Endpoint] -> Q Type
+mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
+    []     -> error "Server has no endpoints"
+    x : xs -> do
+        let f :: Type -> Name -> Q Type
+            f b a = appT (appT [t| (:<|>) |] (pure $ ConT a)) (pure b)
+        foldM f (ConT x) xs
 
 mkReqBody :: [Type] -> Q Type
 mkReqBody = \case
@@ -173,5 +135,5 @@ epType e = appT (appT bird nameAndBody) reqReturn
     bird = [t| (:>) |]
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpoint :: Endpoint -> Q Dec
-mkEndpoint e = tySynD (epTypeName e) [] (epType e)
+mkEndpointDec :: Endpoint -> Q Dec
+mkEndpointDec e = tySynD (mkName $ epTypeAliasName e) [] (epType e)
