@@ -5,6 +5,7 @@ import           DomainDriven.Internal.Class
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
+import           Data.List                      ( unfoldr )
 import           Servant
 
 -- The first goal is to generate a server from a `CmdHandler model event cmd err`. Later
@@ -70,7 +71,7 @@ getDec cmdName = do
 
 
 data Endpoint = Endpoint
-    { epName :: Name
+    { epName :: String
     , epArgs :: [Type]
     , epReturn :: Type
     } deriving Show
@@ -81,10 +82,23 @@ getConstructors = \case
     DataD _ _ _ _ _ _ -> error "bad data type"
     _ -> error "Expected a GADT"
 
+unqualifiedName :: Name -> Name
+unqualifiedName name = case reverse $ unfoldr f (show name) of
+    a : _ -> mkName a
+    _     -> name
+  where
+    f :: String -> Maybe (String, String)
+    f s = case span (/= '.') s of
+        ("", _         ) -> Nothing
+        (x , '.' : rest) -> Just (x, rest)
+        (x , rest      ) -> Just (x, rest)
+
 getParameters :: Con -> Q Endpoint
 getParameters = \case
-    GadtC [name] bangArgs retType ->
-        pure Endpoint { epName = name, epArgs = fmap snd bangArgs, epReturn = retType }
+    GadtC [name] bangArgs retType -> pure Endpoint { epName = show $ unqualifiedName name
+                                                   , epArgs = fmap snd bangArgs
+                                                   , epReturn = retType
+                                                   }
     _ -> error "That's dog shit" -- FIXME: Write nice error messages!
 
 
@@ -109,7 +123,7 @@ mkEndpoints =
 
 -- | The name of the type alias representing the endpoint
 epTypeName :: Endpoint -> Name
-epTypeName = mkName . mappend "Ep" . show . epName
+epTypeName = mkName . mappend "Ep" . epName
 
 --runQ [t| "BuyBook" :> Post '[JSON] NoContent |]
 --AppT
@@ -137,10 +151,15 @@ mkReqBody = \case
 -- | Define the servant endpoint type. E.g.
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
 epType :: Endpoint -> Q Type
-epType e = appT (appT (appT bird (pure cmdName)) reqBody) reqReturn
+epType e = appT (appT bird nameAndBody) reqReturn
   where
+    -- "Something" :> ReqBody '[JSON] Something
+    nameAndBody :: Q Type
+    nameAndBody = appT (appT bird (pure cmdName)) reqBody
+
+
     cmdName :: Type
-    cmdName = LitT (StrTyLit . show $ epName e)
+    cmdName = LitT . StrTyLit $ epName e
 
     reqBody :: Q Type
     reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ epArgs e)

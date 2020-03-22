@@ -1,3 +1,5 @@
+module Spec where
+
 import           RIO
 import qualified RIO.List                                     as L
 import           DomainDriven
