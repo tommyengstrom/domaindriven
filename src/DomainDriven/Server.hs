@@ -7,7 +7,8 @@ import           Language.Haskell.TH
 import           Control.Monad
 import           Data.List                      ( unfoldr )
 import           Servant
-
+import           Debug.Trace
+import           Data.Char
 -- The first goal is to generate a server from a `CmdHandler model event cmd err`. Later
 -- on I will refactor queris to alsu use a GADT and follow the same pattern.
 --
@@ -19,7 +20,7 @@ import           Servant
 --
 --
 data StoreCmd a where
-    AddToCart    ::String -> Int -> StoreCmd ()
+    AddToCart    ::String -> Int -> StoreCmd [Int]
     RemoveFromCart ::String -> StoreCmd ()
 
 getDec :: Name -> Q Dec
@@ -45,6 +46,7 @@ data Endpoint = Endpoint
     , epReturn :: Type
     } deriving Show
 
+-- | Turn "ModuleA.ModuleB.Name" into "Name"
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
     DataD _ _ [KindedTV _ StarT] _ constructors _ -> pure constructors
@@ -64,7 +66,7 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
 
 toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
-    GadtC [name] bangArgs retType -> do
+    GadtC [name] bangArgs (AppT _ retType) -> do
         let baseName = show $ unqualifiedName name
         pure Endpoint { epName          = baseName
                       , epTypeAliasName = "Ep" <> baseName
@@ -85,10 +87,11 @@ getEndpoints = traverse toEndpoint <=< getConstructors <=< getDec
 -- and a type `Api` that represents the full API.
 mkApiDec :: Name -> Q [Dec]
 mkApiDec name = do
-    endpoints    <- getEndpoints name
-    endpointDecs <- traverse mkEndpointDec endpoints
-    serverDec    <- TySynD (mkName "Api") [] <$> mkApiType endpoints
-    pure $ serverDec : endpointDecs
+    endpoints     <- getEndpoints name
+    endpointDecs  <- traverse mkEndpointDec endpoints
+    serverTypeDec <- TySynD (mkName "Api") [] <$> mkApiType endpoints
+    handlers      <- mconcat <$> traverse (mkApiHandlerDec name) endpoints
+    pure $ serverTypeDec : endpointDecs <> handlers
 
 mkApiType :: [Endpoint] -> Q Type
 mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
@@ -137,3 +140,48 @@ epType e = appT (appT bird nameAndBody) reqReturn
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q Dec
 mkEndpointDec e = tySynD (mkName $ epTypeAliasName e) [] (epType e)
+
+
+lowerFirst :: String -> String
+lowerFirst = \case
+    c : cs -> toLower c : cs
+    []     -> []
+
+-- | Generate a handler for the endpoint
+-- Constructor `AddToCart :: String -> Int -> StoreCmd ()` will result in:
+
+appMany :: Type -> [Type] -> Type
+appMany t args = foldl AppT t args
+
+--a `addToCart :: (String, Int) -> Handler ()`
+
+type CmdGADT = Name
+mkApiHandlerDec :: CmdGADT -> Endpoint -> Q [Dec]
+mkApiHandlerDec cmdType e = do
+    traceShowM e
+    let handlerName = mkName . lowerFirst $ epName e :: Name
+    cmdRunnerVar   <- newName "cmdRunner"
+    cmdRunnerType  <- [t| CmdRunner $(pure $ ConT cmdType) |]
+    varNames       <- traverse (\_ -> newName "arg") $ epArgs e
+    handlerRetType <- appT [t| Handler |] (pure $ epReturn e)
+    let varPat = TupP $ fmap VarP varNames
+        nrArgs = length $ epArgs e
+        funSig =
+            SigD (mkName $ lowerFirst $ epName e)
+                . AppT (AppT ArrowT cmdRunnerType)
+                $ case epArgs e of
+                      []  -> handlerRetType
+                      [a] -> AppT (AppT ArrowT a) handlerRetType
+                      as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
+                                  handlerRetType
+
+    funClause <- clause [pure (VarP cmdRunnerVar), pure $ varPat]
+                        (normalB [| undefined |])
+                        []
+    let funDef = FunD handlerName [funClause]
+
+    pure [funSig, funDef]
+
+-- [ SigD apa_27 (AppT (AppT ArrowT (ConT GHC.Types.Int)) (ConT GHC.Base.String))
+-- , FunD apa_27 [Clause [WildP] (NormalB (LitE (StringL "hej"))) []]
+-- ]
