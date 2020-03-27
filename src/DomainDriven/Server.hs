@@ -1,5 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
-module DomainDriven.Server where
+module DomainDriven.Server
+    ( module DomainDriven.Server
+    , liftIO
+    )
+where
 
 import           DomainDriven.Internal.Class
 import           Prelude
@@ -9,6 +13,7 @@ import           Data.List                      ( unfoldr )
 import           Servant
 import           Debug.Trace
 import           Data.Char
+import           Control.Monad.Trans
 -- The first goal is to generate a server from a `CmdHandler model event cmd err`. Later
 -- on I will refactor queris to alsu use a GADT and follow the same pattern.
 --
@@ -41,6 +46,7 @@ getDec cmdName = do
 
 data Endpoint = Endpoint
     { epName :: String
+    , constructorName :: Name
     , epTypeAliasName :: String
     , epArgs :: [Type]
     , epReturn :: Type
@@ -69,6 +75,7 @@ toEndpoint = \case
     GadtC [name] bangArgs (AppT _ retType) -> do
         let baseName = show $ unqualifiedName name
         pure Endpoint { epName          = baseName
+                      , constructorName = name
                       , epTypeAliasName = "Ep" <> baseName
                       , epArgs          = fmap snd bangArgs
                       , epReturn        = retType
@@ -160,7 +167,7 @@ mkApiHandlerDec :: CmdGADT -> Endpoint -> Q [Dec]
 mkApiHandlerDec cmdType e = do
     traceShowM e
     let handlerName = mkName . lowerFirst $ epName e :: Name
-    cmdRunnerVar   <- newName "cmdRunner"
+        cmdRunner   = mkName "cmdRunner"
     cmdRunnerType  <- [t| CmdRunner $(pure $ ConT cmdType) |]
     varNames       <- traverse (\_ -> newName "arg") $ epArgs e
     handlerRetType <- appT [t| Handler |] (pure $ epReturn e)
@@ -175,8 +182,10 @@ mkApiHandlerDec cmdType e = do
                       as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
                                   handlerRetType
 
-    funClause <- clause [pure (VarP cmdRunnerVar), pure $ varPat]
-                        (normalB [| undefined |])
+        gadtExp = AppE (VarE cmdRunner)
+            $ foldl AppE (ConE (constructorName e)) (fmap VarE varNames)
+    funClause <- clause [pure (VarP cmdRunner), pure $ varPat]
+                        (normalB [| liftIO $ $(pure $ gadtExp)  |])
                         []
     let funDef = FunD handlerName [funClause]
 
