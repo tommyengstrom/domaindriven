@@ -103,7 +103,8 @@ mkApiDec name = do
     endpointDecs  <- traverse mkEndpointDec endpoints
     serverTypeDec <- TySynD (mkName "Api") [] <$> mkApiType endpoints
     handlers      <- mconcat <$> traverse (mkApiHandlerDec name) endpoints
-    pure $ serverTypeDec : endpointDecs <> handlers
+    server        <- mkFullServer endpoints
+    pure $ serverTypeDec : server : endpointDecs <> handlers
 
 mkApiType :: [Endpoint] -> Q Type
 mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
@@ -168,6 +169,7 @@ appMany t args = foldl AppT t args
 --a `addToCart :: (String, Int) -> Handler ()`
 
 type CmdGADT = Name
+
 mkApiHandlerDec :: CmdGADT -> Endpoint -> Q [Dec]
 mkApiHandlerDec cmdType e = do
     traceShowM e
@@ -197,9 +199,13 @@ mkApiHandlerDec cmdType e = do
                         (normalB [| liftIO $ $(funBody)  |])
                         []
     let funDef = FunD handlerName [funClause]
-
     pure [funSig, funDef]
 
--- [ SigD apa_27 (AppT (AppT ArrowT (ConT GHC.Types.Int)) (ConT GHC.Base.String))
--- , FunD apa_27 [Clause [WildP] (NormalB (LitE (StringL "hej"))) []]
--- ]
+
+-- This must pass the first argument (CmdRunner a) to each handler!
+mkFullServer :: [Endpoint] -> Q Dec
+mkFullServer endpoints = do
+    b <- case VarE . mkName . lowerFirst . epName <$> endpoints of
+        []     -> error "Server contains no endpoints"
+        e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+    pure $ FunD (mkName "server") [Clause [] (NormalB b) []]
