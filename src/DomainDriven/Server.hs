@@ -47,7 +47,6 @@ getDec cmdName = do
 data Endpoint = Endpoint
     { epName :: String
     , epTypeAliasName :: String
-    , epReturn :: Type
     , constructorName :: Name
     , constructorArgs :: [Type]
     , constructorReturn :: Type
@@ -75,15 +74,18 @@ toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
     GadtC [name] bangArgs (AppT _ retType) -> do
         let baseName = show $ unqualifiedName name
-        epRet <- if retType == TupleT 0 then [t| NoContent |] else pure retType
         pure Endpoint { epName            = baseName
                       , constructorName   = name
                       , epTypeAliasName   = "Ep" <> baseName
                       , constructorArgs   = fmap snd bangArgs
                       , constructorReturn = retType
-                      , epReturn          = epRet
                       }
     _ -> error "Expected a GATD constructor representing an endpoint"
+
+epReturnType :: Type -> Q Type
+epReturnType = \case
+    TupleT 0 -> [t| NoContent |]
+    t        -> pure t
 
 -- | Create the type aliases representing the endpoints
 mkEndpointDecs :: Name -> Q [Dec]
@@ -173,7 +175,7 @@ mkApiHandlerDec cmdType e = do
         cmdRunner   = mkName "cmdRunner"
     cmdRunnerType  <- [t| CmdRunner $(pure $ ConT cmdType) |]
     varNames       <- traverse (\_ -> newName "arg") $ constructorArgs e
-    handlerRetType <- appT [t| Handler |] (pure $ constructorReturn e)
+    handlerRetType <- appT [t| Handler |] (epReturnType $ constructorReturn e)
     let varPat = TupP $ fmap VarP varNames
         nrArgs = length $ constructorArgs e
         funSig =
@@ -185,10 +187,14 @@ mkApiHandlerDec cmdType e = do
                       as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
                                   handlerRetType
 
-        gadtExp = AppE (VarE cmdRunner)
+        funBodyBase = AppE (VarE cmdRunner)
             $ foldl AppE (ConE (constructorName e)) (fmap VarE varNames)
+
+        funBody = case constructorReturn e of
+            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+            _        -> pure funBodyBase
     funClause <- clause [pure (VarP cmdRunner), pure $ varPat]
-                        (normalB [| liftIO $ $(pure $ gadtExp)  |])
+                        (normalB [| liftIO $ $(funBody)  |])
                         []
     let funDef = FunD handlerName [funClause]
 
