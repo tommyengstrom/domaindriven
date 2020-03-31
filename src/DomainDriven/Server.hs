@@ -46,10 +46,11 @@ getDec cmdName = do
 
 data Endpoint = Endpoint
     { epName :: String
-    , constructorName :: Name
     , epTypeAliasName :: String
-    , epArgs :: [Type]
     , epReturn :: Type
+    , constructorName :: Name
+    , constructorArgs :: [Type]
+    , constructorReturn :: Type
     } deriving Show
 
 -- | Turn "ModuleA.ModuleB.Name" into "Name"
@@ -74,11 +75,13 @@ toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
     GadtC [name] bangArgs (AppT _ retType) -> do
         let baseName = show $ unqualifiedName name
-        pure Endpoint { epName          = baseName
-                      , constructorName = name
-                      , epTypeAliasName = "Ep" <> baseName
-                      , epArgs          = fmap snd bangArgs
-                      , epReturn        = retType
+        epRet <- if retType == TupleT 0 then [t| NoContent |] else pure retType
+        pure Endpoint { epName            = baseName
+                      , constructorName   = name
+                      , epTypeAliasName   = "Ep" <> baseName
+                      , constructorArgs   = fmap snd bangArgs
+                      , constructorReturn = retType
+                      , epReturn          = epRet
                       }
     _ -> error "Expected a GATD constructor representing an endpoint"
 
@@ -134,10 +137,10 @@ epType e = appT (appT bird nameAndBody) reqReturn
     cmdName = LitT . StrTyLit $ epName e
 
     reqBody :: Q Type
-    reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ epArgs e)
+    reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ constructorArgs e)
 
     reqReturn :: Q Type
-    reqReturn = appT [t| Post '[JSON] |] (pure $ epReturn e)
+    reqReturn = appT [t| Post '[JSON] |] (pure $ constructorReturn e)
 
 
     -- The bird operator, aka :>
@@ -169,14 +172,14 @@ mkApiHandlerDec cmdType e = do
     let handlerName = mkName . lowerFirst $ epName e :: Name
         cmdRunner   = mkName "cmdRunner"
     cmdRunnerType  <- [t| CmdRunner $(pure $ ConT cmdType) |]
-    varNames       <- traverse (\_ -> newName "arg") $ epArgs e
-    handlerRetType <- appT [t| Handler |] (pure $ epReturn e)
+    varNames       <- traverse (\_ -> newName "arg") $ constructorArgs e
+    handlerRetType <- appT [t| Handler |] (pure $ constructorReturn e)
     let varPat = TupP $ fmap VarP varNames
-        nrArgs = length $ epArgs e
+        nrArgs = length $ constructorArgs e
         funSig =
             SigD (mkName $ lowerFirst $ epName e)
                 . AppT (AppT ArrowT cmdRunnerType)
-                $ case epArgs e of
+                $ case constructorArgs e of
                       []  -> handlerRetType
                       [a] -> AppT (AppT ArrowT a) handlerRetType
                       as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
