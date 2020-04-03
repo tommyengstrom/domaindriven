@@ -25,8 +25,8 @@ import           Control.Monad.Trans
 --
 --
 data StoreCmd a where
-    AddToCart    ::String -> Int -> StoreCmd [Int]
-    RemoveFromCart ::String -> StoreCmd ()
+    AddToCart    ::Int -> StoreCmd String
+    RemoveFromCart ::String -> StoreCmd Int
 
 getDec :: Name -> Q Dec
 getDec cmdName = do
@@ -99,12 +99,11 @@ getEndpoints = traverse toEndpoint <=< getConstructors <=< getDec
 -- and a type `Api` that represents the full API.
 mkApiDec :: Name -> Q [Dec]
 mkApiDec name = do
-    endpoints     <- getEndpoints name
-    endpointDecs  <- traverse mkEndpointDec endpoints
-    serverTypeDec <- TySynD (mkName "Api") [] <$> mkApiType endpoints
-    handlers      <- mconcat <$> traverse (mkApiHandlerDec name) endpoints
-    server        <- mkFullServer endpoints
-    pure $ serverTypeDec : server : endpointDecs <> handlers
+    endpoints    <- getEndpoints name
+    endpointDecs <- traverse mkEndpointDec endpoints
+    handlers     <- mconcat <$> traverse (mkApiHandlerDec name) endpoints
+    server       <- mkFullServer name endpoints
+    pure $ endpointDecs <> handlers <> server
 
 mkApiType :: [Endpoint] -> Q Type
 mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
@@ -129,13 +128,8 @@ mkReqBody = \case
 -- | Define the servant endpoint type. E.g.
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
 epType :: Endpoint -> Q Type
-epType e = appT (appT bird nameAndBody) reqReturn
+epType e = [t| $(pure cmdName) :> $(reqBody) :> $(reqReturn) |]
   where
-    -- "Something" :> ReqBody '[JSON] Something
-    nameAndBody :: Q Type
-    nameAndBody = appT (appT bird (pure cmdName)) reqBody
-
-
     cmdName :: Type
     cmdName = LitT . StrTyLit $ epName e
 
@@ -144,11 +138,6 @@ epType e = appT (appT bird nameAndBody) reqReturn
 
     reqReturn :: Q Type
     reqReturn = appT [t| Post '[JSON] |] (pure $ constructorReturn e)
-
-
-    -- The bird operator, aka :>
-    bird :: Q Type
-    bird = [t| (:>) |]
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q Dec
@@ -203,9 +192,20 @@ mkApiHandlerDec cmdType e = do
 
 
 -- This must pass the first argument (CmdRunner a) to each handler!
-mkFullServer :: [Endpoint] -> Q Dec
-mkFullServer endpoints = do
-    b <- case VarE . mkName . lowerFirst . epName <$> endpoints of
+mkFullServer :: CmdGADT -> [Endpoint] -> Q [Dec]
+mkFullServer cmdType endpoints = do
+    let cmdRunner = mkName "cmdRunner"
+    cmdRunnerType <- [t| CmdRunner $(pure $ ConT cmdType) |]
+    let epToVarE e = AppE (VarE . mkName . lowerFirst $ epName e) (VarE cmdRunner)
+    b <- case epToVarE <$> endpoints of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-    pure $ FunD (mkName "server") [Clause [] (NormalB b) []]
+    serverType <- mkApiType endpoints
+    let apiDec     = TySynD (mkName "Api") [] serverType
+    let serverName = mkName "server"
+    serverTypeDec <-
+        SigD serverName
+        .   AppT (AppT ArrowT cmdRunnerType)
+        <$> [t| Server $(pure $ ConT $ mkName "Api") |]
+    let funDec = FunD serverName [Clause [VarP cmdRunner] (NormalB b) []]
+    pure [apiDec, serverTypeDec, funDec]
