@@ -26,7 +26,7 @@ import           Control.Monad.Trans
 --
 data StoreCmd a where
     AddToCart    ::Int -> StoreCmd String
-    RemoveFromCart ::String -> StoreCmd Int
+    RemoveFromCart ::String -> StoreCmd ()
 
 getDec :: Name -> Q Dec
 getDec cmdName = do
@@ -110,7 +110,7 @@ mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
     []     -> error "Server has no endpoints"
     x : xs -> do
         let f :: Type -> Name -> Q Type
-            f b a = appT (appT [t| (:<|>) |] (pure $ ConT a)) (pure b)
+            f b a = [t| $(pure $ ConT a) :<|> $(pure b) |]
         foldM f (ConT x) xs
 
 mkReqBody :: [Type] -> Q Type
@@ -137,7 +137,7 @@ epType e = [t| $(pure cmdName) :> $(reqBody) :> $(reqReturn) |]
     reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ constructorArgs e)
 
     reqReturn :: Q Type
-    reqReturn = appT [t| Post '[JSON] |] (pure $ constructorReturn e)
+    reqReturn = appT [t| Post '[JSON] |] (epReturnType $ constructorReturn e)
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q Dec
