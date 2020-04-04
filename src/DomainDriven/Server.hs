@@ -24,12 +24,17 @@ import           Control.Monad.Trans
 -- * Ensure that error messages are easy to understand!
 --
 --
-data StoreCmd a where
-    AddToCart    ::Int -> StoreCmd String
-    RemoveFromCart ::String -> StoreCmd ()
 
-getDec :: Name -> Q Dec
-getDec cmdName = do
+data Endpoint = Endpoint
+    { epName :: String
+    , epTypeAliasName :: String
+    , constructorName :: Name
+    , constructorArgs :: [Type]
+    , constructorReturn :: Type
+    } deriving Show
+
+getCmdDec :: Name -> Q Dec
+getCmdDec cmdName = do
     cmdType <- reify cmdName
     let errMsg = error "Must be GADT with one parameter, representing return type."
     case cmdType of
@@ -43,14 +48,6 @@ getDec cmdName = do
         VarI _ _ _       -> errMsg
         TyVarI _ _       -> errMsg
 
-
-data Endpoint = Endpoint
-    { epName :: String
-    , epTypeAliasName :: String
-    , constructorName :: Name
-    , constructorArgs :: [Type]
-    , constructorReturn :: Type
-    } deriving Show
 
 -- | Turn "ModuleA.ModuleB.Name" into "Name"
 getConstructors :: Dec -> Q [Con]
@@ -90,10 +87,10 @@ epReturnType = \case
 -- | Create the type aliases representing the endpoints
 mkEndpointDecs :: Name -> Q [Dec]
 mkEndpointDecs =
-    traverse mkEndpointDec <=< traverse toEndpoint <=< getConstructors <=< getDec
+    traverse mkEndpointDec <=< traverse toEndpoint <=< getConstructors <=< getCmdDec
 
 getEndpoints :: Name -> Q [Endpoint]
-getEndpoints = traverse toEndpoint <=< getConstructors <=< getDec
+getEndpoints = traverse toEndpoint <=< getConstructors <=< getCmdDec
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
@@ -106,11 +103,11 @@ mkApiDec name = do
     pure $ endpointDecs <> handlers <> server
 
 mkApiType :: [Endpoint] -> Q Type
-mkApiType endpoints = case mkName . epTypeAliasName <$> reverse endpoints of
+mkApiType endpoints = case mkName . epTypeAliasName <$> endpoints of
     []     -> error "Server has no endpoints"
     x : xs -> do
         let f :: Type -> Name -> Q Type
-            f b a = [t| $(pure $ ConT a) :<|> $(pure b) |]
+            f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
         foldM f (ConT x) xs
 
 mkReqBody :: [Type] -> Q Type
@@ -197,7 +194,7 @@ mkFullServer cmdType endpoints = do
     let cmdRunner = mkName "cmdRunner"
     cmdRunnerType <- [t| CmdRunner $(pure $ ConT cmdType) |]
     let epToVarE e = AppE (VarE . mkName . lowerFirst $ epName e) (VarE cmdRunner)
-    b <- case epToVarE <$> endpoints of
+    body <- case epToVarE <$> endpoints of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
     serverType <- mkApiType endpoints
@@ -207,5 +204,5 @@ mkFullServer cmdType endpoints = do
         SigD serverName
         .   AppT (AppT ArrowT cmdRunnerType)
         <$> [t| Server $(pure $ ConT $ mkName "Api") |]
-    let funDec = FunD serverName [Clause [VarP cmdRunner] (NormalB b) []]
+    let funDec = FunD serverName [Clause [VarP cmdRunner] (NormalB body) []]
     pure [apiDec, serverTypeDec, funDec]
