@@ -18,7 +18,7 @@ newtype Price = Euros Int
 
 data StoreCmd a where
     AddToCart    ::ItemKey -> StoreCmd ()
-    CreateNewItem ::String -> StoreCmd ItemKey
+    CreateNewItem ::String -> Price -> StoreCmd ItemKey
     RemoveFromCart ::ItemKey -> StoreCmd ()
 
 data Item = Item
@@ -32,4 +32,4 @@ data StoreLookup a where
     Lookup ::ItemKey -> StoreLookup Item
 
 
-$(mkApiDec ''StoreCmd)
+$(mkServer ''StoreCmd)

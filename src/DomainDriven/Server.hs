@@ -25,12 +25,18 @@ import           Control.Monad.Trans
 --
 --
 
+data ServerSpec = ServerSpec
+    { gadtName :: Name -- ^ Name of the GADT representing the command
+    , endpoints :: [Endpoint] -- ^ Endpoints created from the constructors of the GADT
+    } deriving Show
+
 data Endpoint = Endpoint
-    { epName :: String
-    , epTypeAliasName :: String
-    , constructorName :: Name
+    { fullConstructorName :: Name
+    , shortConstructor :: String  -- ^ Name of the endpoint
+    , handlerName :: Name
     , constructorArgs :: [Type]
     , constructorReturn :: Type
+    , handlerReturn :: Type -- ^ Same as for constructor but with NoContent instead of ()
     } deriving Show
 
 getCmdDec :: Name -> Q Dec
@@ -49,13 +55,13 @@ getCmdDec cmdName = do
         TyVarI _ _       -> errMsg
 
 
--- | Turn "ModuleA.ModuleB.Name" into "Name"
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
     DataD _ _ [KindedTV _ StarT] _ constructors _ -> pure constructors
     DataD _ _ _ _ _ _ -> error "bad data type"
     _ -> error "Expected a GADT"
 
+-- | Turn "ModuleA.ModuleB.Name" into "Name"
 unqualifiedName :: Name -> Name
 unqualifiedName name = case reverse $ unfoldr f (show name) of
     a : _ -> mkName a
@@ -70,45 +76,57 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
 toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
     GadtC [name] bangArgs (AppT _ retType) -> do
-        let baseName = show $ unqualifiedName name
-        pure Endpoint { epName            = baseName
-                      , constructorName   = name
-                      , epTypeAliasName   = "Ep" <> baseName
-                      , constructorArgs   = fmap snd bangArgs
-                      , constructorReturn = retType
+        let shortName = show $ unqualifiedName name
+        hRetType <- unitToNoContent retType
+        pure Endpoint { fullConstructorName = name
+                      , shortConstructor    = shortName
+                      , handlerName         = mkName $ lowerFirst shortName
+                      , constructorArgs     = fmap snd bangArgs
+                      , constructorReturn   = retType
+                      , handlerReturn       = hRetType
                       }
     _ -> error "Expected a GATD constructor representing an endpoint"
 
-epReturnType :: Type -> Q Type
-epReturnType = \case
+unitToNoContent :: Type -> Q Type
+unitToNoContent = \case
     TupleT 0 -> [t| NoContent |]
     t        -> pure t
 
--- | Create the type aliases representing the endpoints
-mkEndpointDecs :: Name -> Q [Dec]
-mkEndpointDecs =
-    traverse mkEndpointDec <=< traverse toEndpoint <=< getConstructors <=< getCmdDec
-
-getEndpoints :: Name -> Q [Endpoint]
-getEndpoints = traverse toEndpoint <=< getConstructors <=< getCmdDec
+-- | Create a ServerSpec from a GADT
+-- The GADT must have one parameter representing the return type
+mkServerSpec :: Name -> Q ServerSpec
+mkServerSpec n = do
+    eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
+    pure ServerSpec { gadtName = n, endpoints = eps }
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
-mkApiDec :: Name -> Q [Dec]
-mkApiDec name = do
-    endpoints    <- getEndpoints name
-    endpointDecs <- traverse mkEndpointDec endpoints
-    handlers     <- mconcat <$> traverse (mkApiHandlerDec name) endpoints
-    server       <- mkFullServer name endpoints
+mkServer :: Name -> Q [Dec]
+mkServer name = do
+    serverSpec   <- mkServerSpec name
+    endpointDecs <- traverse mkEndpointDec $ endpoints serverSpec
+    handlers     <- mkHandlers serverSpec
+    server       <- mkFullServer serverSpec
     pure $ endpointDecs <> handlers <> server
 
 mkApiType :: [Endpoint] -> Q Type
-mkApiType endpoints = case mkName . epTypeAliasName <$> endpoints of
+mkApiType endpoints = case mkName . shortConstructor <$> endpoints of
     []     -> error "Server has no endpoints"
     x : xs -> do
         let f :: Type -> Name -> Q Type
             f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
         foldM f (ConT x) xs
+
+-- | Create a typealias for the API
+-- type Api = EpA :<|> EpB :<|> EpC ...
+mkApiDec :: ServerSpec -> Q Dec
+mkApiDec spec =
+    TySynD (mkName "Api") [] <$> case mkName . shortConstructor <$> endpoints spec of
+        []     -> error "Server has no endpoints"
+        x : xs -> do
+            let f :: Type -> Name -> Q Type
+                f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
+            foldM f (ConT x) xs
 
 mkReqBody :: [Type] -> Q Type
 mkReqBody = \case
@@ -128,17 +146,17 @@ epType :: Endpoint -> Q Type
 epType e = [t| $(pure cmdName) :> $(reqBody) :> $(reqReturn) |]
   where
     cmdName :: Type
-    cmdName = LitT . StrTyLit $ epName e
+    cmdName = LitT . StrTyLit $ shortConstructor e
 
     reqBody :: Q Type
     reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ constructorArgs e)
 
     reqReturn :: Q Type
-    reqReturn = appT [t| Post '[JSON] |] (epReturnType $ constructorReturn e)
+    reqReturn = [t| Post '[JSON] $(pure $ handlerReturn e) |]
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q Dec
-mkEndpointDec e = tySynD (mkName $ epTypeAliasName e) [] (epType e)
+mkEndpointDec e = tySynD (mkName $ shortConstructor e) [] (epType e)
 
 
 lowerFirst :: String -> String
@@ -154,55 +172,63 @@ appMany t args = foldl AppT t args
 
 --a `addToCart :: (String, Int) -> Handler ()`
 
-type CmdGADT = Name
+-- | Make command handlers for each endpoint
+mkHandlers :: ServerSpec -> Q [Dec]
+mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
+  where
+    cmdRunner :: Name
+    cmdRunner = mkName "cmdRunner"
 
-mkApiHandlerDec :: CmdGADT -> Endpoint -> Q [Dec]
-mkApiHandlerDec cmdType e = do
-    traceShowM e
-    let handlerName = mkName . lowerFirst $ epName e :: Name
-        cmdRunner   = mkName "cmdRunner"
-    cmdRunnerType  <- [t| CmdRunner $(pure $ ConT cmdType) |]
-    varNames       <- traverse (\_ -> newName "arg") $ constructorArgs e
-    handlerRetType <- appT [t| Handler |] (epReturnType $ constructorReturn e)
-    let varPat = TupP $ fmap VarP varNames
-        nrArgs = length $ constructorArgs e
-        funSig =
-            SigD (mkName $ lowerFirst $ epName e)
-                . AppT (AppT ArrowT cmdRunnerType)
-                $ case constructorArgs e of
-                      []  -> handlerRetType
-                      [a] -> AppT (AppT ArrowT a) handlerRetType
-                      as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
-                                  handlerRetType
+    mkHandler :: Endpoint -> Q [Dec]
+    mkHandler e = do
+        cmdRunnerType  <- [t| CmdRunner $(pure . ConT $ gadtName spec) |]
+        varNames       <- traverse (const $ newName "arg") $ constructorArgs e
+        handlerRetType <- [t| Handler $(pure $ handlerReturn e) |]
+        let varPat = TupP $ fmap VarP varNames
+            nrArgs = length $ constructorArgs e
+            funSig =
+                SigD (mkName $ lowerFirst $ shortConstructor e)
+                    . AppT (AppT ArrowT cmdRunnerType)
+                    $ case constructorArgs e of
+                          []  -> handlerRetType
+                          [a] -> AppT (AppT ArrowT a) handlerRetType
+                          as  -> AppT
+                              (AppT ArrowT (foldl AppT (TupleT (length as)) as))
+                              handlerRetType
 
-        funBodyBase = AppE (VarE cmdRunner)
-            $ foldl AppE (ConE (constructorName e)) (fmap VarE varNames)
+            funBodyBase = AppE (VarE cmdRunner)
+                $ foldl AppE (ConE (fullConstructorName e)) (fmap VarE varNames)
 
-        funBody = case constructorReturn e of
-            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
-            _        -> pure funBodyBase
-    funClause <- clause [pure (VarP cmdRunner), pure $ varPat]
-                        (normalB [| liftIO $ $(funBody)  |])
-                        []
-    let funDef = FunD handlerName [funClause]
-    pure [funSig, funDef]
+            funBody = case constructorReturn e of
+                TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                _        -> pure funBodyBase
+        funClause <- clause [pure (VarP cmdRunner), pure $ varPat]
+                            (normalB [| liftIO $ $(funBody)  |])
+                            []
+        let funDef = FunD (handlerName e) [funClause]
+        pure [funSig, funDef]
 
+-- | The type of the CmdRunner used to execute commands
+cmdRunnerType :: ServerSpec -> Q Type
+cmdRunnerType spec = [t| CmdRunner $(pure . ConT $ gadtName spec) |]
 
 -- This must pass the first argument (CmdRunner a) to each handler!
-mkFullServer :: CmdGADT -> [Endpoint] -> Q [Dec]
-mkFullServer cmdType endpoints = do
+mkFullServer :: ServerSpec -> Q [Dec]
+mkFullServer spec = do
+    cmdRunnerT <- cmdRunnerType spec
     let cmdRunner = mkName "cmdRunner"
-    cmdRunnerType <- [t| CmdRunner $(pure $ ConT cmdType) |]
-    let epToVarE e = AppE (VarE . mkName . lowerFirst $ epName e) (VarE cmdRunner)
-    body <- case epToVarE <$> endpoints of
+
+        handlerExp :: Endpoint -> Exp
+        handlerExp e = VarE (handlerName e) `AppE` VarE cmdRunner
+
+    body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-    serverType <- mkApiType endpoints
-    let apiDec     = TySynD (mkName "Api") [] serverType
+    apiDec <- mkApiDec spec
     let serverName = mkName "server"
     serverTypeDec <-
         SigD serverName
-        .   AppT (AppT ArrowT cmdRunnerType)
+        .   AppT (AppT ArrowT cmdRunnerT)
         <$> [t| Server $(pure $ ConT $ mkName "Api") |]
     let funDec = FunD serverName [Clause [VarP cmdRunner] (NormalB body) []]
     pure [apiDec, serverTypeDec, funDec]
