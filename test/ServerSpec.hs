@@ -6,7 +6,7 @@ import           Language.Haskell.TH
 import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
-import           GHC.Generics
+import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Aeson
 

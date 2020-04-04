@@ -27,6 +27,8 @@ import           Control.Monad.Trans
 
 data ServerSpec = ServerSpec
     { gadtName :: Name -- ^ Name of the GADT representing the command
+    , apiName :: Name
+    , serverName :: Name
     , endpoints :: [Endpoint] -- ^ Endpoints created from the constructors of the GADT
     } deriving Show
 
@@ -87,6 +89,12 @@ toEndpoint = \case
                       }
     _ -> error "Expected a GATD constructor representing an endpoint"
 
+-- | Turn "OhYEAH" into "ohYEAH"...
+lowerFirst :: String -> String
+lowerFirst = \case
+    c : cs -> toLower c : cs
+    []     -> []
+
 unitToNoContent :: Type -> Q Type
 unitToNoContent = \case
     TupleT 0 -> [t| NoContent |]
@@ -97,7 +105,11 @@ unitToNoContent = \case
 mkServerSpec :: Name -> Q ServerSpec
 mkServerSpec n = do
     eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
-    pure ServerSpec { gadtName = n, endpoints = eps }
+    pure ServerSpec { gadtName   = n
+                    , apiName    = mkName "Api"
+                    , serverName = mkName "server"
+                    , endpoints  = eps
+                    }
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
@@ -121,23 +133,29 @@ mkApiType endpoints = case mkName . shortConstructor <$> endpoints of
 -- type Api = EpA :<|> EpB :<|> EpC ...
 mkApiDec :: ServerSpec -> Q Dec
 mkApiDec spec =
-    TySynD (mkName "Api") [] <$> case mkName . shortConstructor <$> endpoints spec of
+    TySynD (apiName spec) [] <$> case mkName . shortConstructor <$> endpoints spec of
         []     -> error "Server has no endpoints"
         x : xs -> do
             let f :: Type -> Name -> Q Type
                 f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
             foldM f (ConT x) xs
 
-mkReqBody :: [Type] -> Q Type
-mkReqBody = \case
-    []     -> error "Empty list cannot be turned into a tuple"
-    a : [] -> pure a
-    ts     -> pure $ appAll (TupleT $ length ts) ts
+-- | Create a request body by turning multiple arguments into a tuple
+-- `BuyThing ItemKey Quantity` yields `ReqBody '[JSON] (ItemKey, Quantity)`
+toReqBody :: [Type] -> Q Type
+toReqBody args = do
+    [t| ReqBody '[JSON] $(mkBody) |]
   where
     appAll :: Type -> [Type] -> Type
     appAll t = \case
         []     -> t
         x : xs -> appAll (AppT t x) xs
+
+    mkBody :: Q Type
+    mkBody = case args of
+        []     -> error "Empty list cannot be turned into a tuple"
+        a : [] -> pure a
+        ts     -> pure $ appAll (TupleT $ length ts) ts
 
 
 -- | Define the servant endpoint type. E.g.
@@ -149,7 +167,7 @@ epType e = [t| $(pure cmdName) :> $(reqBody) :> $(reqReturn) |]
     cmdName = LitT . StrTyLit $ shortConstructor e
 
     reqBody :: Q Type
-    reqBody = appT [t| ReqBody '[JSON] |] (mkReqBody $ constructorArgs e)
+    reqBody = toReqBody $ constructorArgs e
 
     reqReturn :: Q Type
     reqReturn = [t| Post '[JSON] $(pure $ handlerReturn e) |]
@@ -159,18 +177,6 @@ mkEndpointDec :: Endpoint -> Q Dec
 mkEndpointDec e = tySynD (mkName $ shortConstructor e) [] (epType e)
 
 
-lowerFirst :: String -> String
-lowerFirst = \case
-    c : cs -> toLower c : cs
-    []     -> []
-
--- | Generate a handler for the endpoint
--- Constructor `AddToCart :: String -> Int -> StoreCmd ()` will result in:
-
-appMany :: Type -> [Type] -> Type
-appMany t args = foldl AppT t args
-
---a `addToCart :: (String, Int) -> Handler ()`
 
 -- | Make command handlers for each endpoint
 mkHandlers :: ServerSpec -> Q [Dec]
@@ -187,7 +193,7 @@ mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
         let varPat = TupP $ fmap VarP varNames
             nrArgs = length $ constructorArgs e
             funSig =
-                SigD (mkName $ lowerFirst $ shortConstructor e)
+                SigD (handlerName e)
                     . AppT (AppT ArrowT cmdRunnerType)
                     $ case constructorArgs e of
                           []  -> handlerRetType
@@ -212,7 +218,8 @@ mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
 cmdRunnerType :: ServerSpec -> Q Type
 cmdRunnerType spec = [t| CmdRunner $(pure . ConT $ gadtName spec) |]
 
--- This must pass the first argument (CmdRunner a) to each handler!
+-- | Create the full server and api dec
+-- Assumes the handlers have already been created (using `mkHandlers`)
 mkFullServer :: ServerSpec -> Q [Dec]
 mkFullServer spec = do
     cmdRunnerT <- cmdRunnerType spec
@@ -224,11 +231,10 @@ mkFullServer spec = do
     body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-    apiDec <- mkApiDec spec
-    let serverName = mkName "server"
+    apiDec        <- mkApiDec spec
     serverTypeDec <-
-        SigD serverName
+        SigD (serverName spec)
         .   AppT (AppT ArrowT cmdRunnerT)
-        <$> [t| Server $(pure $ ConT $ mkName "Api") |]
-    let funDec = FunD serverName [Clause [VarP cmdRunner] (NormalB body) []]
+        <$> [t| Server $(pure $ ConT $ apiName spec) |]
+    let funDec = FunD (serverName spec) [Clause [VarP cmdRunner] (NormalB body) []]
     pure [apiDec, serverTypeDec, funDec]
