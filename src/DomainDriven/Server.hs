@@ -11,7 +11,6 @@ import           Language.Haskell.TH
 import           Control.Monad
 import           Data.List                      ( unfoldr )
 import           Servant
-import           Debug.Trace
 import           Data.Char
 import           Control.Monad.Trans
 -- The first goal is to generate a server from a `CmdHandler model event cmd err`. Later
@@ -142,31 +141,36 @@ mkApiDec spec =
 
 -- | Create a request body by turning multiple arguments into a tuple
 -- `BuyThing ItemKey Quantity` yields `ReqBody '[JSON] (ItemKey, Quantity)`
-toReqBody :: [Type] -> Q Type
-toReqBody args = do
-    [t| ReqBody '[JSON] $(mkBody) |]
+toReqBody :: [Type] -> Q (Maybe Type)
+toReqBody args = mkBody
+    >>= maybe (pure Nothing) (\b -> fmap Just [t| ReqBody '[JSON] $(pure b) |])
   where
     appAll :: Type -> [Type] -> Type
     appAll t = \case
         []     -> t
         x : xs -> appAll (AppT t x) xs
 
-    mkBody :: Q Type
+    mkBody :: Q (Maybe Type)
     mkBody = case args of
-        []     -> error "Empty list cannot be turned into a tuple"
-        a : [] -> pure a
-        ts     -> pure $ appAll (TupleT $ length ts) ts
+        []     -> pure Nothing
+        a : [] -> pure $ Just a
+        ts     -> pure . Just $ appAll (TupleT $ length ts) ts
 
 
 -- | Define the servant endpoint type. E.g.
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
 epType :: Endpoint -> Q Type
-epType e = [t| $(pure cmdName) :> $(reqBody) :> $(reqReturn) |]
+epType e = [t| $(pure cmdName) :> $middle |]
   where
     cmdName :: Type
     cmdName = LitT . StrTyLit $ shortConstructor e
 
-    reqBody :: Q Type
+    middle :: Q Type
+    middle = reqBody >>= \case
+        Nothing -> reqReturn
+        Just b  -> [t| $(pure b) :>  $reqReturn |]
+
+    reqBody :: Q (Maybe Type)
     reqBody = toReqBody $ constructorArgs e
 
     reqReturn :: Q Type
@@ -208,9 +212,11 @@ mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
             funBody = case constructorReturn e of
                 TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
                 _        -> pure funBodyBase
-        funClause <- clause [pure (VarP cmdRunner), pure $ varPat]
-                            (normalB [| liftIO $ $(funBody)  |])
-                            []
+        funClause <- clause
+            (pure (VarP cmdRunner) : (if length varNames > 0 then [pure $ varPat] else [])
+            )
+            (normalB [| liftIO $ $(funBody)  |])
+            []
         let funDef = FunD (handlerName e) [funClause]
         pure [funSig, funDef]
 

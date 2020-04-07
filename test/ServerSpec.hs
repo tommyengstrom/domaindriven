@@ -20,6 +20,11 @@ data StoreCmd a where
     AddToCart    ::ItemKey -> StoreCmd ()
     CreateNewItem ::String -> Price -> StoreCmd ItemKey
     RemoveFromCart ::ItemKey -> StoreCmd ()
+    Poke ::StoreCmd ()
+
+data SubCmd a where
+    SubOp1 ::SubCmd ()
+    SubOp2 ::Int -> String -> SubCmd Int
 
 data Item = Item
     { key :: ItemKey
