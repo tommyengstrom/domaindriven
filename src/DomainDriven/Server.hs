@@ -10,6 +10,7 @@ import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
 import           Data.List                      ( unfoldr )
+import           Debug.Trace
 import           Servant
 import           Data.Char
 import           Control.Monad.Trans
@@ -38,12 +39,14 @@ data Endpoint = Endpoint
     , constructorArgs :: [Type]
     , constructorReturn :: Type
     , handlerReturn :: Type -- ^ Same as for constructor but with NoContent instead of ()
+    , varBindings :: [TyVarBndr]
     } deriving Show
 
 getCmdDec :: Name -> Q Dec
 getCmdDec cmdName = do
     cmdType <- reify cmdName
     let errMsg = error "Must be GADT with one parameter, representing return type."
+    traceShowM cmdType
     case cmdType of
         TyConI dec       -> pure dec
         ClassI _ _       -> errMsg
@@ -76,6 +79,7 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
 
 toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
+    -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
         let shortName = show $ unqualifiedName name
         hRetType <- unitToNoContent retType
@@ -85,8 +89,24 @@ toEndpoint = \case
                       , constructorArgs     = fmap snd bangArgs
                       , constructorReturn   = retType
                       , handlerReturn       = hRetType
+                      , varBindings         = []
                       }
-    _ -> error "Expected a GATD constructor representing an endpoint"
+    -- When the constructor contain references to other domain models
+    ForallC varBinds [] (GadtC [name] bangArgs (AppT _ retType)) -> do
+        let shortName = show $ unqualifiedName name
+        hRetType <- unitToNoContent retType
+        pure Endpoint { fullConstructorName = name
+                      , shortConstructor    = shortName
+                      , handlerName         = mkName $ lowerFirst shortName
+                      , constructorArgs     = fmap snd bangArgs
+                      , constructorReturn   = retType
+                      , handlerReturn       = hRetType
+                      , varBindings         = varBinds
+                      }
+    c ->
+        error
+            $  "Expected a GATD constructor representing an endpoint but got:\n"
+            <> show c
 
 -- | Turn "OhYEAH" into "ohYEAH"...
 lowerFirst :: String -> String
@@ -191,14 +211,14 @@ mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
 
     mkHandler :: Endpoint -> Q [Dec]
     mkHandler e = do
-        cmdRunnerType  <- [t| CmdRunner $(pure . ConT $ gadtName spec) |]
+        cmdRunnerTy    <- cmdRunnerType spec
         varNames       <- traverse (const $ newName "arg") $ constructorArgs e
         handlerRetType <- [t| Handler $(pure $ handlerReturn e) |]
         let varPat = TupP $ fmap VarP varNames
             nrArgs = length $ constructorArgs e
             funSig =
                 SigD (handlerName e)
-                    . AppT (AppT ArrowT cmdRunnerType)
+                    . AppT (AppT ArrowT cmdRunnerTy)
                     $ case constructorArgs e of
                           []  -> handlerRetType
                           [a] -> AppT (AppT ArrowT a) handlerRetType
@@ -213,8 +233,7 @@ mkHandlers spec = fmap mconcat . traverse mkHandler $ endpoints spec
                 TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
                 _        -> pure funBodyBase
         funClause <- clause
-            (pure (VarP cmdRunner) : (if length varNames > 0 then [pure $ varPat] else [])
-            )
+            (pure (VarP cmdRunner) : (if nrArgs > 0 then [pure $ varPat] else []))
             (normalB [| liftIO $ $(funBody)  |])
             []
         let funDef = FunD (handlerName e) [funClause]
