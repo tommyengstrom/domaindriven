@@ -57,7 +57,7 @@ data SubApiData = SubApiData
     , feShortConstructor :: String  -- ^ Name of the endpoint
     , feHandlerName :: Name
     , feConstructorArgs :: [Type]
-    , feSubServer :: ServerSpec
+    , feSubCmd :: Name
     } deriving (Show, Generic)
 
 fullConstructorName :: Lens' Endpoint Name
@@ -111,7 +111,6 @@ getCmdDec :: Name -> Q Dec
 getCmdDec cmdName = do
     cmdType <- reify cmdName
     let errMsg = error "Must be GADT with one parameter, representing return type."
-    traceShowM cmdType
     case cmdType of
         TyConI dec       -> pure dec
         ClassI _ _       -> errMsg
@@ -143,24 +142,40 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
         (x , rest      ) -> Just (x, rest)
 
 
-toEndpoint :: Con -> Q (Endpoint, [Dec])
+toEndpoint :: Con -> Q Endpoint
 toEndpoint = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
-        let shortName = show $ unqualifiedName name
         hRetType <- unitToNoContent retType
-        let ep = Endpoint $ EndpointData { eFullConstructorName = name
-                                         , eShortConstructor    = shortName
-                                         , eHandlerName = mkName $ lowerFirst shortName
-                                         , eConstructorArgs     = fmap snd bangArgs
-                                         , eConstructorReturns  = retType
-                                         , eHandlerReturn       = hRetType
-                                         }
-        pure (ep, [])
-    -- When the constructor contain references to other domain models
-    ForallC varBinds [] (GadtC [name] bangArgs (AppT _ retType)) -> do
         let shortName = show $ unqualifiedName name
-        pure undefined
+        pure . Endpoint $ EndpointData { eFullConstructorName = name
+                                       , eShortConstructor    = shortName
+                                       , eHandlerName = mkName $ lowerFirst shortName
+                                       , eConstructorArgs     = fmap snd bangArgs
+                                       , eConstructorReturns  = retType
+                                       , eHandlerReturn       = hRetType
+                                       }
+    -- When the constructor contain references to other domain models
+    ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ retType)) -> do
+        let shortName = show $ unqualifiedName name
+        -- [ ] Split the argument up into before and after the subcommand
+
+        (args, subCmd) <- case reverse $ fmap snd bangArgs of
+            AppT (ConT subCmd) (VarT var') : rest -> do
+                unless (var == var')
+                    $ error "Subcommand must be the last constructor argument"
+                pure (reverse rest, subCmd)
+            _ -> error $ "Last constructor argument must have form `SubCmd a`"
+
+        traceShowM args
+        traceShowM subCmd
+        traceShowM $ bangArgs ^.. folded . _2
+        pure . SubApi $ SubApiData { feFullConstructorName = name
+                                   , feShortConstructor    = shortName
+                                   , feHandlerName         = mkName $ lowerFirst shortName
+                                   , feConstructorArgs     = args
+                                   , feSubCmd              = subCmd
+                                   }
     c ->
         error
             $  "Expected a GATD constructor representing an endpoint but got:\n"
@@ -181,7 +196,7 @@ unitToNoContent = \case
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: Name -> Q ServerSpec
 mkServerSpec n = do
-    (eps, _) <- fmap unzip . traverse toEndpoint =<< getConstructors =<< getCmdDec n
+    eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
     pure ServerSpec { gadtName   = n
                     , apiName    = mkName "Api"
                     , serverName = mkName "server"
@@ -193,7 +208,7 @@ mkServerSpec n = do
 mkServer :: Name -> Q [Dec]
 mkServer name = do
     serverSpec   <- mkServerSpec name
-    endpointDecs <- traverse mkEndpointDec $ endpoints serverSpec
+    endpointDecs <- fmap mconcat . traverse mkEndpointDec $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
     pure $ endpointDecs <> handlers <> server
@@ -235,73 +250,12 @@ toReqBody args = mkBody
         ts     -> pure . Just $ appAll (TupleT $ length ts) ts
 
 
--- | Define the servant endpoint type. E.g.
--- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
--- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
---
--- `BookCmd :: BookId -> BookCmd a -> Cmd a` will result in:
--- "BookCmd" :> Capture "BookId" BookId :> BookApi
---epType :: Endpoint -> Q Type
---epType e = case varBindings e of
---    []                     -> epTypeSimple e
---    [KindedTV vName StarT] -> do
---        case lastMay $ eConstructorArgs e of
---            Just (AppT (ConT subCmd) (VarT vName')) -> do
---                unless (vName' == vName)
---                    $ error "Variable binding mismatch. Do you have more than one?"
---                error
---                    "I don't want to define the server here. I must really define it \
---                    \earlier and pass the definition here!"
---            Just _  -> error "Submodels are only allowed as the last constructor argument"
---            Nothing -> error "No constructor argument"
---        epTypeHierarchical e undefined
---    _ ->
---        error
---            "Variable bindings are only supported when the constructors have \
---                  \shape: `CmdName :: Something -> SubCmd a -> Cmd a`"
---
---
---type SubApi = [Endpoint]
---
----- | Define the servant endpoint type for hierarchical constructors. E.g.
----- `BookCmd :: BookId -> BookCmd a -> Cmd a` will result in:
----- "BookCmd" :> Capture "BookId" BookId :> BookApi
---epTypeHierarchical :: Endpoint -> SubApi -> Q Type
---epTypeHierarchical e subApi = [t| $(pure cmdName) :> $middle |]
---  where
---    cmdName :: Type
---    cmdName = LitT . StrTyLit $ eShortConstructor e
---
---    middle :: Q Type
---    middle = reqBody >>= \case
---        Nothing -> reqReturn
---        Just b  -> [t| $(pure b) :>  $reqReturn |]
---
---    reqBody :: Q (Maybe Type)
---    reqBody = toReqBody $ eConstructorArgs e
---
---    reqReturn :: Q Type
---    reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
--- Endpoint
---   { eFullConstructorName = ServerSpec.ItemSubCmd
---   , eShortConstructor = "ItemSubCmd"
---   , eHandlerName = itemSubCmd
---   , eConstructorArgs =
---       [ ConT ServerSpec.ItemKey
---       , AppT (ConT ServerSpec.SubCmd) (VarT a_6989586621680175111)
---       ]
---   , eConstructorReturns = VarT a_6989586621680175111
---   , eHandlerReturn = VarT a_6989586621680175111
---   , varBindings = [KindedTV a_6989586621680175111 StarT]
---   }
-
-
 -- | Define the servant endpoint type for non-hierarchical constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-epType :: Endpoint -> Q Type
+epType :: Endpoint -> Q (Type, [Dec])
 epType = \case
-    Endpoint e -> epSimpleType e
+    Endpoint e -> (, []) <$> epSimpleType e
     SubApi   e -> undefined e
   where
     epSimpleType :: EndpointData -> Q Type
@@ -322,8 +276,10 @@ epType = \case
         reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: Endpoint -> Q Dec
-mkEndpointDec e = tySynD (mkName $ view shortConstructor e) [] (epType e)
+mkEndpointDec :: Endpoint -> Q [Dec]
+mkEndpointDec e = do
+    (ty, _) <- epType e
+    pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
 
 

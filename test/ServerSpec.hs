@@ -21,7 +21,7 @@ data StoreCmd a where
     CreateNewItem ::String -> Price -> StoreCmd ItemKey
     RemoveFromCart ::ItemKey -> StoreCmd ()
     Poke ::StoreCmd ()
---    ItemSubCmd ::ItemKey -> SubCmd a -> StoreCmd a
+    ItemSubCmd ::ItemKey -> SubCmd a -> StoreCmd a
 
 data SubCmd a where
     SubOp1 ::SubCmd ()
