@@ -9,9 +9,7 @@ import           DomainDriven.Internal.Class
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
-import           Data.List                      ( unfoldr
-                                                , unzip
-                                                )
+import           Data.List                      ( unfoldr )
 import           Debug.Trace
 import           Servant
 import           Data.Char
@@ -35,7 +33,7 @@ data ServerSpec = ServerSpec
     , apiName :: Name
     , serverName :: Name
     , endpoints :: [Endpoint] -- ^ Endpoints created from the constructors of the GADT
-    } deriving Show
+    } deriving (Show, Generic)
 
 data Endpoint
     = Endpoint EndpointData
@@ -206,8 +204,10 @@ mkServerSpec n = do
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
 mkServer :: Name -> Q [Dec]
-mkServer name = do
-    serverSpec   <- mkServerSpec name
+mkServer = mkServerFromSpec <=< mkServerSpec
+
+mkServerFromSpec :: ServerSpec -> Q [Dec]
+mkServerFromSpec serverSpec = do
     endpointDecs <- fmap mconcat . traverse mkEndpointDec $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
@@ -256,7 +256,7 @@ toReqBody args = mkBody
 epType :: Endpoint -> Q (Type, [Dec])
 epType = \case
     Endpoint e -> (, []) <$> epSimpleType e
-    SubApi   e -> undefined e
+    SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e = [t| $(pure cmdName) :> $middle |]
@@ -274,6 +274,44 @@ epType = \case
 
         reqReturn :: Q Type
         reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
+
+epSubApiType :: SubApiData -> Q (Type, [Dec])
+epSubApiType e = do
+    let apiPrefix    = show $ feSubCmd e
+        serverPrefix = apiPrefix & taking 1 traversed %~ toLower
+    subServerSpec <-
+        over (field @"apiName") (mkName . mappend apiPrefix . show)
+        .   over (field @"serverName") (mkName . mappend serverPrefix . show)
+        <$> mkServerSpec (feSubCmd e)
+    subServerDecs <- mkServerFromSpec subServerSpec
+
+    let cmdName :: Type
+        cmdName = LitT . StrTyLit $ feShortConstructor e
+
+        subApiType :: Type
+        subApiType = ConT $ apiName subServerSpec
+
+
+    mReqParams <- toReqParams $ feConstructorArgs e
+    ty <- case  mReqParams of
+        Just reqParams -> [t| $(pure cmdName)
+                           :> $(pure reqParams)
+                           :> $(pure subApiType)
+                          |]
+        Nothing -> [t| $(pure cmdName) :>  $(pure subApiType) |]
+    pure (ty, subServerDecs)
+    -- [ ] Generate the subserver using a prefix
+    -- [ ] Generate the this endpoint
+    -- [ ] Celebrate
+
+-- FIXME: Change typename into something reasonable
+toReqParams :: [Type] -> Q (Maybe Type)
+toReqParams ts = do
+    captures <- forM ts $ \t -> [t| Capture "typename" $(pure t) |]
+    case (captures :: [Type]) of
+        [] -> pure Nothing
+        c:cs -> Just <$> foldM (\b a -> [t| $(pure b) :> $(pure a) |]) c cs
+
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q [Dec]
