@@ -56,6 +56,8 @@ data SubApiData = SubApiData
     , feHandlerName :: Name
     , feConstructorArgs :: [Type]
     , feSubCmd :: Name
+    , feSubApiName :: Name
+    , feSubServerName :: Name
     } deriving (Show, Generic)
 
 fullConstructorName :: Lens' Endpoint Name
@@ -154,7 +156,7 @@ toEndpoint = \case
                                        , eHandlerReturn       = hRetType
                                        }
     -- When the constructor contain references to other domain models
-    ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ retType)) -> do
+    ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ _retType)) -> do
         let shortName = show $ unqualifiedName name
         -- [ ] Split the argument up into before and after the subcommand
 
@@ -165,14 +167,16 @@ toEndpoint = \case
                 pure (reverse rest, subCmd)
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        traceShowM args
-        traceShowM subCmd
-        traceShowM $ bangArgs ^.. folded . _2
+        let apiPrefix  = show name
+            apiName    = mkName $ apiPrefix <> show subCmd
+            serverName = mkName $ lowerFirst apiPrefix <> show subCmd
         pure . SubApi $ SubApiData { feFullConstructorName = name
                                    , feShortConstructor    = shortName
                                    , feHandlerName         = mkName $ lowerFirst shortName
                                    , feConstructorArgs     = args
                                    , feSubCmd              = subCmd
+                                   , feSubApiName          = apiName
+                                   , feSubServerName       = serverName
                                    }
     c ->
         error
@@ -208,10 +212,11 @@ mkServer = mkServerFromSpec <=< mkServerSpec
 
 mkServerFromSpec :: ServerSpec -> Q [Dec]
 mkServerFromSpec serverSpec = do
+    subServers <- fmap mconcat . traverse mkSubServers $ endpoints serverSpec
     endpointDecs <- fmap mconcat . traverse mkEndpointDec $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
-    pure $ endpointDecs <> handlers <> server
+    pure $ subServers <> endpointDecs <> handlers <> server
 
 mkApiType :: [Endpoint] -> Q Type
 mkApiType endpoints = case mkName . view shortConstructor <$> endpoints of
@@ -253,9 +258,9 @@ toReqBody args = mkBody
 -- | Define the servant endpoint type for non-hierarchical constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-epType :: Endpoint -> Q (Type, [Dec])
+epType :: Endpoint -> Q Type
 epType = \case
-    Endpoint e -> (, []) <$> epSimpleType e
+    Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
@@ -275,31 +280,23 @@ epType = \case
         reqReturn :: Q Type
         reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
 
-epSubApiType :: SubApiData -> Q (Type, [Dec])
+epSubApiType :: SubApiData -> Q Type
 epSubApiType e = do
-    let apiPrefix    = show $ feSubCmd e
-        serverPrefix = apiPrefix & taking 1 traversed %~ toLower
-    subServerSpec <-
-        over (field @"apiName") (mkName . mappend apiPrefix . show)
-        .   over (field @"serverName") (mkName . mappend serverPrefix . show)
-        <$> mkServerSpec (feSubCmd e)
-    subServerDecs <- mkServerFromSpec subServerSpec
 
     let cmdName :: Type
         cmdName = LitT . StrTyLit $ feShortConstructor e
 
         subApiType :: Type
-        subApiType = ConT $ apiName subServerSpec
+        subApiType = ConT $ feSubApiName e
 
 
     mReqParams <- toReqParams $ feConstructorArgs e
-    ty <- case  mReqParams of
+    case  mReqParams of
         Just reqParams -> [t| $(pure cmdName)
                            :> $(pure reqParams)
                            :> $(pure subApiType)
                           |]
         Nothing -> [t| $(pure cmdName) :>  $(pure subApiType) |]
-    pure (ty, subServerDecs)
     -- [ ] Generate the subserver using a prefix
     -- [ ] Generate the this endpoint
     -- [ ] Celebrate
@@ -316,9 +313,19 @@ toReqParams ts = do
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q [Dec]
 mkEndpointDec e = do
-    (ty, _) <- epType e
+    ty <- epType e
     pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
+mkSubServers :: Endpoint -> Q [Dec]
+mkSubServers = \case
+    Endpoint _ -> pure []
+    SubApi e -> do
+        subServerSpec <-
+            set (field @"apiName") (feSubApiName e)
+            .   set (field @"serverName") (feSubServerName e)
+            <$> mkServerSpec (feSubCmd e)
+        subServerDecs <- mkServerFromSpec subServerSpec
+        pure subServerDecs
 
 
 -- | Make command handlers for each endpoint
