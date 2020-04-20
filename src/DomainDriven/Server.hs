@@ -167,9 +167,8 @@ toEndpoint = \case
                 pure (reverse rest, subCmd)
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let apiPrefix  = show name
-            apiName    = mkName $ apiPrefix <> show subCmd
-            serverName = mkName $ lowerFirst apiPrefix <> show subCmd
+        let apiName    = mkName $ shortName <> show (unqualifiedName subCmd)
+            serverName = mkName $ lowerFirst shortName <> show (unqualifiedName subCmd)
         pure . SubApi $ SubApiData { feFullConstructorName = name
                                    , feShortConstructor    = shortName
                                    , feHandlerName         = mkName $ lowerFirst shortName
@@ -334,7 +333,7 @@ mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
     cmdRunnerTy <- cmdRunnerType spec
     case ep of
         Endpoint e -> mkEndpointHander cmdRunnerTy e
-        SubApi   _ -> undefined
+        SubApi   e -> mkSubAPiHandler cmdRunnerTy e
 
 mkEndpointHander :: Type -> EndpointData -> Q [Dec]
 mkEndpointHander cmdRunnerTy e = do
@@ -366,6 +365,35 @@ mkEndpointHander cmdRunnerTy e = do
   where
     cmdRunner :: Name
     cmdRunner = mkName "cmdRunner"
+
+mkSubAPiHandler :: Type -> SubApiData -> Q [Dec]
+mkSubAPiHandler cmdRunnerTy e = do
+    subCmdVar <- newName "subcmd"
+    cmdRunner <- newName "cmdRunner"
+
+    paramNames  <- traverse (const $ newName "arg") $ feConstructorArgs e
+    funSig <- SigD (feHandlerName e)
+          <$> [t| $(pure cmdRunnerTy) -> Server $(pure . ConT $ feSubApiName e)
+              |]
+
+    funClause <- clause
+        [pure $ VarP cmdRunner]
+        (NormalB <$>
+              [e| $(pure $ VarE (feSubServerName e))
+                    ( $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e))
+              |]
+        )
+        []
+
+
+    -- This is how it should look!
+    -- itemSubCmd :: CmdRunner StoreCmd -> Server ItemSubCmdSubCmd
+    -- itemSubCmd cmdRunner = itemSubCmdSubCmd (cmdRunner . ItemSubCmd)
+    traceShowM funSig
+    traceShowM funClause
+    traceShowM $ feHandlerName e
+    let funDef = FunD (feHandlerName e) [funClause]
+    pure [funSig, funDef]
 
 -- | The type of the CmdRunner used to execute commands
 cmdRunnerType :: ServerSpec -> Q Type
