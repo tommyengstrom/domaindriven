@@ -372,26 +372,35 @@ mkSubAPiHandler cmdRunnerTy e = do
 
     paramNames  <- traverse (const $ newName "arg") $ feConstructorArgs e
     let finalSig = [t| Server $(pure . ConT $ feSubApiName e) |]
+    finalSig' <- finalSig
     params <- case feConstructorArgs e of
         [] -> [t| $(pure cmdRunnerTy) -> $finalSig |]
         [a] -> [t| $(pure cmdRunnerTy) -> $(pure a) -> $finalSig |]
-        t:ts -> pure $ foldl (\b a -> AppT (AppT ArrowT b) (a)) t ts
+        ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
+                    (cmdRunnerTy : ts <> [finalSig'])
     funSig <- SigD (feHandlerName e) <$> pure params
 
     subCmdRunner <-
         [e|  $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e) |]
-    funClause <- case paramNames of
+    funClause <- case fmap VarE paramNames of
         [] -> clause
                 [varP cmdRunner]
                 (fmap NormalB
-                      $ appE (varE $ feSubServerName e)
-                             [e| $(pure $ VarE cmdRunner)
-                                    . $(pure . ConE . mkName $ feShortConstructor e) |]
+                      [e| $(varE $ feSubServerName e)
+                             $ $(pure $ VarE cmdRunner)
+                             . $(pure . ConE . mkName $ feShortConstructor e) |]
                 )
                 []
-        t:ts -> clause
-                  (fmap (pure . VarP) $  cmdRunner : paramNames)
-                  (fmap NormalB [e| undefined |])
+        ts ->
+            let cmd = foldl (\b a -> AppE b a) (ConE . mkName $ feShortConstructor e) ts
+             in clause
+                  (varP <$>  cmdRunner : paramNames)
+                  (fmap NormalB
+                        [e| $(varE $ feSubServerName e)
+                                $ $(varE cmdRunner)
+                                . $(pure cmd)
+                        |]
+                  )
                   []
 --        (fmap NormalB
 --              . appE (varE $ feSubServerName e)
@@ -403,7 +412,9 @@ mkSubAPiHandler cmdRunnerTy e = do
     -- [e| $(pure $ VarE (feSubServerName e))
     --       ( $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e))
     -- |]
-
+--    itemAction cmdRunner_asGF
+--      = itemActionServer (cmdRunner_asGF . ItemAction)
+--
 --        []
     let funDef = FunD (feHandlerName e) [funClause]
     pure [funSig, funDef]
