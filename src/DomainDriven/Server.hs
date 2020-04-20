@@ -167,8 +167,8 @@ toEndpoint = \case
                 pure (reverse rest, subCmd)
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let apiName    = mkName $ shortName <> show (unqualifiedName subCmd)
-            serverName = mkName $ lowerFirst shortName <> show (unqualifiedName subCmd)
+        let apiName    = mkName $ shortName <> "Api"
+            serverName = mkName $ lowerFirst shortName <> "Server"
         pure . SubApi $ SubApiData { feFullConstructorName = name
                                    , feShortConstructor    = shortName
                                    , feHandlerName         = mkName $ lowerFirst shortName
@@ -384,14 +384,6 @@ mkSubAPiHandler cmdRunnerTy e = do
               |]
         )
         []
-
-
-    -- This is how it should look!
-    -- itemSubCmd :: CmdRunner StoreCmd -> Server ItemSubCmdSubCmd
-    -- itemSubCmd cmdRunner = itemSubCmdSubCmd (cmdRunner . ItemSubCmd)
-    traceShowM funSig
-    traceShowM funClause
-    traceShowM $ feHandlerName e
     let funDef = FunD (feHandlerName e) [funClause]
     pure [funSig, funDef]
 
