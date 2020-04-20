@@ -17,11 +17,12 @@ newtype Price = Euros Int
     deriving newtype (Show, Eq, FromJSON, ToJSON)
 
 data StoreCmd a where
-    AddToCart    ::ItemKey -> StoreCmd ()
-    CreateNewItem ::String -> Price -> StoreCmd ItemKey
-    RemoveFromCart ::ItemKey -> StoreCmd ()
-    Poke ::StoreCmd ()
-    ItemAction ::Int -> ItemCmd a -> StoreCmd a
+   -- AddToCart    ::ItemKey -> StoreCmd ()
+   -- CreateNewItem ::String -> Price -> StoreCmd ItemKey
+   -- RemoveFromCart ::ItemKey -> StoreCmd ()
+   -- Poke ::StoreCmd ()
+    ItemAction ::ItemCmd a -> StoreCmd a
+    --ItemAction ::Int -> ItemCmd a -> StoreCmd a
 
 data ItemCmd a where
     SubOp1 ::ItemCmd ()
