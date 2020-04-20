@@ -368,21 +368,29 @@ mkEndpointHander cmdRunnerTy e = do
 
 mkSubAPiHandler :: Type -> SubApiData -> Q [Dec]
 mkSubAPiHandler cmdRunnerTy e = do
-    subCmdVar <- newName "subcmd"
     cmdRunner <- newName "cmdRunner"
 
     paramNames  <- traverse (const $ newName "arg") $ feConstructorArgs e
-    funSig <- SigD (feHandlerName e)
-          <$> [t| $(pure cmdRunnerTy) -> Server $(pure . ConT $ feSubApiName e)
-              |]
+    let finalSig = [t| Server $(pure . ConT $ feSubApiName e) |]
+    params <- case fmap VarT paramNames of
+        [] -> [t| $(pure cmdRunnerTy) -> $finalSig |]
+        [a] -> [t| $(pure cmdRunnerTy) -> $(pure a) -> $finalSig |]
+        t:ts -> pure $ foldl (\b a -> AppT (AppT ArrowT b) (a)) t ts
+    funSig <- SigD (feHandlerName e) <$> pure params
 
+    subCmdRunner <-
+        [e|  $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e) |]
     funClause <- clause
-        [pure $ VarP cmdRunner]
-        (NormalB <$>
-              [e| $(pure $ VarE (feSubServerName e))
-                    ( $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e))
-              |]
-        )
+        (fmap (pure . VarP) $  cmdRunner : paramNames)
+        (pure .  NormalB
+              $ foldl (\b a -> AppE b a)
+                      (VarE $ feSubServerName e)
+                      (subCmdRunner : fmap VarE paramNames) )
+
+    -- [e| $(pure $ VarE (feSubServerName e))
+    --       ( $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e))
+    -- |]
+
         []
     let funDef = FunD (feHandlerName e) [funClause]
     pure [funSig, funDef]
