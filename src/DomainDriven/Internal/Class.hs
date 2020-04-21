@@ -23,7 +23,9 @@ type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
 
 type CmdRunner c = forall a . c a -> IO a
+--type QueryRunner c m = forall a e . Exception e => (c a -> m -> Either e a) -> IO a
 type QueryRunner c = forall a . c a -> IO a
+
 
 runCmd
     :: Exception err
@@ -96,11 +98,11 @@ noPersistance = Persistance <$> newTChanIO
 getModel :: Domain model event -> IO model
 getModel (Domain _ _ m) = readTVarIO m
 
--- | Query the model
-runQuery :: Exception e => Domain model event -> (model -> Either e a) -> IO a
-runQuery es f = do
+runQuery
+    :: Exception e => Domain model event -> (model -> c a -> Either e a) -> c a -> IO a
+runQuery es f cmd = do
     m <- getModel es
-    case f m of
+    case f m cmd of
         Right a -> pure a
         Left  e -> throwM e
 

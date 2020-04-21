@@ -133,8 +133,8 @@ data StoreQuery a where
     ListAllItems ::StoreQuery [(ItemKey, Item)]
     LookupItem ::ItemKey -> StoreQuery Item
 
-runStoreQuery :: StoreQuery a -> StoreModel -> Either StoreError a
-runStoreQuery query m = case query of
+runStoreQuery :: StoreModel -> StoreQuery a -> Either StoreError a
+runStoreQuery m = \case
     ListAllItems    -> Right $ M.toList m
     LookupItem iKey -> maybe (Left NoSuchItem) Right $ M.lookup iKey m
 

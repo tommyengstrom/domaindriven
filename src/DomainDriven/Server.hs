@@ -10,7 +10,6 @@ import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
 import           Data.List                      ( unfoldr )
-import           Debug.Trace
 import           Servant
 import           Data.Char
 import           Control.Monad.Trans
@@ -377,8 +376,6 @@ mkSubAPiHandler runnerTy e = do
                     (runnerTy : ts <> [finalSig'])
     funSig <- SigD (feHandlerName e) <$> pure params
 
-    subCmdRunner <-
-        [e|  $(pure $ VarE runner) . $(pure . ConE . mkName $ feShortConstructor e) |]
     funClause <- case fmap VarE paramNames of
         [] -> clause
                 [varP runner]
