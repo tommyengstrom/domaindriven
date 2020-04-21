@@ -213,7 +213,7 @@ mkServerFromSpec :: ServerSpec -> Q [Dec]
 mkServerFromSpec serverSpec = do
     subServers <- fmap mconcat . traverse (mkSubServer $ serverType serverSpec)
                 $ endpoints serverSpec
-    endpointDecs <- fmap mconcat . traverse mkEndpointDec $ endpoints serverSpec
+    endpointDecs <- fmap mconcat . traverse (mkEndpointDec (serverType serverSpec)) $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
     pure $ subServers <> endpointDecs <> handlers <> server
@@ -258,8 +258,8 @@ toReqBody args = mkBody
 -- | Define the servant endpoint type for non-hierarchical constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-epType :: Endpoint -> Q Type
-epType = \case
+epType :: ServerType -> Endpoint -> Q Type
+epType sType = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
@@ -278,7 +278,9 @@ epType = \case
         reqBody = toReqBody $ eConstructorArgs e
 
         reqReturn :: Q Type
-        reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
+        reqReturn = case sType of
+            CmdServer -> [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
+            QueryServer -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
 
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
@@ -306,9 +308,9 @@ epSubApiType e = do
     pure $ foldr1 (\a b -> AppT (AppT bird a) b) (cmdName : captures <> [subApiType])
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: Endpoint -> Q [Dec]
-mkEndpointDec e = do
-    ty <- epType e
+mkEndpointDec :: ServerType -> Endpoint -> Q [Dec]
+mkEndpointDec sType e = do
+    ty <- epType sType e
     pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
 mkSubServer :: ServerType -> Endpoint -> Q [Dec]
