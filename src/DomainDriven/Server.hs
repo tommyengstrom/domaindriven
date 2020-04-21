@@ -279,6 +279,9 @@ epType = \case
         reqReturn :: Q Type
         reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
 
+-- | Define a servant endpoint ending in a reference to the sub API.
+-- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
+-- "EditBook" :> Capture "BookId" BookId :> BookApi
 epSubApiType :: SubApiData -> Q Type
 epSubApiType e = do
 
@@ -288,26 +291,19 @@ epSubApiType e = do
         subApiType :: Type
         subApiType = ConT $ feSubApiName e
 
+    bird <- [t| (:>) |]
+    let mkCapture :: Type -> Q Type
+        mkCapture t = do
+            let pName = LitT . StrTyLit $ getTypeName t
+            [t| Capture $(pure pName) $(pure t) |]
+    captures <- traverse mkCapture $ feConstructorArgs e
+    pure $ foldr1 (\a b -> AppT (AppT bird a) b) (cmdName : captures <> [subApiType])
 
-    mReqParams <- toReqParams $ feConstructorArgs e
-    case  mReqParams of
-        Just reqParams -> [t| $(pure cmdName)
-                           :> $(pure reqParams)
-                           :> $(pure subApiType)
-                          |]
-        Nothing -> [t| $(pure cmdName) :>  $(pure subApiType) |]
-    -- [ ] Generate the subserver using a prefix
-    -- [ ] Generate the this endpoint
-    -- [ ] Celebrate
 
--- FIXME: Change typename into something reasonable
-toReqParams :: [Type] -> Q (Maybe Type)
-toReqParams ts = do
-    captures <- forM ts $ \t -> [t| Capture "typename" $(pure t) |]
-    case (captures :: [Type]) of
-        [] -> pure Nothing
-        c:cs -> Just <$> foldM (\b a -> [t| $(pure b) :> $(pure a) |]) c cs
-
+getTypeName :: Type -> String
+getTypeName = \case
+    ConT n -> show $ unqualifiedName n
+    _ -> "typename"
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q [Dec]
