@@ -12,6 +12,9 @@ import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
 
 
+-- | The model, representing the current state
+type CounterModel = Int
+
 -- | The command GADT
 -- The `a` represents the return value of the endpoints. If it is `()` domain-driven
 -- will translate into `NoContent` (instead of using the servant encoding: `[]`)
@@ -25,7 +28,6 @@ data CounterEvent
     | CounterDecreased
     deriving (Show)
 
-type CounterModel = Int
 
 data CounterError
     = NegativeNotSupported

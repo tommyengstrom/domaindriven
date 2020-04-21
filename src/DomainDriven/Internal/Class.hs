@@ -97,8 +97,12 @@ getModel :: Domain model event -> IO model
 getModel (Domain _ _ m) = readTVarIO m
 
 -- | Query the model
-runQuery :: Domain model event -> (model -> a) -> IO a
-runQuery es f = f <$> getModel es
+runQuery :: Exception e => Domain model event -> (model -> Either e a) -> IO a
+runQuery es f = do
+    m <- getModel es
+    case f m of
+        Right a -> pure a
+        Left  e -> throwM e
 
 data Stored a = Stored
     { storedEvent     :: a
