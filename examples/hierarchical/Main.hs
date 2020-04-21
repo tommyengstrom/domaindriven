@@ -12,6 +12,7 @@ import           DomainDriven
 import           Prelude
 import           Data.Bifunctor                 ( bimap )
 import           Servant                        ( serve
+                                                , Capture
                                                 , FromHttpApiData
                                                 , Proxy(..)
                                                 , Server
@@ -27,27 +28,31 @@ import           Data.Aeson                     ( FromJSON
 import qualified Data.Map                                     as M
 import           Control.Monad
 import           Control.Exception              ( throwIO )
-
+import           Servant.Docs
+import           Data.UUID                      ( nil )
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 data Item = Item
-    { description :: String
+    { description :: Description
     , price :: Price
     } deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 newtype ItemKey = ItemKey UUID
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData)
 
+newtype Description = Description String
+    deriving newtype (Show, Eq, FromJSON, ToJSON)
+
 newtype Price = EUR Int
     deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON)
 
 data ItemCmd a where
-    ChangeDescription ::String -> ItemCmd ()
+    ChangeDescription ::Description -> ItemCmd ()
     ChangePrice ::Price -> ItemCmd ()
 
 data ItemEvent
-    = ChangedDescription String
+    = ChangedDescription Description
     | ChangedPrice Price
     deriving (Show)
 
@@ -147,6 +152,28 @@ type Api = StoreCmdApi :<|> StoreQueryApi
 server :: QueryRunner StoreQuery -> CmdRunner StoreCmd -> Server Api
 server queryRunner cmdRunner = storeCmdServer cmdRunner :<|> storeQueryServer queryRunner
 
+
+------------------------------------------------------------------------------------------
+-- Servant-docs for documentation --------------------------------------------------------
+------------------------------------------------------------------------------------------
+instance ToCapture (Capture "ItemKey" ItemKey) where
+    toCapture _ = DocCapture "ItemKey" "Item Id"
+
+instance ToCapture (Capture "Price" Price) where
+    toCapture _ = DocCapture "Price" "Price in Euroes"
+
+instance ToSample ItemKey where
+    toSamples _ = [("key", ItemKey nil)]
+
+instance ToSample Price where
+    toSamples _ = [("a cheap thing", EUR 3)]
+
+instance ToSample Item where
+    toSamples _ = [("item", Item (Description "sample item") (EUR 35))]
+
+
+instance ToSample Description where
+    toSamples _ = []
 -- | Start a server running on port 8765
 main :: IO ()
 main = do
@@ -154,6 +181,9 @@ main = do
     persistanceModel <- noPersistance
     -- Then we need to create the model
     model            <- createModel persistanceModel applyStoreEvent mempty
+
+    -- Print the API documentation before starting the server
+    putStrLn . markdown . docs $ Proxy @Api
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
     run 8765 $ serve

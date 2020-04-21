@@ -112,6 +112,7 @@ executables:
     - domain-driven
     - wai
     - warp
+    - servant-docs
     ghc-options:
     - -threaded
     - -rtsopts
