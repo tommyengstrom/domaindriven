@@ -89,3 +89,18 @@ tests:
     - domain-driven
     - hspec
     - QuickCheck
+
+executables:
+  simple:
+    main:                Main.hs
+    source-dirs:         examples/simple
+    dependencies:
+    - domain-driven
+    - wai
+    - warp
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Werror
+    - -Wall
