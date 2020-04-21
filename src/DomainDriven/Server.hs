@@ -194,9 +194,10 @@ unitToNoContent = \case
 mkServerSpec :: ServerType -> Name -> Q ServerSpec
 mkServerSpec serverType n = do
     eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
+    let prefix = show $ unqualifiedName n
     pure ServerSpec { gadtName   = n
-                    , apiName    = mkName "Api"
-                    , serverName = mkName "server"
+                    , apiName    = mkName $ prefix <> "Api"
+                    , serverName = mkName $ lowerFirst prefix <> "Server"
                     , endpoints  = eps
                     , serverType = serverType
                     }
