@@ -17,16 +17,6 @@ import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
 import           GHC.Generics                   ( Generic )
--- The first goal is to generate a server from a `CmdHandler model event cmd err`. Later
--- on I will refactor queris to alsu use a GADT and follow the same pattern.
---
--- In order to achieve this I will
--- * Start by writing the template haskell to generate endpoint types from a `Cmd a`
--- * All arguments will be encoded in the request body
--- * All commands use POST or PUT (does one make more sense?)
--- * Ensure that error messages are easy to understand!
---
---
 
 data ServerSpec = ServerSpec
     { gadtName :: Name -- ^ Name of the GADT representing the command
@@ -296,14 +286,13 @@ epSubApiType e = do
         mkCapture t = do
             let pName = LitT . StrTyLit $ getTypeName t
             [t| Capture $(pure pName) $(pure t) |]
+
+        getTypeName :: Type -> String
+        getTypeName = \case
+            ConT n -> show $ unqualifiedName n
+            _ -> "typename"
     captures <- traverse mkCapture $ feConstructorArgs e
     pure $ foldr1 (\a b -> AppT (AppT bird a) b) (cmdName : captures <> [subApiType])
-
-
-getTypeName :: Type -> String
-getTypeName = \case
-    ConT n -> show $ unqualifiedName n
-    _ -> "typename"
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: Endpoint -> Q [Dec]
@@ -398,20 +387,6 @@ mkSubAPiHandler cmdRunnerTy e = do
                         |]
                   )
                   []
---        (fmap NormalB
---              . appE (varE $ feSubServerName e)
---              $ appE (varE cmdRunner)
---                     (foldM (\b a -> pure $ AppE b a)
---                      subCmdRunner
---                      (fmap VarE paramNames) ))
---
-    -- [e| $(pure $ VarE (feSubServerName e))
-    --       ( $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e))
-    -- |]
---    itemAction cmdRunner_asGF
---      = itemActionServer (cmdRunner_asGF . ItemAction)
---
---        []
     let funDef = FunD (feHandlerName e) [funClause]
     pure [funSig, funDef]
 
