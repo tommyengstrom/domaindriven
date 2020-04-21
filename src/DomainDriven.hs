@@ -1,18 +1,18 @@
 module DomainDriven
-    ( Domain
-    , ViewModel
+    ( CmdHandler
+    , CmdRunner
     , createModel
-    , CmdHandler
-    , PersistanceModel
+    , Domain
     , filePersistance
-    , noPersistance
-    , Stored(..)
-    , runQuery
-    , runCmd
-    , mkId
     , getModel
+    , mkId
+    , noPersistance
+    , Persistance
+    , QueryRunner
+    , runCmd
+    , runQuery
+    , Stored(..)
     )
 where
 
 import           DomainDriven.Internal.Class
--- import           DomainDriven.Internal.Storage.File as X

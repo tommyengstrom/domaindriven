@@ -37,6 +37,9 @@ dependencies:
 - directory
 - text
 - monad-loops
+- servant
+- servant-server
+- template-haskell
 
 default-extensions:
 - Arrows
