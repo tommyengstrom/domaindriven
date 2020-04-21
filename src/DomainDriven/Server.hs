@@ -23,7 +23,13 @@ data ServerSpec = ServerSpec
     , apiName :: Name
     , serverName :: Name
     , endpoints :: [Endpoint] -- ^ Endpoints created from the constructors of the GADT
+    , serverType :: ServerType
     } deriving (Show, Generic)
+
+data ServerType
+    = CmdServer -- ^ A server that runs commands, i.e. requires a command runner to run
+    | QueryServer -- ^ A server that runs queries.
+    deriving (Show, Generic)
 
 data Endpoint
     = Endpoint EndpointData
@@ -185,23 +191,28 @@ unitToNoContent = \case
 
 -- | Create a ServerSpec from a GADT
 -- The GADT must have one parameter representing the return type
-mkServerSpec :: Name -> Q ServerSpec
-mkServerSpec n = do
+mkServerSpec :: ServerType -> Name -> Q ServerSpec
+mkServerSpec serverType n = do
     eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
     pure ServerSpec { gadtName   = n
                     , apiName    = mkName "Api"
                     , serverName = mkName "server"
                     , endpoints  = eps
+                    , serverType = serverType
                     }
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
-mkServer :: Name -> Q [Dec]
-mkServer = mkServerFromSpec <=< mkServerSpec
+mkCmdServer :: Name -> Q [Dec]
+mkCmdServer = mkServerFromSpec <=< mkServerSpec CmdServer
+
+mkQueryServer :: Name -> Q [Dec]
+mkQueryServer = mkServerFromSpec <=< mkServerSpec QueryServer
 
 mkServerFromSpec :: ServerSpec -> Q [Dec]
 mkServerFromSpec serverSpec = do
-    subServers <- fmap mconcat . traverse mkSubServers $ endpoints serverSpec
+    subServers <- fmap mconcat . traverse (mkSubServer $ serverType serverSpec)
+                $ endpoints serverSpec
     endpointDecs <- fmap mconcat . traverse mkEndpointDec $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
@@ -300,14 +311,14 @@ mkEndpointDec e = do
     ty <- epType e
     pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
-mkSubServers :: Endpoint -> Q [Dec]
-mkSubServers = \case
+mkSubServer :: ServerType -> Endpoint -> Q [Dec]
+mkSubServer sTy = \case
     Endpoint _ -> pure []
     SubApi e -> do
         subServerSpec <-
             set (field @"apiName") (feSubApiName e)
             .   set (field @"serverName") (feSubServerName e)
-            <$> mkServerSpec (feSubCmd e)
+            <$> mkServerSpec sTy (feSubCmd e)
         subServerDecs <- mkServerFromSpec subServerSpec
         pure subServerDecs
 
@@ -315,74 +326,74 @@ mkSubServers = \case
 -- | Make command handlers for each endpoint
 mkHandlers :: ServerSpec -> Q [Dec]
 mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
-    cmdRunnerTy <- cmdRunnerType spec
+    runnerTy <- runnerType spec
     case ep of
-        Endpoint e -> mkEndpointHander cmdRunnerTy e
-        SubApi   e -> mkSubAPiHandler cmdRunnerTy e
+        Endpoint e -> mkEndpointHander runnerTy e
+        SubApi   e -> mkSubAPiHandler runnerTy e
 
 mkEndpointHander :: Type -> EndpointData -> Q [Dec]
-mkEndpointHander cmdRunnerTy e = do
+mkEndpointHander runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
     let varPat = TupP $ fmap VarP varNames
         nrArgs = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
-                . AppT (AppT ArrowT cmdRunnerTy)
+                . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
                       []  -> handlerRetType
                       [a] -> AppT (AppT ArrowT a) handlerRetType
                       as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
                                   handlerRetType
 
-        funBodyBase = AppE (VarE cmdRunner)
+        funBodyBase = AppE (VarE runner)
             $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)
 
         funBody = case eConstructorReturns e of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
             _        -> pure funBodyBase
     funClause <- clause
-        (pure (VarP cmdRunner) : (if nrArgs > 0 then [pure $ varPat] else []))
+        (pure (VarP runner) : (if nrArgs > 0 then [pure $ varPat] else []))
         (normalB [| liftIO $ $(funBody)  |])
         []
     let funDef = FunD (eHandlerName e) [funClause]
     pure [funSig, funDef]
   where
-    cmdRunner :: Name
-    cmdRunner = mkName "cmdRunner"
+    runner :: Name
+    runner = mkName "runner"
 
 mkSubAPiHandler :: Type -> SubApiData -> Q [Dec]
-mkSubAPiHandler cmdRunnerTy e = do
-    cmdRunner <- newName "cmdRunner"
+mkSubAPiHandler runnerTy e = do
+    runner <- newName "runner"
 
     paramNames  <- traverse (const $ newName "arg") $ feConstructorArgs e
     let finalSig = [t| Server $(pure . ConT $ feSubApiName e) |]
     finalSig' <- finalSig
     params <- case feConstructorArgs e of
-        [] -> [t| $(pure cmdRunnerTy) -> $finalSig |]
-        [a] -> [t| $(pure cmdRunnerTy) -> $(pure a) -> $finalSig |]
+        [] -> [t| $(pure runnerTy) -> $finalSig |]
+        [a] -> [t| $(pure runnerTy) -> $(pure a) -> $finalSig |]
         ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
-                    (cmdRunnerTy : ts <> [finalSig'])
+                    (runnerTy : ts <> [finalSig'])
     funSig <- SigD (feHandlerName e) <$> pure params
 
     subCmdRunner <-
-        [e|  $(pure $ VarE cmdRunner) . $(pure . ConE . mkName $ feShortConstructor e) |]
+        [e|  $(pure $ VarE runner) . $(pure . ConE . mkName $ feShortConstructor e) |]
     funClause <- case fmap VarE paramNames of
         [] -> clause
-                [varP cmdRunner]
+                [varP runner]
                 (fmap NormalB
                       [e| $(varE $ feSubServerName e)
-                             $ $(pure $ VarE cmdRunner)
+                             $ $(pure $ VarE runner)
                              . $(pure . ConE . mkName $ feShortConstructor e) |]
                 )
                 []
         ts ->
             let cmd = foldl (\b a -> AppE b a) (ConE . mkName $ feShortConstructor e) ts
              in clause
-                  (varP <$>  cmdRunner : paramNames)
+                  (varP <$>  runner : paramNames)
                   (fmap NormalB
                         [e| $(varE $ feSubServerName e)
-                                $ $(varE cmdRunner)
+                                $ $(varE runner)
                                 . $(pure cmd)
                         |]
                   )
@@ -391,18 +402,20 @@ mkSubAPiHandler cmdRunnerTy e = do
     pure [funSig, funDef]
 
 -- | The type of the CmdRunner used to execute commands
-cmdRunnerType :: ServerSpec -> Q Type
-cmdRunnerType spec = [t| CmdRunner $(pure . ConT $ gadtName spec) |]
+runnerType :: ServerSpec -> Q Type
+runnerType spec = case serverType spec of
+    QueryServer -> [t| QueryRunner $(pure . ConT $ gadtName spec) |]
+    CmdServer -> [t| CmdRunner $(pure . ConT $ gadtName spec) |]
 
 -- | Create the full server and api dec
 -- Assumes the handlers have already been created (using `mkHandlers`)
 mkFullServer :: ServerSpec -> Q [Dec]
 mkFullServer spec = do
-    cmdRunnerT <- cmdRunnerType spec
-    let cmdRunner = mkName "cmdRunner"
+    runnerT <- runnerType spec
+    let runner = mkName "runner"
 
         handlerExp :: Endpoint -> Exp
-        handlerExp e = VarE (e ^. handlerName) `AppE` VarE cmdRunner
+        handlerExp e = VarE (e ^. handlerName) `AppE` VarE runner
 
     body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
@@ -410,7 +423,7 @@ mkFullServer spec = do
     apiDec        <- mkApiDec spec
     serverTypeDec <-
         SigD (serverName spec)
-        .   AppT (AppT ArrowT cmdRunnerT)
+        .   AppT (AppT ArrowT runnerT)
         <$> [t| Server $(pure $ ConT $ apiName spec) |]
-    let funDec = FunD (serverName spec) [Clause [VarP cmdRunner] (NormalB body) []]
+    let funDec = FunD (serverName spec) [Clause [VarP runner] (NormalB body) []]
     pure [apiDec, serverTypeDec, funDec]

@@ -37,6 +37,8 @@ data Item = Item
 
 data StoreLookup a where
     LookupAll ::StoreLookup [Item]
-    Lookup ::ItemKey -> StoreLookup Item
+    LookupItem ::ItemKey -> StoreLookup Item
 
-$(mkServer ''StoreCmd)
+-- $(mkCmdServer ''StoreCmd)
+
+$(mkQueryServer ''StoreLookup)

@@ -23,7 +23,7 @@ type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
 
 type CmdRunner c = forall a . c a -> IO a
-type QueryRunner c = forall a . (c -> a) -> IO a
+type QueryRunner c = forall a . c a -> IO a
 
 runCmd
     :: Exception err
