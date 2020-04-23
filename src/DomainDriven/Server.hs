@@ -280,7 +280,7 @@ epType sType = \case
         reqReturn :: Q Type
         reqReturn = case sType of
             CmdServer -> [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
-            QueryServer -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
+            QueryServer -> [t| Put '[JSON] $(pure $ eHandlerReturn e) |]
 
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
