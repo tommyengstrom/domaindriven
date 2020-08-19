@@ -4,6 +4,7 @@
 module Main where
 
 import           DomainDriven.Server            ( mkCmdServer )
+import           DomainDriven.Persistance.FileAndSTM
 import           DomainDriven
 import           Prelude
 import           Servant
@@ -29,8 +30,7 @@ data CounterEvent
     deriving (Show)
 
 
-data CounterError
-    = NegativeNotSupported
+data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)
 
 applyCounterEvent :: CounterModel -> Stored CounterEvent -> CounterModel
