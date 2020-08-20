@@ -6,9 +6,12 @@ import           Data.UUID
 import           RIO
 import           RIO.Time
 import           System.Random
-data Domain persist model event = Domain
-    { persistance :: persist
-    , applyEvent  :: model -> Stored event -> model
+
+data DomainModel persist model event = DomainModel
+    { persistanceHandler :: persist
+        -- ^ An implementation of `PersistanceHandler`.
+    , applyEvent         :: model -> Stored event -> model
+        -- ^ How to calculate the next state
     }
 
 -- | Command handler
@@ -46,21 +49,21 @@ class PersistanceHandler a model event | a -> model, a -> event where
 
 runCmd
     :: (Exception err, PersistanceHandler persist model event)
-    => Domain persist model event
+    => DomainModel persist model event
     -> CmdHandler model event cmd err
     -> cmd a
     -> IO a
-runCmd (Domain pm appEvent) cmdRunner cmd =
+runCmd (DomainModel pm appEvent) cmdRunner cmd =
     cmdRunner cmd >>= transactionalUpdate pm appEvent
 
 -- | Run a query
 runQuery
     :: (Exception e, PersistanceHandler persist model event)
-    => Domain persist model event
+    => DomainModel persist model event
     -> (model -> c a -> Either e a)
     -> c a
     -> IO a
-runQuery (Domain pm _) f query = do
+runQuery (DomainModel pm _) f query = do
     m <- getModel pm
     case f m query of
         Right a -> pure a

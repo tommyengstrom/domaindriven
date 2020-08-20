@@ -1,7 +1,7 @@
 module DomainDriven
     ( CmdHandler
     , CmdRunner
-    , Domain
+    , DomainModel
     , getModel
     , mkId
     , QueryRunner
