@@ -58,16 +58,15 @@ runCmd (DomainModel pm appEvent) cmdRunner cmd =
 
 -- | Run a query
 runQuery
-    :: (Exception e, PersistanceHandler persist model event)
+    :: (Exception err, PersistanceHandler persist model event)
     => DomainModel persist model event
-    -> (model -> c a -> Either e a)
-    -> c a
+    -> (model -> query a -> IO (Either err a))
+    -> query a
     -> IO a
 runQuery (DomainModel pm _) f query = do
     m <- getModel pm
-    case f m query of
-        Right a -> pure a
-        Left  e -> throwM e
+    r <- f m query
+    either throwM pure r
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

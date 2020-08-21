@@ -179,7 +179,7 @@ instance ToSample Description where
 main :: IO ()
 main = do
     -- Then we need to create the model
-    dm <- createFileAndStm "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
+    dm <- createFileAndSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
     -- Print the API documentation before starting the server
     putStrLn . markdown . docs $ Proxy @Api

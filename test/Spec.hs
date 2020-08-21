@@ -2,7 +2,7 @@ module Spec where
 
 import           RIO
 import qualified RIO.List                                     as L
-import           DomainDriven
+import           DomainDriven.Internal.Class
 import           Data.Aeson
 import           Data.Generics.Product
 import           GHC.TypeLits
@@ -13,6 +13,8 @@ import           Safe                           ( headNote )
 import           Control.Monad.Except
 import           System.Directory
 import           System.Mem
+import           DomainDriven.Persistance.ForgetfulSTM
+import           DomainDriven.Persistance.FileAndSTM
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -38,8 +40,9 @@ data StoreEvent
 
 data ItemInfo = ItemInfo
     { quantity :: Quantity
-    , price :: Int
-    } deriving (Show, Eq, Ord, Generic, ToJSON, FromJSON)
+    , price    :: Int
+    }
+    deriving (Show, Eq, Ord, Generic, ToJSON, FromJSON)
 
 data StoreError
     = NotEnoughStock
@@ -74,45 +77,61 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkForgetfullModel :: IO (Domain StoreModel StoreEvent)
-mkForgetfullModel = do
-    p <- noPersistance
-    createModel p applyStoreEvent mempty
+mkForgetfullModel
+    :: IO (DomainModel (ForgetfulSTM StoreModel StoreEvent) StoreModel StoreEvent)
+mkForgetfullModel = createForgetfulSTM applyStoreEvent mempty
 
-mkPersistedModel :: FilePath -> IO (Domain StoreModel StoreEvent)
+mkPersistedModel
+    :: FilePath
+    -> IO (DomainModel (FileAndSTM StoreModel StoreEvent) StoreModel StoreEvent)
 mkPersistedModel fp = do
-    p <- filePersistance fp
-    createModel p applyStoreEvent mempty
+    createFileAndSTM fp applyStoreEvent mempty
 
--- | Number of unique products in stock
-productCount :: StoreModel -> Int
-productCount = length . M.keys . M.filter ((> 0) . view (typed @Quantity))
+data StoreQuery a where
+    ProductCount ::StoreQuery Int
+
+queryHandler :: StoreModel -> StoreQuery a -> IO (Either StoreError a)
+queryHandler m = \case
+    ProductCount ->
+        pure . Right . length . M.keys $ M.filter ((> 0) . view (typed @Quantity)) m
+
+
+getFileModel
+    :: DomainModel (FileAndSTM StoreModel StoreEvent) model event
+    -> IO (Map ItemKey ItemInfo)
+getFileModel = getModel . persistanceHandler
+
+getForgetfulModel
+    :: DomainModel (ForgetfulSTM StoreModel StoreEvent) model event
+    -> IO (Map ItemKey ItemInfo)
+getForgetfulModel = getModel . persistanceHandler
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
     es <- runIO mkForgetfullModel
     let fp = "/tmp/persisted-model.events"
 
+
     it "Can add item" $ do
         let item :: ItemInfo
             item = ItemInfo 10 49
         iKey <- runCmd es handleStoreCmd $ AddItem item
-        getModel es `shouldReturn` M.singleton iKey item
+        getForgetfulModel es `shouldReturn` M.singleton iKey item
 
     it "Can buy item" $ do
-        iKey <- headNote "Ops" . M.keys <$> getModel es
+        iKey <- headNote "Ops" . M.keys <$> getForgetfulModel es
         runCmd es handleStoreCmd $ BuyItem iKey 7
-        getModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
+        getForgetfulModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
 
 
     it "Can run Query" $ do
-        runQuery es productCount `shouldReturn` 1
+        runQuery es queryHandler ProductCount `shouldReturn` 1
 
         let item :: ItemInfo
             item = ItemInfo 4 33
         _ <- runCmd es handleStoreCmd $ AddItem item
 
-        runQuery es productCount `shouldReturn` 2
+        runQuery es queryHandler ProductCount `shouldReturn` 2
 
     it "File storage works" $ do
         fileExists <- doesFileExist fp
@@ -121,11 +140,11 @@ main = hspec . describe "Store model" $ do
         let item :: ItemInfo
             item = ItemInfo 32 7
         iKey <- runCmd esp handleStoreCmd $ AddItem item
-        getModel esp `shouldReturn` M.singleton iKey item
+        getFileModel esp `shouldReturn` M.singleton iKey item
 
     it "File storage rembers" $ do
         performMajorGC
         threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
         esp <- mkPersistedModel fp
-        m   <- getModel esp
+        m   <- getFileModel esp
         m `shouldSatisfy` (== 1) . M.size
