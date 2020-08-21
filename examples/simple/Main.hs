@@ -4,7 +4,7 @@
 module Main where
 
 import           DomainDriven.Server            ( mkCmdServer )
-import           DomainDriven.Persistance.FileAndSTM
+import           DomainDriven.Persistance.ForgetfulSTM
 import           DomainDriven
 import           Prelude
 import           Servant
@@ -68,7 +68,7 @@ $(mkCmdServer ''CounterCmd)
 main :: IO ()
 main = do
     -- Pick a persistance model to create the domain model
-    dm <- createFileAndStm "/tmp/myevents.sjson" applyCounterEvent 0
+    dm <- createForgetfulSTM applyCounterEvent 0
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
     run 8765
