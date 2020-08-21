@@ -21,6 +21,7 @@ import           Servant                        ( serve
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
+import           DomainDriven.Persistance.FileAndSTM
 import           GHC.Generics                   ( Generic )
 import           Data.Aeson                     ( FromJSON
                                                 , ToJSON
@@ -35,8 +36,9 @@ import           Data.UUID                      ( nil )
 ------------------------------------------------------------------------------------------
 data Item = Item
     { description :: Description
-    , price :: Price
-    } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    , price       :: Price
+    }
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 newtype ItemKey = ItemKey UUID
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData)
@@ -54,15 +56,14 @@ data ItemCmd a where
 data ItemEvent
     = ChangedDescription Description
     | ChangedPrice Price
-    deriving (Show)
+    deriving (Show, Generic, FromJSON, ToJSON)
 
 applyItemEvent :: Item -> Stored ItemEvent -> Item
 applyItemEvent m (Stored e _ _) = case e of
     ChangedDescription s -> m { description = s }
     ChangedPrice       p -> m { price = p }
 
-data ItemError
-    = PriceMustBePositive
+data ItemError = PriceMustBePositive
     deriving (Show, Eq, Typeable, Exception)
 
 handleItemCmd :: CmdHandler Item ItemEvent ItemCmd ItemError
@@ -90,7 +91,7 @@ data StoreEvent
     = AddedItem ItemKey Item
     | RemovedItem ItemKey
     | UpdatedItem ItemKey ItemEvent
-    deriving (Show)
+    deriving (Show, Generic, FromJSON, ToJSON)
 
 data StoreError
     = NoSuchItem
@@ -177,15 +178,12 @@ instance ToSample Description where
 -- | Start a server running on port 8765
 main :: IO ()
 main = do
-    -- First we need to pick a persistance model.
-    persistanceModel <- noPersistance
     -- Then we need to create the model
-    model            <- createModel persistanceModel applyStoreEvent mempty
+    dm <- createFileAndStm "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
     -- Print the API documentation before starting the server
     putStrLn . markdown . docs $ Proxy @Api
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
-    run 8765 $ serve
-        (Proxy @Api)
-        (server (runQuery model runStoreQuery) (runCmd model handleStoreCmd))
+    run 8765 $ serve (Proxy @Api)
+                     (server (runQuery dm runStoreQuery) (runCmd dm handleStoreCmd))

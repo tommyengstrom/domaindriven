@@ -1,13 +1,9 @@
 module DomainDriven
     ( CmdHandler
     , CmdRunner
-    , createModel
-    , Domain
-    , filePersistance
+    , DomainModel
     , getModel
     , mkId
-    , noPersistance
-    , Persistance
     , QueryRunner
     , runCmd
     , runQuery
