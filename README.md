@@ -79,6 +79,6 @@ To get a command runner we first have to define a persistance model, which tells
 
 ### Simple example
 
-Minimal example can be found in [examples/simple/Main.hs]. 
+Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs). 
 
-For a slightly more realistic example check out [examples/hierarchical/Main.hs].
+For a slightly more realistic example check out [examples/hierarchical/Main.hs](examples/hierarchical/Main.hs).
