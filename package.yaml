@@ -21,26 +21,26 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 
 dependencies:
 - base >= 4.7 && < 5
-- rio
-- random
-- uuid
-- mtl
+- aeson
 - containers
-- transformers
+- deepseq
+- directory
 - generic-lens
 - lens
-- aeson
-- stm
-- streaming
-- deepseq
-- safe
-- postgresql-simple
-- directory
-- text
 - monad-loops
+- mtl
+- postgresql-simple
+- random
+- rio
+- safe
 - servant
 - servant-server
+- stm
+- streaming
 - template-haskell
+- text
+- transformers
+- uuid
 
 default-extensions:
 - Arrows
