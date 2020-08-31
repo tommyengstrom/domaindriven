@@ -1,8 +1,10 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.UUID
+import           Data.Kind
 import           RIO
 import           RIO.Time
 import           System.Random
@@ -13,6 +15,18 @@ data DomainModel persist model event = DomainModel
     , applyEvent         :: model -> Stored event -> model
         -- ^ How to calculate the next state
     }
+
+class ReadModel a where
+    type Model a :: Type
+    type Event a :: Type
+    applyEvent' :: a -> Model a -> Stored (Event a) -> Model a
+    getModel' :: a -> IO (Model a)
+    getEvents' :: a -> IO [Event a] -- TODO: Make it a stream!
+
+
+class ReadModel a => WriteModel a where
+    type Error a :: Type
+    transactionalUpdate' :: forall ret . Model a -> Either (Error a) (ret, [Event a])
 
 -- | Command handler
 --
@@ -46,6 +60,15 @@ class PersistanceHandler a model event | a -> model, a -> event where
         -> (model -> Either err (ret, [event]))
             -- ^ The continuation returned by CmdHandler
         -> IO ret
+--runCmd'
+--    :: WriteModel model event err
+--    => DomainModel persist model event
+--    -> CmdHandler model event cmd err
+--    -> cmd a
+--    -> IO a
+--runCmd' (DomainModel pm appEvent) cmdRunner cmd =
+--    cmdRunner cmd >>= transactionalUpdate pm appEvent
+
 
 runCmd
     :: (Exception err, PersistanceHandler persist model event)
