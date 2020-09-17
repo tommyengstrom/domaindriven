@@ -19,16 +19,16 @@ data DomainModel persist model event = DomainModel
 class ReadModel a where
     type Model a :: Type
     type Event a :: Type
-    applyEvent' :: a -> Model a -> Stored (Event a) -> Model a
-    getModel' :: a -> IO (Model a)
-    getEvents' :: a -> IO [Stored (Event a)] -- TODO: Make it a stream!
+    applyEvent :: a -> Model a -> Stored (Event a) -> Model a
+    getModel :: a -> IO (Model a)
+    getEvents :: a -> IO [Stored (Event a)] -- TODO: Make it a stream!
 
 
 class ReadModel a => WriteModel a where
-    type Error a :: Type
-    transactionalUpdate' :: forall ret
-                          . a
-                          -> (Model a -> Either (Error a) (ret, [Event a]))
+    transactionalUpdate :: forall ret err.
+                        Exception err =>
+                           a
+                          -> (Model a -> Either err (ret, [Event a]))
                          -> IO ret
 
 -- | Command handler
@@ -49,49 +49,28 @@ type CmdHandler model event cmd err
 type CmdRunner c = forall a . c a -> IO a
 type QueryRunner c = forall a . c a -> IO a
 
-class PersistanceHandler a model event | a -> model, a -> event where
-    getModel :: a -> IO model
-    getEvents :: a -> IO [event] -- ^ FIXME: This should really be a stream of some sort!
-    -- | How to perform updates
-    -- It is important that the state cannot be changed be updated between aquiring the
-    -- current state and writing the events.
-    transactionalUpdate
-        :: Exception err
-        => a
-        -> (model -> Stored event -> model)
-            -- ^ The apply function of the model
-        -> (model -> Either err (ret, [event]))
-            -- ^ The continuation returned by CmdHandler
-        -> IO ret
---runCmd'
---    :: WriteModel model event err
---    => DomainModel persist model event
---    -> CmdHandler model event cmd err
---    -> cmd a
---    -> IO a
---runCmd' (DomainModel pm appEvent) cmdRunner cmd =
---    cmdRunner cmd >>= transactionalUpdate pm appEvent
-
-
 runCmd
-    :: (Exception err, PersistanceHandler persist model event)
-    => DomainModel persist model event
-    -> CmdHandler model event cmd err
+    :: (Exception err, WriteModel m)
+    => m
+    -> CmdHandler (Model m) (Event m) cmd err
     -> cmd a
     -> IO a
-runCmd (DomainModel pm appEvent) cmdRunner cmd =
-    cmdRunner cmd >>= transactionalUpdate pm appEvent
+runCmd m cmdRunner cmd = do
+
+    cmdRunner cmd >>= transactionalUpdate m
+
+
 
 -- | Run a query
 runQuery
-    :: (Exception err, PersistanceHandler persist model event)
-    => DomainModel persist model event
-    -> (model -> query a -> IO (Either err a))
+    :: (Exception err, ReadModel rm)
+    => rm
+    -> (Model rm -> query a -> IO (Either err a))
     -> query a
     -> IO a
-runQuery (DomainModel pm _) f query = do
-    m <- getModel pm
-    r <- f m query
+runQuery rm queryRunner query = do
+    m <- getModel rm
+    r <- queryRunner m query
     either throwM pure r
 
 -- | Wrapper for stored data

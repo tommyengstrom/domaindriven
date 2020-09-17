@@ -5,9 +5,6 @@ import           RIO
 import           GHC.IO.Unsafe                  ( unsafePerformIO )
 
 
-data ForgetfulError = ForgetfulError Text
-    deriving (Show, Eq, Typeable, Exception)
-
 createForgetfulSTM
     :: (model -> Stored event -> model)
     -> model -- ^ initial model
@@ -29,13 +26,12 @@ data ForgetfulSTM model event = ForgetfulSTM
 instance ReadModel (ForgetfulSTM m e) where
     type Model (ForgetfulSTM m e) = m
     type Event (ForgetfulSTM m e) = e
-    applyEvent'  ff = app ff
-    getModel' ff = readTVarIO $ stateTVar ff
-    getEvents' ff = readTVarIO $ events ff
+    applyEvent  ff = app ff
+    getModel ff = readTVarIO $ stateTVar ff
+    getEvents ff = readTVarIO $ events ff
 
 instance WriteModel (ForgetfulSTM m e) where
-    type Error (ForgetfulSTM m e) = ForgetfulError
-    transactionalUpdate' ff evalCmd =
+    transactionalUpdate ff evalCmd =
         atomically $ do
             let tvar = stateTVar ff
             m         <- readTVar tvar

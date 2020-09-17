@@ -12,7 +12,7 @@ import           Control.Monad.Except
 import           System.Directory
 import           System.Mem
 import           DomainDriven.Persistance.ForgetfulSTM
-import           DomainDriven.Persistance.FileAndSTM
+-- import           DomainDriven.Persistance.FileAndSTM
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -75,15 +75,12 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-mkForgetfullModel
-    :: IO (DomainModel (ForgetfulSTM StoreModel StoreEvent) StoreModel StoreEvent)
-mkForgetfullModel = createForgetfulSTM applyStoreEvent mempty
 
-mkPersistedModel
-    :: FilePath
-    -> IO (DomainModel (FileAndSTM StoreModel StoreEvent) StoreModel StoreEvent)
-mkPersistedModel fp = do
-    createFileAndSTM fp applyStoreEvent mempty
+-- mkPersistedModel
+--     :: FilePath
+--     -> IO (DomainModel (FileAndSTM StoreModel StoreEvent) StoreModel StoreEvent)
+-- mkPersistedModel fp = do
+--     createFileAndSTM fp applyStoreEvent mempty
 
 data StoreQuery a where
     ProductCount ::StoreQuery Int
@@ -94,19 +91,14 @@ queryHandler m = \case
         pure . Right . length . M.keys $ M.filter ((> 0) . view (typed @Quantity)) m
 
 
-getFileModel
-    :: DomainModel (FileAndSTM StoreModel StoreEvent) model event
-    -> IO (Map ItemKey ItemInfo)
-getFileModel = getModel . persistanceHandler
-
-getForgetfulModel
-    :: DomainModel (ForgetfulSTM StoreModel StoreEvent) model event
-    -> IO (Map ItemKey ItemInfo)
-getForgetfulModel = getModel . persistanceHandler
+-- getFileModel
+--     :: DomainModel (FileAndSTM StoreModel StoreEvent) model event
+--     -> IO (Map ItemKey ItemInfo)
+-- getFileModel = getModel . persistanceHandler
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
-    es <- runIO mkForgetfullModel
+    es <- runIO $ createForgetfulSTM applyStoreEvent mempty
     let fp = "/tmp/persisted-model.events"
 
 
@@ -114,12 +106,12 @@ main = hspec . describe "Store model" $ do
         let item :: ItemInfo
             item = ItemInfo 10 49
         iKey <- runCmd es handleStoreCmd $ AddItem item
-        getForgetfulModel es `shouldReturn` M.singleton iKey item
+        getModel es `shouldReturn` M.singleton iKey item
 
     it "Can buy item" $ do
-        iKey <- headNote "Ops" . M.keys <$> getForgetfulModel es
+        iKey <- headNote "Ops" . M.keys <$> getModel es
         runCmd es handleStoreCmd $ BuyItem iKey 7
-        getForgetfulModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
+        getModel es `shouldReturn` M.singleton (Wrap 1) (ItemInfo 3 49)
 
 
     it "Can run Query" $ do
@@ -130,19 +122,19 @@ main = hspec . describe "Store model" $ do
         _ <- runCmd es handleStoreCmd $ AddItem item
 
         runQuery es queryHandler ProductCount `shouldReturn` 2
-
-    it "File storage works" $ do
-        fileExists <- doesFileExist fp
-        when fileExists $ removeFile fp
-        esp <- mkPersistedModel fp
-        let item :: ItemInfo
-            item = ItemInfo 32 7
-        iKey <- runCmd esp handleStoreCmd $ AddItem item
-        getFileModel esp `shouldReturn` M.singleton iKey item
-
-    it "File storage rembers" $ do
-        performMajorGC
-        threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
-        esp <- mkPersistedModel fp
-        m   <- getFileModel esp
-        m `shouldSatisfy` (== 1) . M.size
+--
+--    it "File storage works" $ do
+--        fileExists <- doesFileExist fp
+--        when fileExists $ removeFile fp
+--        esp <- mkPersistedModel fp
+--        let item :: ItemInfo
+--            item = ItemInfo 32 7
+--        iKey <- runCmd esp handleStoreCmd $ AddItem item
+--        getFileModel esp `shouldReturn` M.singleton iKey item
+--
+--    it "File storage rembers" $ do
+--        performMajorGC
+--        threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
+--        esp <- mkPersistedModel fp
+--        m   <- getFileModel esp
+--        m `shouldSatisfy` (== 1) . M.size
