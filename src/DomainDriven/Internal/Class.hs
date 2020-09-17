@@ -21,12 +21,15 @@ class ReadModel a where
     type Event a :: Type
     applyEvent' :: a -> Model a -> Stored (Event a) -> Model a
     getModel' :: a -> IO (Model a)
-    getEvents' :: a -> IO [Event a] -- TODO: Make it a stream!
+    getEvents' :: a -> IO [Stored (Event a)] -- TODO: Make it a stream!
 
 
 class ReadModel a => WriteModel a where
     type Error a :: Type
-    transactionalUpdate' :: forall ret . Model a -> Either (Error a) (ret, [Event a])
+    transactionalUpdate' :: forall ret
+                          . a
+                          -> (Model a -> Either (Error a) (ret, [Event a]))
+                         -> IO ret
 
 -- | Command handler
 --
