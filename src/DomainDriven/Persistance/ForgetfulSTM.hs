@@ -11,10 +11,19 @@ data PersistanceError = EncodingError String
 -- | STM state without event persistance
 data ForgetfulSTM model event = ForgetfulSTM
     { stateTVar :: TVar model
+    , app       :: model -> Stored event -> model
+    , seed      :: model
     }
     deriving Generic
 
---
+instance ReadModel (ForgetfulSTM m e) where
+    type Model (ForgetfulSTM m e) = m
+    type Event (ForgetfulSTM m e) = e
+    applyEvent'  ff = app ff
+    getModel' ff = readTVarIO $ stateTVar ff
+------------------------------------------------------------------------------------------
+-- The old stuff
+------------------------------------------------------------------------------------------
 createForgetfulSTM
     :: (model -> Stored event -> model)
     -> model -- ^ initial model

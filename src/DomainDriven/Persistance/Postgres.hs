@@ -27,38 +27,6 @@ data PostgresStateAndEvent model event = PostgresStateAndEvent
     deriving Generic
 
 
---instance (FromRow model, FromRow event, ToRow model, ToRow (Stored event))
---        => PersistanceHandler (PostgresStateAndEvent model event) model event where
---    -- | getModel will always return the latest model
---    getModel pg = do
---        conn <- getConnection pg
---        r    <- query_ conn (queryState pg)
---        case r of
---            x : _ -> pure x
---            _     -> throwM $ ValueError "Found no state"
---            -- ^ FIXME: I should recalculate the state, right?
---            -- I need the inital event and the
---
---    getEvents pg = do
---        conn <- getConnection pg
---        query_ conn (queryEvents pg)
---
---    transactionalUpdate pg appEvent evalCmd = do
---        conn <- getConnection pg
---        withTransaction conn $ do
---            m <- getModel pg
---            case evalCmd m of
---                Left  err        -> throwM err
---                Right (ret, evs) -> do
---                    storedEvs <- traverse toStored evs
---                    let newM = foldl' appEvent m storedEvs
---                        -- FIXME: Ensure the events are applied in the correct order!
---                    _ <- traverse (query conn (writeEvents pg)) storedEvs :: IO [[event]]
---                    _ <- query conn (writeState pg) newM :: IO [model]
---                    pure ret
-
-
-
 instance (FromRow m, FromRow (Stored e), ToRow m)
         => ReadModel (PostgresStateAndEvent m e) where
     type Model (PostgresStateAndEvent m e) = m
@@ -89,7 +57,8 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
         conn <- getConnection pg
         query_ conn (queryEvents pg)
 
-instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e)) => WriteModel (PostgresStateAndEvent m e) where
+instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e))
+        => WriteModel (PostgresStateAndEvent m e) where
     type Error (PostgresStateAndEvent m e) = PersistanceError
     transactionalUpdate' pg evalCmd = do
         conn <- getConnection pg
