@@ -53,7 +53,7 @@ instance (JSONFieldName a, JSONFieldName b) => ToSchema (Fancy (a, b)) where
         a <- declareSchemaRef $ Proxy @a
         b <- declareSchemaRef $ Proxy @b
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy2")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -70,7 +70,7 @@ instance (JSONFieldName a
         b <- declareSchemaRef $ Proxy @b
         c <- declareSchemaRef $ Proxy @c
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy3")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -92,7 +92,7 @@ instance (JSONFieldName a
         c <- declareSchemaRef $ Proxy @c
         d <- declareSchemaRef $ Proxy @d
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy4")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -117,7 +117,7 @@ instance (JSONFieldName a
         d <- declareSchemaRef $ Proxy @d
         e <- declareSchemaRef $ Proxy @e
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy5")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -145,7 +145,7 @@ instance (JSONFieldName a
         e <- declareSchemaRef $ Proxy @e
         f <- declareSchemaRef $ Proxy @f
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy6")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -175,7 +175,7 @@ instance (JSONFieldName a
         f <- declareSchemaRef $ Proxy @f
         g <- declareSchemaRef $ Proxy @g
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy7")
             $  mempty
             &  type_
             ?~ SwaggerObject
@@ -208,7 +208,7 @@ instance (JSONFieldName a
         g <- declareSchemaRef $ Proxy @g
         h <- declareSchemaRef $ Proxy @h
         pure
-            $  NamedSchema (Just "Fancy")
+            $  NamedSchema (Just "Fancy8")
             $  mempty
             &  type_
             ?~ SwaggerObject
