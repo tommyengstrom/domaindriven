@@ -60,12 +60,13 @@ runCmd (DomainModel pm appEvent) cmdRunner cmd =
 runQuery
     :: (Exception e, PersistanceHandler persist model event)
     => DomainModel persist model event
-    -> (model -> c a -> Either e a)
-    -> c a
+    -> (model -> query a -> IO (Either e a))
+    -> query a
     -> IO a
 runQuery (DomainModel pm _) f query = do
     m <- getModel pm
-    case f m query of
+    r <- f m query
+    case  r of
         Right a -> pure a
         Left  e -> throwM e
 

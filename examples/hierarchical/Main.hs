@@ -139,10 +139,10 @@ data StoreQuery a where
     ListAllItems ::StoreQuery [(ItemKey, Item)]
     LookupItem ::ItemKey -> StoreQuery Item
 
-runStoreQuery :: StoreModel -> StoreQuery a -> Either StoreError a
+runStoreQuery :: StoreModel -> StoreQuery a -> IO (Either StoreError a)
 runStoreQuery m = \case
-    ListAllItems    -> Right $ M.toList m
-    LookupItem iKey -> maybe (Left NoSuchItem) Right $ M.lookup iKey m
+    ListAllItems    -> pure . Right $ M.toList m
+    LookupItem iKey -> pure . maybe (Left NoSuchItem) Right $ M.lookup iKey m
 
 $(mkQueryServer ''StoreQuery)
 
@@ -185,5 +185,5 @@ main = do
     putStrLn . markdown . docs $ Proxy @Api
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
-    run 8765 $ serve (Proxy @Api)
+    run 8989 $ serve (Proxy @Api)
                      (server (runQuery dm runStoreQuery) (runCmd dm handleStoreCmd))

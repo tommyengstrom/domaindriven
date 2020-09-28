@@ -9,6 +9,7 @@ import           Prelude
 import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Aeson
+import DomainDriven.Persistance.ForgetfulSTM
 
 newtype ItemKey = ItemKey String
     deriving newtype (Show, Eq, FromJSON, ToJSON)
