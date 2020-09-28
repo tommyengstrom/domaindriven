@@ -36,6 +36,7 @@ dependencies:
 - safe
 - directory
 - text
+- swagger2
 - monad-loops
 - servant
 - servant-server
