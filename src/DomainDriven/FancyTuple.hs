@@ -5,6 +5,7 @@ module DomainDriven.FancyTuple where
 
 import Data.Aeson
 import RIO
+import RIO.Time
 
 class (ToJSON t, FromJSON t) => JSONFieldName t where
   fieldName :: Proxy t -> Text
@@ -23,6 +24,12 @@ instance JSONFieldName String where
 
 instance JSONFieldName Bool where
   fieldName _ = "bool"
+
+instance JSONFieldName Day where
+  fieldName _ = "day"
+
+instance JSONFieldName UTCTime where
+  fieldName _ = "utcTime"
 
 data Fancy a = Fancy {unFancy :: a}
   deriving (Show, Eq, Ord)
