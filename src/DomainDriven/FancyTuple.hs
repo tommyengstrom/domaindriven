@@ -4,10 +4,7 @@
 module DomainDriven.FancyTuple where
 
 import Data.Aeson
-import Data.Char (toLower)
-import GHC.TypeLits
 import RIO
-import qualified RIO.Text as T
 
 class (ToJSON t, FromJSON t) => JSONFieldName t where
   fieldName :: Proxy t -> Text
@@ -26,18 +23,6 @@ instance JSONFieldName String where
 
 instance JSONFieldName Bool where
   fieldName _ = "bool"
-
-newtype Wrapped (s :: Symbol) a = Wrap a
-  deriving stock (Show, Eq, Ord, Generic)
-  deriving newtype (FromJSON, ToJSON)
-
-instance (KnownSymbol s, ToJSON a, FromJSON a) => JSONFieldName (Wrapped s a) where
-  fieldName _ = T.pack . lowerFirst . symbolVal $ Proxy @s
-    where
-      lowerFirst :: String -> String
-      lowerFirst = \case
-        (s : ss) -> toLower s : ss
-        [] -> []
 
 data Fancy a = Fancy {unFancy :: a}
   deriving (Show, Eq, Ord)
