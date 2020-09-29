@@ -3,503 +3,500 @@
 
 module DomainDriven.FancyTuple where
 
-import           Control.Lens                   ( (.~)
-                                                , (?~)
-                                                )
-import           Data.Aeson
-import           Data.Swagger
-import           RIO
-import           RIO.Time
-
-class (ToJSON t, FromJSON t, ToSchema t) => JSONFieldName t where
-  fieldName :: Proxy t -> Text
-
-instance JSONFieldName Int where
-    fieldName _ = "int"
-
-instance JSONFieldName Double where
-    fieldName _ = "double"
-
-instance JSONFieldName Text where
-    fieldName _ = "text"
-
-instance JSONFieldName String where
-    fieldName _ = "string"
-
-instance JSONFieldName Bool where
-    fieldName _ = "bool"
-
-instance JSONFieldName Day where
-    fieldName _ = "day"
-
-instance JSONFieldName UTCTime where
-    fieldName _ = "utcTime"
+import Control.Lens
+  ( (.~),
+    (?~),
+  )
+import Data.Aeson
+import Data.Swagger
+import DomainDriven.Internal.JsonFieldName
+import RIO
 
 data Fancy a = Fancy {unFancy :: a}
   deriving (Show, Eq, Ord)
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b
+  ( JsonFieldName a,
+    JsonFieldName b
   ) =>
   ToJSON (Fancy (a, b))
   where
-    toJSON (Fancy (a, b)) =
-        Object [(fieldName (Proxy @a), toJSON a), (fieldName (Proxy @b), toJSON b)]
+  toJSON (Fancy (a, b)) =
+    Object [(fieldName @a, toJSON a), (fieldName @b, toJSON b)]
 
-instance (JSONFieldName a, JSONFieldName b) => ToSchema (Fancy (a, b)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [(fieldName (Proxy @a), a), (fieldName (Proxy @b), b)]
+instance (JsonFieldName a, JsonFieldName b) => ToSchema (Fancy (a, b)) where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [(fieldName @a, a), (fieldName @b, b)]
 
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         )
-    => ToSchema (Fancy (a, b, c)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               ]
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c
+  ) =>
+  ToSchema (Fancy (a, b, c))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c)
+             ]
 
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         , JSONFieldName d
-         )
-    => ToSchema (Fancy (a, b, c, d)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        d <- declareSchemaRef $ Proxy @d
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               , (fieldName (Proxy @d), d)
-               ]
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d
+  ) =>
+  ToSchema (Fancy (a, b, c, d))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    d <- declareSchemaRef $ Proxy @d
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c),
+               (fieldName @d, d)
+             ]
 
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         , JSONFieldName d
-         , JSONFieldName e
-         )
-    => ToSchema (Fancy (a, b, c, d, e)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        d <- declareSchemaRef $ Proxy @d
-        e <- declareSchemaRef $ Proxy @e
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               , (fieldName (Proxy @d), d)
-               , (fieldName (Proxy @e), e)
-               ]
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e
+  ) =>
+  ToSchema (Fancy (a, b, c, d, e))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    d <- declareSchemaRef $ Proxy @d
+    e <- declareSchemaRef $ Proxy @e
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c),
+               (fieldName @d, d),
+               (fieldName @e, e)
+             ]
 
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         , JSONFieldName d
-         , JSONFieldName e
-         , JSONFieldName f
-         )
-    => ToSchema (Fancy (a, b, c, d, e, f)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        d <- declareSchemaRef $ Proxy @d
-        e <- declareSchemaRef $ Proxy @e
-        f <- declareSchemaRef $ Proxy @f
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               , (fieldName (Proxy @d), d)
-               , (fieldName (Proxy @e), e)
-               , (fieldName (Proxy @f), f)
-               ]
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         , JSONFieldName d
-         , JSONFieldName e
-         , JSONFieldName f
-         , JSONFieldName g
-         )
-    => ToSchema (Fancy (a, b, c, d, e, f, g)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        d <- declareSchemaRef $ Proxy @d
-        e <- declareSchemaRef $ Proxy @e
-        f <- declareSchemaRef $ Proxy @f
-        g <- declareSchemaRef $ Proxy @g
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               , (fieldName (Proxy @d), d)
-               , (fieldName (Proxy @e), e)
-               , (fieldName (Proxy @f), f)
-               , (fieldName (Proxy @g), g)
-               ]
-instance (JSONFieldName a
-         , JSONFieldName b
-         , JSONFieldName c
-         , JSONFieldName d
-         , JSONFieldName e
-         , JSONFieldName f
-         , JSONFieldName g
-         , JSONFieldName h
-         )
-    => ToSchema (Fancy (a, b, c, d, e, f, g, h)) where
-    declareNamedSchema _ = do
-        a <- declareSchemaRef $ Proxy @a
-        b <- declareSchemaRef $ Proxy @b
-        c <- declareSchemaRef $ Proxy @c
-        d <- declareSchemaRef $ Proxy @d
-        e <- declareSchemaRef $ Proxy @e
-        f <- declareSchemaRef $ Proxy @f
-        g <- declareSchemaRef $ Proxy @g
-        h <- declareSchemaRef $ Proxy @h
-        pure
-            $  NamedSchema Nothing
-            $  mempty
-            &  type_
-            ?~ SwaggerObject
-            &  properties
-            .~ [ (fieldName (Proxy @a), a)
-               , (fieldName (Proxy @b), b)
-               , (fieldName (Proxy @c), c)
-               , (fieldName (Proxy @d), d)
-               , (fieldName (Proxy @e), e)
-               , (fieldName (Proxy @f), f)
-               , (fieldName (Proxy @g), g)
-               , (fieldName (Proxy @h), h)
-               ]
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f
+  ) =>
+  ToSchema (Fancy (a, b, c, d, e, f))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    d <- declareSchemaRef $ Proxy @d
+    e <- declareSchemaRef $ Proxy @e
+    f <- declareSchemaRef $ Proxy @f
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c),
+               (fieldName @d, d),
+               (fieldName @e, e),
+               (fieldName @f, f)
+             ]
+
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g
+  ) =>
+  ToSchema (Fancy (a, b, c, d, e, f, g))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    d <- declareSchemaRef $ Proxy @d
+    e <- declareSchemaRef $ Proxy @e
+    f <- declareSchemaRef $ Proxy @f
+    g <- declareSchemaRef $ Proxy @g
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c),
+               (fieldName @d, d),
+               (fieldName @e, e),
+               (fieldName @f, f),
+               (fieldName @g, g)
+             ]
+
+instance
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g,
+    JsonFieldName h
+  ) =>
+  ToSchema (Fancy (a, b, c, d, e, f, g, h))
+  where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    b <- declareSchemaRef $ Proxy @b
+    c <- declareSchemaRef $ Proxy @c
+    d <- declareSchemaRef $ Proxy @d
+    e <- declareSchemaRef $ Proxy @e
+    f <- declareSchemaRef $ Proxy @f
+    g <- declareSchemaRef $ Proxy @g
+    h <- declareSchemaRef $ Proxy @h
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [ (fieldName @a, a),
+               (fieldName @b, b),
+               (fieldName @c, c),
+               (fieldName @d, d),
+               (fieldName @e, e),
+               (fieldName @f, f),
+               (fieldName @g, g),
+               (fieldName @h, h)
+             ]
+
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c
   ) =>
   ToJSON (Fancy (a, b, c))
   where
-    toJSON (Fancy (a, b, c)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        ]
+  toJSON (Fancy (a, b, c)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c)
+      ]
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d
   ) =>
   ToJSON (Fancy (a, b, c, d))
   where
-    toJSON (Fancy (a, b, c, d)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        , (fieldName (Proxy @d), toJSON d)
-        ]
+  toJSON (Fancy (a, b, c, d)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c),
+        (fieldName @d, toJSON d)
+      ]
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e
   ) =>
   ToJSON (Fancy (a, b, c, d, e))
   where
-    toJSON (Fancy (a, b, c, d, e)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        , (fieldName (Proxy @d), toJSON d)
-        , (fieldName (Proxy @e), toJSON e)
-        ]
+  toJSON (Fancy (a, b, c, d, e)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c),
+        (fieldName @d, toJSON d),
+        (fieldName @e, toJSON e)
+      ]
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f
   ) =>
   ToJSON (Fancy (a, b, c, d, e, f))
   where
-    toJSON (Fancy (a, b, c, d, e, f)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        , (fieldName (Proxy @d), toJSON d)
-        , (fieldName (Proxy @e), toJSON e)
-        , (fieldName (Proxy @f), toJSON f)
-        ]
+  toJSON (Fancy (a, b, c, d, e, f)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c),
+        (fieldName @d, toJSON d),
+        (fieldName @e, toJSON e),
+        (fieldName @f, toJSON f)
+      ]
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f,
-    JSONFieldName g
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g
   ) =>
   ToJSON (Fancy (a, b, c, d, e, f, g))
   where
-    toJSON (Fancy (a, b, c, d, e, f, g)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        , (fieldName (Proxy @d), toJSON d)
-        , (fieldName (Proxy @e), toJSON e)
-        , (fieldName (Proxy @f), toJSON f)
-        , (fieldName (Proxy @g), toJSON g)
-        ]
+  toJSON (Fancy (a, b, c, d, e, f, g)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c),
+        (fieldName @d, toJSON d),
+        (fieldName @e, toJSON e),
+        (fieldName @f, toJSON f),
+        (fieldName @g, toJSON g)
+      ]
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f,
-    JSONFieldName g,
-    JSONFieldName h
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g,
+    JsonFieldName h
   ) =>
   ToJSON (Fancy (a, b, c, d, e, f, g, h))
   where
-    toJSON (Fancy (a, b, c, d, e, f, g, h)) = Object
-        [ (fieldName (Proxy @a), toJSON a)
-        , (fieldName (Proxy @b), toJSON b)
-        , (fieldName (Proxy @c), toJSON c)
-        , (fieldName (Proxy @d), toJSON d)
-        , (fieldName (Proxy @e), toJSON e)
-        , (fieldName (Proxy @f), toJSON f)
-        , (fieldName (Proxy @g), toJSON g)
-        , (fieldName (Proxy @h), toJSON h)
-        ]
+  toJSON (Fancy (a, b, c, d, e, f, g, h)) =
+    Object
+      [ (fieldName @a, toJSON a),
+        (fieldName @b, toJSON b),
+        (fieldName @c, toJSON c),
+        (fieldName @d, toJSON d),
+        (fieldName @e, toJSON e),
+        (fieldName @f, toJSON f),
+        (fieldName @g, toJSON g),
+        (fieldName @h, toJSON h)
+      ]
 
 instance ToJSON a => ToJSON (Fancy a) where
-    toJSON (Fancy a) = toJSON a
+  toJSON (Fancy a) = toJSON a
 
 ------------------------------------------------------------------------------------------
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b
+  ( JsonFieldName a,
+    JsonFieldName b
   ) =>
   FromJSON (Fancy (a, b))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,) <$> v .: fieldName (Proxy @a) <*> v .: fieldName (Proxy @b)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,) <$> v .: fieldName @a <*> v .: fieldName @b
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c
   ) =>
   FromJSON (Fancy (a, b, c))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d
   ) =>
   FromJSON (Fancy (a, b, c, d))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
-            <*> v
-            .:  fieldName (Proxy @d)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
+      <*> v
+      .: fieldName @d
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e
   ) =>
   FromJSON (Fancy (a, b, c, d, e))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
-            <*> v
-            .:  fieldName (Proxy @d)
-            <*> v
-            .:  fieldName (Proxy @e)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
+      <*> v
+      .: fieldName @d
+      <*> v
+      .: fieldName @e
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f
   ) =>
   FromJSON (Fancy (a, b, c, d, e, f))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,,,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
-            <*> v
-            .:  fieldName (Proxy @d)
-            <*> v
-            .:  fieldName (Proxy @e)
-            <*> v
-            .:  fieldName (Proxy @f)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,,,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
+      <*> v
+      .: fieldName @d
+      <*> v
+      .: fieldName @e
+      <*> v
+      .: fieldName @f
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f,
-    JSONFieldName g
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g
   ) =>
   FromJSON (Fancy (a, b, c, d, e, f, g))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,,,,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
-            <*> v
-            .:  fieldName (Proxy @d)
-            <*> v
-            .:  fieldName (Proxy @e)
-            <*> v
-            .:  fieldName (Proxy @f)
-            <*> v
-            .:  fieldName (Proxy @g)
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,,,,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
+      <*> v
+      .: fieldName @d
+      <*> v
+      .: fieldName @e
+      <*> v
+      .: fieldName @f
+      <*> v
+      .: fieldName @g
 
 instance
   {-# OVERLAPPING #-}
-  ( JSONFieldName a,
-    JSONFieldName b,
-    JSONFieldName c,
-    JSONFieldName d,
-    JSONFieldName e,
-    JSONFieldName f,
-    JSONFieldName g,
-    JSONFieldName h
+  ( JsonFieldName a,
+    JsonFieldName b,
+    JsonFieldName c,
+    JsonFieldName d,
+    JsonFieldName e,
+    JsonFieldName f,
+    JsonFieldName g,
+    JsonFieldName h
   ) =>
   FromJSON (Fancy (a, b, c, d, e, f, g, h))
   where
-    parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
-        (,,,,,,,)
-            <$> v
-            .:  fieldName (Proxy @a)
-            <*> v
-            .:  fieldName (Proxy @b)
-            <*> v
-            .:  fieldName (Proxy @c)
-            <*> v
-            .:  fieldName (Proxy @d)
-            <*> v
-            .:  fieldName (Proxy @e)
-            <*> v
-            .:  fieldName (Proxy @f)
-            <*> v
-            .:  fieldName (Proxy @g)
-            <*> v
-            .:  fieldName (Proxy @h)
-
+  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+    (,,,,,,,)
+      <$> v
+      .: fieldName @a
+      <*> v
+      .: fieldName @b
+      <*> v
+      .: fieldName @c
+      <*> v
+      .: fieldName @d
+      <*> v
+      .: fieldName @e
+      <*> v
+      .: fieldName @f
+      <*> v
+      .: fieldName @g
+      <*> v
+      .: fieldName @h
 
 instance FromJSON a => FromJSON (Fancy a) where
-    parseJSON = fmap Fancy . parseJSON
+  parseJSON = fmap Fancy . parseJSON
 
 --
 --
