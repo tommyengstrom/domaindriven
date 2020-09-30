@@ -3,10 +3,12 @@ module DomainDriven.Server
     ( module DomainDriven.Server
     , liftIO
     , module DomainDriven.Internal.NamedFields
+    , JsonFieldName(..)
     )
 where
 
 import           DomainDriven.Internal.Class
+import           DomainDriven.Internal.JsonFieldName (JsonFieldName(..))
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
