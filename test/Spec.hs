@@ -12,7 +12,7 @@ import           Control.Monad.Except
 import           System.Directory
 import           System.Mem
 import           DomainDriven.Persistance.ForgetfulSTM
--- import           DomainDriven.Persistance.FileAndSTM
+import           DomainDriven.Persistance.FileWithSTM
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
@@ -73,15 +73,6 @@ applyStoreEvent m (Stored e _ _) = case e of
     AddedItem  iKey info -> M.insert iKey info m
     RemovedItem iKey     -> M.delete iKey m
 
-
-
-
--- mkPersistedModel
---     :: FilePath
---     -> IO (DomainModel (FileAndSTM StoreModel StoreEvent) StoreModel StoreEvent)
--- mkPersistedModel fp = do
---     createFileAndSTM fp applyStoreEvent mempty
-
 data StoreQuery a where
     ProductCount ::StoreQuery Int
 
@@ -89,12 +80,6 @@ queryHandler :: StoreModel -> StoreQuery a -> IO (Either StoreError a)
 queryHandler m = \case
     ProductCount ->
         pure . Right . length . M.keys $ M.filter ((> 0) . view (typed @Quantity)) m
-
-
--- getFileModel
---     :: DomainModel (FileAndSTM StoreModel StoreEvent) model event
---     -> IO (Map ItemKey ItemInfo)
--- getFileModel = getModel . persistanceHandler
 
 main :: IO ()
 main = hspec . describe "Store model" $ do
@@ -122,19 +107,19 @@ main = hspec . describe "Store model" $ do
         _ <- runCmd es handleStoreCmd $ AddItem item
 
         runQuery es queryHandler ProductCount `shouldReturn` 2
---
---    it "File storage works" $ do
---        fileExists <- doesFileExist fp
---        when fileExists $ removeFile fp
---        esp <- mkPersistedModel fp
---        let item :: ItemInfo
---            item = ItemInfo 32 7
---        iKey <- runCmd esp handleStoreCmd $ AddItem item
---        getFileModel esp `shouldReturn` M.singleton iKey item
---
---    it "File storage rembers" $ do
---        performMajorGC
---        threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
---        esp <- mkPersistedModel fp
---        m   <- getFileModel esp
---        m `shouldSatisfy` (== 1) . M.size
+
+    it "File storage works" $ do
+        fileExists <- doesFileExist fp
+        when fileExists $ removeFile fp
+        esp <- createFileWithSTM fp applyStoreEvent mempty
+        let item :: ItemInfo
+            item = ItemInfo 32 7
+        iKey <- runCmd esp handleStoreCmd $ AddItem item
+        getModel esp `shouldReturn` M.singleton iKey item
+
+    it "File storage rembers" $ do
+        performMajorGC
+        threadDelay 100  -- Meh, this is bullshit. Fix it sometime!
+        esp <- createFileWithSTM fp applyStoreEvent mempty
+        m   <- getModel esp
+        m `shouldSatisfy` (== 1) . M.size

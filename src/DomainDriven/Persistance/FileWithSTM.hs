@@ -1,33 +1,35 @@
-module DomainDriven.Persistance.FileAndSTM where
+module DomainDriven.Persistance.FileWithSTM where
 
 import           DomainDriven.Internal.Class
 import           RIO
 import qualified RIO.ByteString                               as BS
 import           System.Directory               ( doesFileExist )
 import           Data.Char                      ( ord )
-import           GHC.IO.Unsafe                  ( unsafePerformIO )
 import           Data.Aeson
 import qualified RIO.ByteString.Lazy                          as BL
-
+import           GHC.IO.Unsafe                  ( unsafePerformIO )
 
 data PersistanceError = EncodingError String
     deriving (Show, Eq, Typeable, Exception)
 
--- | Streaming json storage to disk with STM state.
-data FileAndSTM model event = FileAndSTM
-    { eventChan :: TChan (Stored event)
-    , stateTVar :: TVar model
+
+data FileWithSTM model event = FileWithSTM
+    { stateTVar :: TVar model
+    , eventChan :: TChan (Stored event)
     , eventFile :: FilePath
+    , app       :: model -> Stored event -> model
+    , seed      :: model
     }
     deriving Generic
 
-createFileAndSTM
+createFileWithSTM
     :: (ToJSON event, FromJSON event)
     => FilePath
     -> (model -> Stored event -> model)
     -> model -- ^ initial model
-    -> IO (DomainModel (FileAndSTM model event) model event)
-createFileAndSTM fp appEvent m0 = do
+    -> IO (FileWithSTM model event)
+createFileWithSTM fp appEvent m0 = do
+
     chan <- newTChanIO
     tvar <- newTVarIO m0
     f    <- do
@@ -46,28 +48,36 @@ createFileAndSTM fp appEvent m0 = do
         s <- atomically $ readTChan chan
         let v = encode s <> BL.singleton (fromIntegral $ ord '\n')
         BL.appendFile fp v
+    pure $ FileWithSTM tvar chan fp appEvent m0
 
-    pure $ DomainModel (FileAndSTM chan tvar fp) appEvent
+instance FromJSON event => ReadModel (FileWithSTM model event) where
+  type Model (FileWithSTM model event) = model
+  type Event (FileWithSTM model event) = event
+  applyEvent p = app p
+  getModel p = readTVarIO $ stateTVar p
+  getEvents p = do
+      let fp = eventFile p
+      f <- do
+          fileExists <- doesFileExist fp
+          if fileExists then readFileBinary fp else pure ""
+      let events = fmap eitherDecodeStrict . filter (not . BS.null) $ BS.splitWith
+              (== fromIntegral (ord '\n'))
+              f
+      traverse (either (throwM . EncodingError) pure) events
 
-instance FromJSON event => PersistanceHandler (FileAndSTM model event) model event where
-    getModel (FileAndSTM _ tvar _) = readTVarIO tvar
-    getEvents (FileAndSTM _ _ fp) = do
-        f <- do
-            fileExists <- doesFileExist fp
-            if fileExists then readFileBinary fp else pure ""
-        let events = fmap eitherDecodeStrict . filter (not . BS.null) $ BS.splitWith
-                (== fromIntegral (ord '\n'))
-                f
-        traverse (either (throwM . EncodingError) pure) events
 
-    transactionalUpdate (FileAndSTM chan tvar _) appEvent evalCmd = do
+instance (FromJSON event, ToJSON event) => WriteModel (FileWithSTM model event) where
+    transactionalUpdate ff evalCmd =
         atomically $ do
+            let tvar = stateTVar ff
             m         <- readTVar tvar
             (r, evs)  <- either throwM pure $ evalCmd m
             storedEvs <- for evs $ \e -> do
                 let s = unsafePerformIO $ toStored e
-                writeTChan chan s
                 pure s
-            let newModel = foldl' appEvent m storedEvs
+            let newModel = foldl' (app ff) m storedEvs
+            traverse_ (writeTChan (eventChan ff)) storedEvs
             writeTVar tvar newModel
+
             pure r
+

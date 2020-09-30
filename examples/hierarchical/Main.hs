@@ -21,7 +21,7 @@ import           Servant                        ( serve
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
-import           DomainDriven.Persistance.FileAndSTM
+import           DomainDriven.Persistance.FileWithSTM
 import           GHC.Generics                   ( Generic )
 import           Data.Aeson                     ( FromJSON
                                                 , ToJSON
@@ -179,7 +179,7 @@ instance ToSample Description where
 main :: IO ()
 main = do
     -- Then we need to create the model
-    dm <- createFileAndSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
+    dm <- createFileWithSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
     -- Print the API documentation before starting the server
     putStrLn . markdown . docs $ Proxy @Api

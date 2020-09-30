@@ -9,13 +9,6 @@ import           RIO
 import           RIO.Time
 import           System.Random
 
-data DomainModel persist model event = DomainModel
-    { persistanceHandler :: persist
-        -- ^ An implementation of `PersistanceHandler`.
-    , applyEvent         :: model -> Stored event -> model
-        -- ^ How to calculate the next state
-    }
-
 class ReadModel a where
     type Model a :: Type
     type Event a :: Type
@@ -26,10 +19,10 @@ class ReadModel a where
 
 class ReadModel a => WriteModel a where
     transactionalUpdate :: forall ret err.
-                        Exception err =>
-                           a
-                          -> (Model a -> Either err (ret, [Event a]))
-                         -> IO ret
+        Exception err =>
+           a
+          -> (Model a -> Either err (ret, [Event a]))
+         -> IO ret
 
 -- | Command handler
 --

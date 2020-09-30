@@ -31,8 +31,8 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
         => ReadModel (PostgresStateAndEvent m e) where
     type Model (PostgresStateAndEvent m e) = m
     type Event (PostgresStateAndEvent m e) = e
-    applyEvent' pg = app pg
-    getModel' pg = do
+    applyEvent pg = app pg
+    getModel pg = do
         conn <- getConnection pg
         r    <- query_ conn (queryState pg)
             `catch` const @_ @ResultError (pure <$> recalculateState conn)
@@ -48,22 +48,21 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
       where
         recalculateState :: Connection -> IO m
         recalculateState conn = do
-            s <- foldl' (app pg) (seed pg) <$> getEvents' pg
+            s <- foldl' (app pg) (seed pg) <$> getEvents pg
             _ <- query conn (writeState pg) s :: IO [m] -- FIXME: Not thread safe!
             pure s
 
 
-    getEvents' pg = do
+    getEvents pg = do
         conn <- getConnection pg
         query_ conn (queryEvents pg)
 
 instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e))
         => WriteModel (PostgresStateAndEvent m e) where
-    type Error (PostgresStateAndEvent m e) = PersistanceError
-    transactionalUpdate' pg evalCmd = do
+    transactionalUpdate pg evalCmd = do
         conn <- getConnection pg
         withTransaction conn $ do
-            m <- getModel' pg
+            m <- getModel pg
             case evalCmd m of
                 Left  err        -> throwM err
                 Right (ret, evs) -> do
