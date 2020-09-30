@@ -255,7 +255,6 @@ toReqBody args = mkBody
     mkBody :: Q (Maybe Type)
     mkBody = case args of
         []     -> pure Nothing
-        a : [] -> pure $ Just a
         ts     -> do
             let n = length ts
             pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
@@ -343,16 +342,13 @@ mkEndpointHander :: Type -> EndpointData -> Q [Dec]
 mkEndpointHander runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
-    let varPat = if nrArgs == 1
-                   then  TupP $ fmap VarP varNames
-                   else ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
+    let varPat =  ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
         nrArgs = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
                 . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
                       []  -> handlerRetType
-                      [a] -> AppT (AppT ArrowT a) handlerRetType
                       as  -> AppT (AppT ArrowT (AppT (ConT $ mkName "NamedFields")
                                 $ foldl AppT (TupleT (length as)) as))
                                   handlerRetType

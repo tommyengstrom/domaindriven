@@ -1,13 +1,12 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module contains simple example of how to write hierarchical models in
 -- domain-driven. Note that in real life you may not want to split these models up. The
 -- intent of this example is just to show the technique.
 module Main where
 
-import           DomainDriven.Server            ( mkCmdServer
-                                                , mkQueryServer
-                                                )
+import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
 import           Data.Bifunctor                 ( bimap )
@@ -161,6 +160,9 @@ instance ToCapture (Capture "ItemKey" ItemKey) where
 
 instance ToCapture (Capture "Price" Price) where
     toCapture _ = DocCapture "Price" "Price in Euroes"
+
+instance ToSample a => ToSample (NamedFields a) where
+    toSamples _ =  fmap (fmap NamedFields) . toSamples $ Proxy @a
 
 instance ToSample ItemKey where
     toSamples _ = [("key", ItemKey nil)]
