@@ -29,22 +29,29 @@ import           Control.Monad
 import           Control.Exception              ( throwIO )
 import           Servant.Docs
 import           Data.UUID                      ( nil )
+import Data.Swagger (ToSchema)
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 data Item = Item
     { description :: Description
     , price :: Price
-    } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    } deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
 
 newtype ItemKey = ItemKey UUID
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData)
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Description = Description String
-    deriving newtype (Show, Eq, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Price = EUR Int
-    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()

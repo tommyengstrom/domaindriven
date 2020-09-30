@@ -17,6 +17,33 @@ data NamedFields a = NamedFields {unNamedFields :: a}
 
 instance
   {-# OVERLAPPING #-}
+  ( JsonFieldName a) => ToJSON (NamedFields a)
+  where
+  toJSON (NamedFields a) =
+    Object [(fieldName @a, toJSON a)]
+
+instance (JsonFieldName a) => ToSchema (NamedFields a) where
+  declareNamedSchema _ = do
+    a <- declareSchemaRef $ Proxy @a
+    pure $
+      NamedSchema Nothing $
+        mempty
+          & type_
+          ?~ SwaggerObject
+          & properties
+          .~ [(fieldName @a, a)]
+instance
+  {-# OVERLAPPING #-}
+  ( JsonFieldName a
+  ) =>
+  FromJSON (NamedFields a)
+  where
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+     v .: fieldName @a
+
+
+instance
+  {-# OVERLAPPING #-}
   ( JsonFieldName a,
     JsonFieldName b
   ) =>
@@ -334,9 +361,6 @@ instance
         (fieldName @h, toJSON h)
       ]
 
-instance ToJSON a => ToJSON (NamedFields a) where
-  toJSON (NamedFields a) = toJSON a
-
 ------------------------------------------------------------------------------------------
 instance
   {-# OVERLAPPING #-}
@@ -495,8 +519,6 @@ instance
       <*> v
       .: fieldName @h
 
-instance FromJSON a => FromJSON (NamedFields a) where
-  parseJSON = fmap NamedFields . parseJSON
 
 --
 --
