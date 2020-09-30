@@ -2,7 +2,7 @@
 module DomainDriven.Server
     ( module DomainDriven.Server
     , liftIO
-    , module DomainDriven.FancyTuple
+    , module DomainDriven.Internal.NamedFields
     )
 where
 
@@ -17,7 +17,7 @@ import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
 import           GHC.Generics                   ( Generic )
-import DomainDriven.FancyTuple
+import           DomainDriven.Internal.NamedFields
 
 data ServerSpec = ServerSpec
     { gadtName :: Name -- ^ Name of the GADT representing the command
@@ -256,7 +256,7 @@ toReqBody args = mkBody
         a : [] -> pure $ Just a
         ts     -> do
             let n = length ts
-            pure . Just . AppT (ConT $ mkName "Fancy") $ appAll (TupleT n) ts
+            pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
 
 
 -- | Define the servant endpoint type for non-hierarchical constructors. E.g.
@@ -343,7 +343,7 @@ mkEndpointHander runnerTy e = do
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
     let varPat = if nrArgs == 1
                    then  TupP $ fmap VarP varNames
-                   else ConP (mkName "Fancy") [TupP $ fmap VarP varNames]
+                   else ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
         nrArgs = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
@@ -351,7 +351,7 @@ mkEndpointHander runnerTy e = do
                 $ case eConstructorArgs e of
                       []  -> handlerRetType
                       [a] -> AppT (AppT ArrowT a) handlerRetType
-                      as  -> AppT (AppT ArrowT (AppT (ConT $ mkName "Fancy")
+                      as  -> AppT (AppT ArrowT (AppT (ConT $ mkName "NamedFields")
                                 $ foldl AppT (TupleT (length as)) as))
                                   handlerRetType
 

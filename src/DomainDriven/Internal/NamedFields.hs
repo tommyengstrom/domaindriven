@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module DomainDriven.FancyTuple where
+module DomainDriven.Internal.NamedFields where
 
 import Control.Lens
   ( (.~),
@@ -12,7 +12,7 @@ import Data.Swagger
 import DomainDriven.Internal.JsonFieldName
 import RIO
 
-data Fancy a = Fancy {unFancy :: a}
+data NamedFields a = NamedFields {unNamedFields :: a}
   deriving (Show, Eq, Ord)
 
 instance
@@ -20,12 +20,12 @@ instance
   ( JsonFieldName a,
     JsonFieldName b
   ) =>
-  ToJSON (Fancy (a, b))
+  ToJSON (NamedFields (a, b))
   where
-  toJSON (Fancy (a, b)) =
+  toJSON (NamedFields (a, b)) =
     Object [(fieldName @a, toJSON a), (fieldName @b, toJSON b)]
 
-instance (JsonFieldName a, JsonFieldName b) => ToSchema (Fancy (a, b)) where
+instance (JsonFieldName a, JsonFieldName b) => ToSchema (NamedFields (a, b)) where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
     b <- declareSchemaRef $ Proxy @b
@@ -42,7 +42,7 @@ instance
     JsonFieldName b,
     JsonFieldName c
   ) =>
-  ToSchema (Fancy (a, b, c))
+  ToSchema (NamedFields (a, b, c))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -65,7 +65,7 @@ instance
     JsonFieldName c,
     JsonFieldName d
   ) =>
-  ToSchema (Fancy (a, b, c, d))
+  ToSchema (NamedFields (a, b, c, d))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -91,7 +91,7 @@ instance
     JsonFieldName d,
     JsonFieldName e
   ) =>
-  ToSchema (Fancy (a, b, c, d, e))
+  ToSchema (NamedFields (a, b, c, d, e))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -120,7 +120,7 @@ instance
     JsonFieldName e,
     JsonFieldName f
   ) =>
-  ToSchema (Fancy (a, b, c, d, e, f))
+  ToSchema (NamedFields (a, b, c, d, e, f))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -152,7 +152,7 @@ instance
     JsonFieldName f,
     JsonFieldName g
   ) =>
-  ToSchema (Fancy (a, b, c, d, e, f, g))
+  ToSchema (NamedFields (a, b, c, d, e, f, g))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -187,7 +187,7 @@ instance
     JsonFieldName g,
     JsonFieldName h
   ) =>
-  ToSchema (Fancy (a, b, c, d, e, f, g, h))
+  ToSchema (NamedFields (a, b, c, d, e, f, g, h))
   where
   declareNamedSchema _ = do
     a <- declareSchemaRef $ Proxy @a
@@ -220,9 +220,9 @@ instance
     JsonFieldName b,
     JsonFieldName c
   ) =>
-  ToJSON (Fancy (a, b, c))
+  ToJSON (NamedFields (a, b, c))
   where
-  toJSON (Fancy (a, b, c)) =
+  toJSON (NamedFields (a, b, c)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -236,9 +236,9 @@ instance
     JsonFieldName c,
     JsonFieldName d
   ) =>
-  ToJSON (Fancy (a, b, c, d))
+  ToJSON (NamedFields (a, b, c, d))
   where
-  toJSON (Fancy (a, b, c, d)) =
+  toJSON (NamedFields (a, b, c, d)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -254,9 +254,9 @@ instance
     JsonFieldName d,
     JsonFieldName e
   ) =>
-  ToJSON (Fancy (a, b, c, d, e))
+  ToJSON (NamedFields (a, b, c, d, e))
   where
-  toJSON (Fancy (a, b, c, d, e)) =
+  toJSON (NamedFields (a, b, c, d, e)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -274,9 +274,9 @@ instance
     JsonFieldName e,
     JsonFieldName f
   ) =>
-  ToJSON (Fancy (a, b, c, d, e, f))
+  ToJSON (NamedFields (a, b, c, d, e, f))
   where
-  toJSON (Fancy (a, b, c, d, e, f)) =
+  toJSON (NamedFields (a, b, c, d, e, f)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -296,9 +296,9 @@ instance
     JsonFieldName f,
     JsonFieldName g
   ) =>
-  ToJSON (Fancy (a, b, c, d, e, f, g))
+  ToJSON (NamedFields (a, b, c, d, e, f, g))
   where
-  toJSON (Fancy (a, b, c, d, e, f, g)) =
+  toJSON (NamedFields (a, b, c, d, e, f, g)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -320,9 +320,9 @@ instance
     JsonFieldName g,
     JsonFieldName h
   ) =>
-  ToJSON (Fancy (a, b, c, d, e, f, g, h))
+  ToJSON (NamedFields (a, b, c, d, e, f, g, h))
   where
-  toJSON (Fancy (a, b, c, d, e, f, g, h)) =
+  toJSON (NamedFields (a, b, c, d, e, f, g, h)) =
     Object
       [ (fieldName @a, toJSON a),
         (fieldName @b, toJSON b),
@@ -334,8 +334,8 @@ instance
         (fieldName @h, toJSON h)
       ]
 
-instance ToJSON a => ToJSON (Fancy a) where
-  toJSON (Fancy a) = toJSON a
+instance ToJSON a => ToJSON (NamedFields a) where
+  toJSON (NamedFields a) = toJSON a
 
 ------------------------------------------------------------------------------------------
 instance
@@ -343,9 +343,9 @@ instance
   ( JsonFieldName a,
     JsonFieldName b
   ) =>
-  FromJSON (Fancy (a, b))
+  FromJSON (NamedFields (a, b))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,) <$> v .: fieldName @a <*> v .: fieldName @b
 
 instance
@@ -354,9 +354,9 @@ instance
     JsonFieldName b,
     JsonFieldName c
   ) =>
-  FromJSON (Fancy (a, b, c))
+  FromJSON (NamedFields (a, b, c))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,)
       <$> v
       .: fieldName @a
@@ -372,9 +372,9 @@ instance
     JsonFieldName c,
     JsonFieldName d
   ) =>
-  FromJSON (Fancy (a, b, c, d))
+  FromJSON (NamedFields (a, b, c, d))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,,)
       <$> v
       .: fieldName @a
@@ -393,9 +393,9 @@ instance
     JsonFieldName d,
     JsonFieldName e
   ) =>
-  FromJSON (Fancy (a, b, c, d, e))
+  FromJSON (NamedFields (a, b, c, d, e))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,,,)
       <$> v
       .: fieldName @a
@@ -417,9 +417,9 @@ instance
     JsonFieldName e,
     JsonFieldName f
   ) =>
-  FromJSON (Fancy (a, b, c, d, e, f))
+  FromJSON (NamedFields (a, b, c, d, e, f))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,,,,)
       <$> v
       .: fieldName @a
@@ -444,9 +444,9 @@ instance
     JsonFieldName f,
     JsonFieldName g
   ) =>
-  FromJSON (Fancy (a, b, c, d, e, f, g))
+  FromJSON (NamedFields (a, b, c, d, e, f, g))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,,,,,)
       <$> v
       .: fieldName @a
@@ -474,9 +474,9 @@ instance
     JsonFieldName g,
     JsonFieldName h
   ) =>
-  FromJSON (Fancy (a, b, c, d, e, f, g, h))
+  FromJSON (NamedFields (a, b, c, d, e, f, g, h))
   where
-  parseJSON = fmap (fmap Fancy) . withObject ("Fancy") $ \v ->
+  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
     (,,,,,,,)
       <$> v
       .: fieldName @a
@@ -495,8 +495,8 @@ instance
       <*> v
       .: fieldName @h
 
-instance FromJSON a => FromJSON (Fancy a) where
-  parseJSON = fmap Fancy . parseJSON
+instance FromJSON a => FromJSON (NamedFields a) where
+  parseJSON = fmap NamedFields . parseJSON
 
 --
 --
