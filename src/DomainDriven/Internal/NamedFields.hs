@@ -3,43 +3,38 @@
 
 module DomainDriven.Internal.NamedFields where
 
-import Control.Lens
-  ( (.~),
-    (?~),
-  )
-import Data.Aeson
-import Data.Swagger
-import DomainDriven.Internal.JsonFieldName
-import RIO
+import           Control.Lens                   ( (.~)
+                                                , (?~)
+                                                )
+import           Data.Aeson
+import           Data.Swagger
+import           DomainDriven.Internal.JsonFieldName
+import           RIO
 
 data NamedFields a = NamedFields {unNamedFields :: a}
   deriving (Show, Eq, Ord)
 
-instance
-  {-# OVERLAPPING #-}
-  ( JsonFieldName a) => ToJSON (NamedFields a)
-  where
-  toJSON (NamedFields a) =
-    Object [(fieldName @a, toJSON a)]
+instance {-# OVERLAPPABLE #-} ( JsonFieldName a) => ToJSON (NamedFields a) where
+    toJSON (NamedFields a) = Object [(fieldName @a, toJSON a)]
 
-instance (JsonFieldName a) => ToSchema (NamedFields a) where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [(fieldName @a, a)]
+instance {-# OVERLAPPABLE #-} (JsonFieldName a) => ToSchema (NamedFields a) where
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [(fieldName @a, a)]
 instance
-  {-# OVERLAPPING #-}
+  {-# OVERLAPPABLE #-}
   ( JsonFieldName a
   ) =>
   FromJSON (NamedFields a)
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-     v .: fieldName @a
+    parseJSON =
+        fmap (fmap NamedFields) . withObject ("NamedFields") $ \v -> v .: fieldName @a
 
 
 instance
@@ -49,20 +44,20 @@ instance
   ) =>
   ToJSON (NamedFields (a, b))
   where
-  toJSON (NamedFields (a, b)) =
-    Object [(fieldName @a, toJSON a), (fieldName @b, toJSON b)]
+    toJSON (NamedFields (a, b)) =
+        Object [(fieldName @a, toJSON a), (fieldName @b, toJSON b)]
 
 instance (JsonFieldName a, JsonFieldName b) => ToSchema (NamedFields (a, b)) where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [(fieldName @a, a), (fieldName @b, b)]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [(fieldName @a, a), (fieldName @b, b)]
 
 instance
   ( JsonFieldName a,
@@ -71,20 +66,17 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [(fieldName @a, a), (fieldName @b, b), (fieldName @c, c)]
 
 instance
   ( JsonFieldName a,
@@ -94,22 +86,22 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c, d))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    d <- declareSchemaRef $ Proxy @d
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c),
-               (fieldName @d, d)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        d <- declareSchemaRef $ Proxy @d
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [ (fieldName @a, a)
+               , (fieldName @b, b)
+               , (fieldName @c, c)
+               , (fieldName @d, d)
+               ]
 
 instance
   ( JsonFieldName a,
@@ -120,24 +112,24 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c, d, e))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    d <- declareSchemaRef $ Proxy @d
-    e <- declareSchemaRef $ Proxy @e
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c),
-               (fieldName @d, d),
-               (fieldName @e, e)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        d <- declareSchemaRef $ Proxy @d
+        e <- declareSchemaRef $ Proxy @e
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [ (fieldName @a, a)
+               , (fieldName @b, b)
+               , (fieldName @c, c)
+               , (fieldName @d, d)
+               , (fieldName @e, e)
+               ]
 
 instance
   ( JsonFieldName a,
@@ -149,26 +141,26 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    d <- declareSchemaRef $ Proxy @d
-    e <- declareSchemaRef $ Proxy @e
-    f <- declareSchemaRef $ Proxy @f
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c),
-               (fieldName @d, d),
-               (fieldName @e, e),
-               (fieldName @f, f)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        d <- declareSchemaRef $ Proxy @d
+        e <- declareSchemaRef $ Proxy @e
+        f <- declareSchemaRef $ Proxy @f
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [ (fieldName @a, a)
+               , (fieldName @b, b)
+               , (fieldName @c, c)
+               , (fieldName @d, d)
+               , (fieldName @e, e)
+               , (fieldName @f, f)
+               ]
 
 instance
   ( JsonFieldName a,
@@ -181,28 +173,28 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f, g))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    d <- declareSchemaRef $ Proxy @d
-    e <- declareSchemaRef $ Proxy @e
-    f <- declareSchemaRef $ Proxy @f
-    g <- declareSchemaRef $ Proxy @g
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c),
-               (fieldName @d, d),
-               (fieldName @e, e),
-               (fieldName @f, f),
-               (fieldName @g, g)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        d <- declareSchemaRef $ Proxy @d
+        e <- declareSchemaRef $ Proxy @e
+        f <- declareSchemaRef $ Proxy @f
+        g <- declareSchemaRef $ Proxy @g
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [ (fieldName @a, a)
+               , (fieldName @b, b)
+               , (fieldName @c, c)
+               , (fieldName @d, d)
+               , (fieldName @e, e)
+               , (fieldName @f, f)
+               , (fieldName @g, g)
+               ]
 
 instance
   ( JsonFieldName a,
@@ -216,30 +208,30 @@ instance
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f, g, h))
   where
-  declareNamedSchema _ = do
-    a <- declareSchemaRef $ Proxy @a
-    b <- declareSchemaRef $ Proxy @b
-    c <- declareSchemaRef $ Proxy @c
-    d <- declareSchemaRef $ Proxy @d
-    e <- declareSchemaRef $ Proxy @e
-    f <- declareSchemaRef $ Proxy @f
-    g <- declareSchemaRef $ Proxy @g
-    h <- declareSchemaRef $ Proxy @h
-    pure $
-      NamedSchema Nothing $
-        mempty
-          & type_
-          ?~ SwaggerObject
-          & properties
-          .~ [ (fieldName @a, a),
-               (fieldName @b, b),
-               (fieldName @c, c),
-               (fieldName @d, d),
-               (fieldName @e, e),
-               (fieldName @f, f),
-               (fieldName @g, g),
-               (fieldName @h, h)
-             ]
+    declareNamedSchema _ = do
+        a <- declareSchemaRef $ Proxy @a
+        b <- declareSchemaRef $ Proxy @b
+        c <- declareSchemaRef $ Proxy @c
+        d <- declareSchemaRef $ Proxy @d
+        e <- declareSchemaRef $ Proxy @e
+        f <- declareSchemaRef $ Proxy @f
+        g <- declareSchemaRef $ Proxy @g
+        h <- declareSchemaRef $ Proxy @h
+        pure
+            $  NamedSchema Nothing
+            $  mempty
+            &  type_
+            ?~ SwaggerObject
+            &  properties
+            .~ [ (fieldName @a, a)
+               , (fieldName @b, b)
+               , (fieldName @c, c)
+               , (fieldName @d, d)
+               , (fieldName @e, e)
+               , (fieldName @f, f)
+               , (fieldName @g, g)
+               , (fieldName @h, h)
+               ]
 
 instance
   {-# OVERLAPPING #-}
@@ -249,12 +241,8 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c))
   where
-  toJSON (NamedFields (a, b, c)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c)
-      ]
+    toJSON (NamedFields (a, b, c)) = Object
+        [(fieldName @a, toJSON a), (fieldName @b, toJSON b), (fieldName @c, toJSON c)]
 
 instance
   {-# OVERLAPPING #-}
@@ -265,13 +253,12 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c, d))
   where
-  toJSON (NamedFields (a, b, c, d)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c),
-        (fieldName @d, toJSON d)
-      ]
+    toJSON (NamedFields (a, b, c, d)) = Object
+        [ (fieldName @a, toJSON a)
+        , (fieldName @b, toJSON b)
+        , (fieldName @c, toJSON c)
+        , (fieldName @d, toJSON d)
+        ]
 
 instance
   {-# OVERLAPPING #-}
@@ -283,14 +270,13 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c, d, e))
   where
-  toJSON (NamedFields (a, b, c, d, e)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c),
-        (fieldName @d, toJSON d),
-        (fieldName @e, toJSON e)
-      ]
+    toJSON (NamedFields (a, b, c, d, e)) = Object
+        [ (fieldName @a, toJSON a)
+        , (fieldName @b, toJSON b)
+        , (fieldName @c, toJSON c)
+        , (fieldName @d, toJSON d)
+        , (fieldName @e, toJSON e)
+        ]
 
 instance
   {-# OVERLAPPING #-}
@@ -303,15 +289,14 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f))
   where
-  toJSON (NamedFields (a, b, c, d, e, f)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c),
-        (fieldName @d, toJSON d),
-        (fieldName @e, toJSON e),
-        (fieldName @f, toJSON f)
-      ]
+    toJSON (NamedFields (a, b, c, d, e, f)) = Object
+        [ (fieldName @a, toJSON a)
+        , (fieldName @b, toJSON b)
+        , (fieldName @c, toJSON c)
+        , (fieldName @d, toJSON d)
+        , (fieldName @e, toJSON e)
+        , (fieldName @f, toJSON f)
+        ]
 
 instance
   {-# OVERLAPPING #-}
@@ -325,16 +310,15 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f, g))
   where
-  toJSON (NamedFields (a, b, c, d, e, f, g)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c),
-        (fieldName @d, toJSON d),
-        (fieldName @e, toJSON e),
-        (fieldName @f, toJSON f),
-        (fieldName @g, toJSON g)
-      ]
+    toJSON (NamedFields (a, b, c, d, e, f, g)) = Object
+        [ (fieldName @a, toJSON a)
+        , (fieldName @b, toJSON b)
+        , (fieldName @c, toJSON c)
+        , (fieldName @d, toJSON d)
+        , (fieldName @e, toJSON e)
+        , (fieldName @f, toJSON f)
+        , (fieldName @g, toJSON g)
+        ]
 
 instance
   {-# OVERLAPPING #-}
@@ -349,17 +333,16 @@ instance
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f, g, h))
   where
-  toJSON (NamedFields (a, b, c, d, e, f, g, h)) =
-    Object
-      [ (fieldName @a, toJSON a),
-        (fieldName @b, toJSON b),
-        (fieldName @c, toJSON c),
-        (fieldName @d, toJSON d),
-        (fieldName @e, toJSON e),
-        (fieldName @f, toJSON f),
-        (fieldName @g, toJSON g),
-        (fieldName @h, toJSON h)
-      ]
+    toJSON (NamedFields (a, b, c, d, e, f, g, h)) = Object
+        [ (fieldName @a, toJSON a)
+        , (fieldName @b, toJSON b)
+        , (fieldName @c, toJSON c)
+        , (fieldName @d, toJSON d)
+        , (fieldName @e, toJSON e)
+        , (fieldName @f, toJSON f)
+        , (fieldName @g, toJSON g)
+        , (fieldName @h, toJSON h)
+        ]
 
 ------------------------------------------------------------------------------------------
 instance
@@ -369,8 +352,8 @@ instance
   ) =>
   FromJSON (NamedFields (a, b))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,) <$> v .: fieldName @a <*> v .: fieldName @b
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,) <$> v .: fieldName @a <*> v .: fieldName @b
 
 instance
   {-# OVERLAPPING #-}
@@ -380,14 +363,8 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,) <$> v .: fieldName @a <*> v .: fieldName @b <*> v .: fieldName @c
 
 instance
   {-# OVERLAPPING #-}
@@ -398,16 +375,16 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c, d))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
-      <*> v
-      .: fieldName @d
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,,)
+            <$> v
+            .:  fieldName @a
+            <*> v
+            .:  fieldName @b
+            <*> v
+            .:  fieldName @c
+            <*> v
+            .:  fieldName @d
 
 instance
   {-# OVERLAPPING #-}
@@ -419,18 +396,18 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c, d, e))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
-      <*> v
-      .: fieldName @d
-      <*> v
-      .: fieldName @e
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,,,)
+            <$> v
+            .:  fieldName @a
+            <*> v
+            .:  fieldName @b
+            <*> v
+            .:  fieldName @c
+            <*> v
+            .:  fieldName @d
+            <*> v
+            .:  fieldName @e
 
 instance
   {-# OVERLAPPING #-}
@@ -443,20 +420,20 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,,,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
-      <*> v
-      .: fieldName @d
-      <*> v
-      .: fieldName @e
-      <*> v
-      .: fieldName @f
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,,,,)
+            <$> v
+            .:  fieldName @a
+            <*> v
+            .:  fieldName @b
+            <*> v
+            .:  fieldName @c
+            <*> v
+            .:  fieldName @d
+            <*> v
+            .:  fieldName @e
+            <*> v
+            .:  fieldName @f
 
 instance
   {-# OVERLAPPING #-}
@@ -470,22 +447,22 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f, g))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,,,,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
-      <*> v
-      .: fieldName @d
-      <*> v
-      .: fieldName @e
-      <*> v
-      .: fieldName @f
-      <*> v
-      .: fieldName @g
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,,,,,)
+            <$> v
+            .:  fieldName @a
+            <*> v
+            .:  fieldName @b
+            <*> v
+            .:  fieldName @c
+            <*> v
+            .:  fieldName @d
+            <*> v
+            .:  fieldName @e
+            <*> v
+            .:  fieldName @f
+            <*> v
+            .:  fieldName @g
 
 instance
   {-# OVERLAPPING #-}
@@ -500,24 +477,24 @@ instance
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f, g, h))
   where
-  parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
-    (,,,,,,,)
-      <$> v
-      .: fieldName @a
-      <*> v
-      .: fieldName @b
-      <*> v
-      .: fieldName @c
-      <*> v
-      .: fieldName @d
-      <*> v
-      .: fieldName @e
-      <*> v
-      .: fieldName @f
-      <*> v
-      .: fieldName @g
-      <*> v
-      .: fieldName @h
+    parseJSON = fmap (fmap NamedFields) . withObject ("NamedFields") $ \v ->
+        (,,,,,,,)
+            <$> v
+            .:  fieldName @a
+            <*> v
+            .:  fieldName @b
+            <*> v
+            .:  fieldName @c
+            <*> v
+            .:  fieldName @d
+            <*> v
+            .:  fieldName @e
+            <*> v
+            .:  fieldName @f
+            <*> v
+            .:  fieldName @g
+            <*> v
+            .:  fieldName @h
 
 
 --
