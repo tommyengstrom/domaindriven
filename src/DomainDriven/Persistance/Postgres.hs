@@ -4,6 +4,7 @@ import           DomainDriven.Internal.Class
 import           RIO
 import           RIO.Time
 import           Database.PostgreSQL.Simple
+import           Data.Aeson
 
 
 data PersistanceError
@@ -12,17 +13,36 @@ data PersistanceError
     deriving (Show, Eq, Typeable, Exception)
 
 
+type EventTable = String
+type StateTable = String
+
+simplePostgres
+    :: (FromJSON e, ToJSON e, FromJSON m, ToJSON m)
+    => IO Connection
+    -> EventTable
+    -> StateTable
+    -> (m -> Stored e -> m)
+    -> m
+    -> PostgresStateAndEvent m e
+simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
+    { getConnection = getConn
+    , queryEvents   = \conn -> query conn "select * from " [eventTable]
+    , queryState    = undefined
+    , writeState    = undefined
+    , writeEvents   = undefined
+    , app           = app'
+    , seed          = seed'
+    }
 
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
-    { getConnection    :: IO Connection
-    , queryEvents      :: Query
-    , queryEventsAfter :: UTCTime -> Query
-    , queryState       :: Query
-    , writeState       :: Query -- ^ Insert to write the state
-    , writeEvents      :: Query -- ^ Insert to write an event
-    , app              :: model -> Stored event -> model
-    , seed             :: model
+    { getConnection :: IO Connection
+    , queryEvents   :: Connection -> IO [Stored event]
+    , queryState    :: Query
+    , writeState    :: Query -- ^ Insert to write the state
+    , writeEvents   :: Query -- ^ Insert to write an event
+    , app           :: model -> Stored event -> model
+    , seed          :: model
     }
     deriving Generic
 
@@ -55,7 +75,7 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
 
     getEvents pg = do
         conn <- getConnection pg
-        query_ conn (queryEvents pg)
+        (queryEvents pg) conn
 
 instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e))
         => WriteModel (PostgresStateAndEvent m e) where
