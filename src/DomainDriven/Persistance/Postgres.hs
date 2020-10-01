@@ -5,6 +5,8 @@ import           RIO
 import           RIO.Time
 import           Database.PostgreSQL.Simple
 import           Data.Aeson
+import           Data.UUID
+import           RIO.List                       ( headMaybe )
 
 
 data PersistanceError
@@ -13,32 +15,45 @@ data PersistanceError
     deriving (Show, Eq, Typeable, Exception)
 
 
-type EventTable = String
-type StateTable = String
+type EventTableName = String
+type StateTableName = String
+
+data EventTable = EventTable
+    { key       :: UUID
+    , timestamp :: UTCTime
+    , event     :: ByteString
+    }
+    deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
 
 simplePostgres
     :: (FromJSON e, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
-    -> EventTable
-    -> StateTable
+    -> EventTableName
+    -> StateTableName
     -> (m -> Stored e -> m)
     -> m
     -> PostgresStateAndEvent m e
 simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
-    , queryEvents   = \conn -> query conn "select * from " [eventTable]
-    , queryState    = undefined
+    , queryEvents   = \conn ->
+        traverse decodeEventRow =<< query conn "select * from ?" [eventTable]
+    , queryState    = \conn -> fmap fromOnly <$> query conn "select * from ?" [stateTable]
     , writeState    = undefined
     , writeEvents   = undefined
     , app           = app'
     , seed          = seed'
     }
 
+decodeEventRow :: FromJSON e => EventTable -> IO (Stored e)
+decodeEventRow (EventTable k ts rawEvent) = do
+    ev <- either (throwM . EncodingError) pure $ eitherDecodeStrict rawEvent
+    pure $ Stored { storedEvent = ev, storedTimestamp = ts, storedUUID = k }
+
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
     { getConnection :: IO Connection
     , queryEvents   :: Connection -> IO [Stored event]
-    , queryState    :: Query
+    , queryState    :: Connection -> IO [model]
     , writeState    :: Query -- ^ Insert to write the state
     , writeEvents   :: Query -- ^ Insert to write an event
     , app           :: model -> Stored event -> model
@@ -54,7 +69,7 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
     applyEvent pg = app pg
     getModel pg = do
         conn <- getConnection pg
-        r    <- query_ conn (queryState pg)
+        r    <- (queryState pg) conn
             `catch` const @_ @ResultError (pure <$> recalculateState conn)
         case r of
             []  -> recalculateState conn
