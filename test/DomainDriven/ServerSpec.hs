@@ -1,13 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module ServerSpec where
+module DomainDriven.ServerSpec where
 
-import           Language.Haskell.TH
 import           DomainDriven.Server
-import           DomainDriven
 import           Prelude
 import           GHC.Generics                   ( Generic )
-import           Servant
+import           Test.Hspec
 import           Data.Aeson
 
 newtype ItemKey = ItemKey String
@@ -30,10 +28,11 @@ data ItemCmd a where
     SubOp2 ::Int -> String -> ItemCmd Int
 
 data Item = Item
-    { key :: ItemKey
+    { key         :: ItemKey
     , description :: String
-    , price :: Price
-    } deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    , price       :: Price
+    }
+    deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 data StoreLookup a where
     LookupAll ::StoreLookup [Item]
@@ -42,3 +41,6 @@ data StoreLookup a where
 $(mkCmdServer ''StoreCmd)
 
 $(mkQueryServer ''StoreLookup)
+
+spec :: Spec
+spec = pure ()

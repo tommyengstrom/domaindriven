@@ -4,9 +4,10 @@ import           DomainDriven.Internal.Class
 import           RIO
 import           RIO.Time
 import           Database.PostgreSQL.Simple
+import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
 import           Data.UUID
-import           RIO.List                       ( headMaybe )
+--import qualified Database.PostgreSQL.Simple.FromField         as FF
 
 
 data PersistanceError
@@ -25,6 +26,31 @@ data EventTable = EventTable
     }
     deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
 
+mkTestConn :: IO Connection
+mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
+                                   , connectPort     = 5432
+                                   , connectUser     = "postgres"
+                                   , connectPassword = "test"
+                                   , connectDatabase = "domaindriven"
+                                   }
+
+decodeEventRow :: FromJSON e => EventTable -> IO (Stored e)
+decodeEventRow (EventTable k ts rawEvent) = do
+    ev <- either (throwM . EncodingError) pure $ eitherDecodeStrict rawEvent
+    pure $ Stored { storedEvent = ev, storedTimestamp = ts, storedUUID = k }
+
+data StateTable = StateTable
+    { key       :: UUID
+    , timestamp :: UTCTime
+    , state     :: ByteString
+    }
+    deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
+
+decodeStateRow :: FromJSON e => StateTable -> IO e
+decodeStateRow (StateTable _ _ rawState) =
+    either (throwM . EncodingError) pure $ eitherDecodeStrict rawState
+
+
 simplePostgres
     :: (FromJSON e, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
@@ -37,25 +63,31 @@ simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
     , queryEvents   = \conn ->
         traverse decodeEventRow =<< query conn "select * from ?" [eventTable]
-    , queryState    = \conn -> fmap fromOnly <$> query conn "select * from ?" [stateTable]
-    , writeState    = undefined
-    , writeEvents   = undefined
+    , queryState    = \conn ->
+        traverse decodeStateRow =<< query conn "select * from ?" [stateTable]
+    , writeState    = \conn (BL.toStrict . encode -> s) -> execute
+        conn
+        "insert into ? values ? on conflict (key) do update set state = ?"
+        (stateTable, s, s)
+    , writeEvents   = \conn storedEvents -> executeMany conn
+                                                        "insert into ? values ?"
+                                                        (fmap toEventTable storedEvents)
     , app           = app'
     , seed          = seed'
     }
 
-decodeEventRow :: FromJSON e => EventTable -> IO (Stored e)
-decodeEventRow (EventTable k ts rawEvent) = do
-    ev <- either (throwM . EncodingError) pure $ eitherDecodeStrict rawEvent
-    pure $ Stored { storedEvent = ev, storedTimestamp = ts, storedUUID = k }
+toEventTable :: ToJSON event => Stored event -> EventTable
+toEventTable (Stored ev ts key) =
+    EventTable { key = key, timestamp = ts, event = BL.toStrict $ encode ev }
+
 
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
     { getConnection :: IO Connection
     , queryEvents   :: Connection -> IO [Stored event]
     , queryState    :: Connection -> IO [model]
-    , writeState    :: Query -- ^ Insert to write the state
-    , writeEvents   :: Query -- ^ Insert to write an event
+    , writeState    :: Connection -> model -> IO Int64 -- ^ Insert to write the state
+    , writeEvents   :: Connection -> [Stored event] -> IO Int64 -- ^ Insert to write an event
     , app           :: model -> Stored event -> model
     , seed          :: model
     }
@@ -84,7 +116,7 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
         recalculateState :: Connection -> IO m
         recalculateState conn = do
             s <- foldl' (app pg) (seed pg) <$> getEvents pg
-            _ <- query conn (writeState pg) s :: IO [m] -- FIXME: Not thread safe!
+            _ <- (writeState pg) conn s  -- FIXME: Not thread safe!
             pure s
 
 
@@ -104,8 +136,6 @@ instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e))
                     storedEvs <- traverse toStored evs
                     let newM = foldl' (app pg) m storedEvs
                         -- FIXME: Ensure the events are applied in the correct order!
-                    _ <-
-                        traverse (query conn (writeEvents pg)) storedEvs :: IO
-                            [[Stored e]]
-                    _ <- query conn (writeState pg) newM :: IO [m]
+                    _ <- (writeEvents pg) conn storedEvs
+                    _ <- (writeState pg) conn newM
                     pure ret
