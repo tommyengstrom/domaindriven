@@ -12,7 +12,7 @@ import           DomainDriven.Internal.JsonFieldName
 import           RIO
 
 data NamedFields a = NamedFields {unNamedFields :: a}
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
 
 instance {-# OVERLAPPABLE #-} ( JsonFieldName a) => ToJSON (NamedFields a) where
     toJSON (NamedFields a) = Object [(fieldName @a, toJSON a)]
