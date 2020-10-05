@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedLists #-}
 {-# LANGUAGE DefaultSignatures #-}
 
-module DomainDriven.Internal.WithNamedFields where
+module DomainDriven.Internal.WithNamedField where
 
 import           Prelude
 import           DomainDriven.Internal.JsonFieldName

@@ -25,7 +25,7 @@ instance JsonFieldName Double where
 instance JsonFieldName Text where
     fieldName = "text"
 
-instance JsonFieldName String where
+instance {-# OVERLAPPING #-} JsonFieldName String where
     fieldName = "string"
 
 instance JsonFieldName Bool where
@@ -46,7 +46,7 @@ instance
 instance (Ord v, JsonFieldName v) => JsonFieldName (Set v) where
     fieldName = "setOf" <> fieldName @v
 
-instance JsonFieldName v => JsonFieldName [v] where
+instance {-# OVERLAPPABLE #-} JsonFieldName v => JsonFieldName [v] where
     fieldName = "listOf" <> fieldName @v
 
 instance JsonFieldName v => JsonFieldName (Vector v) where
