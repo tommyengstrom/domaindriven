@@ -25,9 +25,6 @@ instance JsonFieldName Double where
 instance JsonFieldName Text where
     fieldName = "text"
 
-instance {-# OVERLAPPING #-} JsonFieldName String where
-    fieldName = "string"
-
 instance JsonFieldName Bool where
     fieldName = "bool"
 
