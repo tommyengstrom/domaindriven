@@ -13,48 +13,54 @@ import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as HM
 import Control.Applicative
 
+gParseNamedJson :: (GNamedFromJSON (Rep a), Generic a) => Value -> Parser a
+gParseNamedJson = fmap to . gNamedFromJSON
+
+gToNamedJson :: (GNamedToJSON (Rep a), Generic a) => a -> Value
+gToNamedJson = Object . HM.fromList . gToTupleList . from
+
 class GNamedToJSON a where
-    gNamedToJSON :: a x -> [(Text, Value)]
+    gToTupleList :: a x -> [(Text, Value)]
 
 instance (GNamedToJSON f, Datatype d) => GNamedToJSON (M1 D d f) where
-    gNamedToJSON = gNamedToJSON . unM1
+    gToTupleList = gToTupleList . unM1
 
 instance (GNamedToJSON f, Constructor c) => GNamedToJSON (M1 C c f) where
-    gNamedToJSON a = [("tag", String . T.pack $ conName a)] <> gNamedToJSON (unM1 a)
+    gToTupleList a = [("tag", String . T.pack $ conName a)] <> gToTupleList (unM1 a)
 
 instance (JsonFieldName t) => GNamedToJSON (M1 S c (Rec0 t)) where
-    gNamedToJSON a = [(fieldName @t, toJSON . unK1 $ unM1 a)]
+    gToTupleList a = [(fieldName @t, toJSON . unK1 $ unM1 a)]
 
 instance GNamedToJSON U1 where
-    gNamedToJSON U1 = []
+    gToTupleList U1 = []
 
 instance (GNamedToJSON a, GNamedToJSON b) => GNamedToJSON (a :*: b) where
-    gNamedToJSON (a :*: b) = gNamedToJSON a <> gNamedToJSON b
+    gToTupleList (a :*: b) = gToTupleList a <> gToTupleList b
 
 instance (GNamedToJSON a, GNamedToJSON b) => GNamedToJSON (a :+: b) where
-    gNamedToJSON = \case
-        L1 a -> gNamedToJSON a
-        R1 a -> gNamedToJSON a
+    gToTupleList = \case
+        L1 a -> gToTupleList a
+        R1 a -> gToTupleList a
 
-------------------------------------------------------------------------------------------
--- -- It is possible to to go [(Text, Value)] from Value using:
--- tocrap :: Value -> [(Text, Value)]
--- tocrap = \case
---   Object o -> toList o
---   _ -> []
+
+lookupKey :: Text -> Value -> Parser Value
+lookupKey k = \case
+    Object o -> maybe (fail $ "No key " <> show k) pure $ HM.lookup k o
+    _        -> fail $ "Expected " <> show k <> " to be an object."
 
 class GNamedFromJSON a where
-  gNamedFromJSON :: [(Text, Value)] -> Parser (a x)
+  gNamedFromJSON :: Value -> Parser (a x)
 
 instance GNamedFromJSON p => GNamedFromJSON (M1 D f p) where
-  gNamedFromJSON vals = M1 <$> gNamedFromJSON vals
+  gNamedFromJSON v = M1 <$> gNamedFromJSON v
 
 instance (Constructor f, GNamedFromJSON p) => GNamedFromJSON (M1 C f p) where
-  gNamedFromJSON vals = do
-      c <- M1 <$> gNamedFromJSON vals
-      case filter ((== "tag") . fst) vals of
-          (_,String tag):_  -> if T.unpack tag ==conName c then pure c else fail "wrong tag"
-          _ -> fail "No tag field found"
+  gNamedFromJSON v = do
+      c <- M1 <$> gNamedFromJSON v
+      tag <- lookupKey "tag" v
+      case tag of
+          String t | T.unpack t == conName c -> pure c
+          _ -> fail "Unknown tag"
 
 instance GNamedFromJSON U1 where
   gNamedFromJSON _ = pure U1
@@ -68,39 +74,16 @@ instance (GNamedFromJSON a, GNamedFromJSON b) => GNamedFromJSON (a :*: b) where
   gNamedFromJSON vals = (:*:) <$> gNamedFromJSON vals <*> gNamedFromJSON vals
 
 instance JsonFieldName t => GNamedFromJSON (M1 S c (Rec0 t)) where
-  gNamedFromJSON vals = case filter ((== fieldName @t) . fst) vals of
-      (_, v):_ -> M1 . K1 <$> (parseJSON @t) v
-      [] -> fail $ "No field named " <> show (fieldName @t)
+  gNamedFromJSON vals = do
+      v <- lookupKey (fieldName @t) vals
+      M1 . K1 <$> (parseJSON @t) v
 
---But you can also fail, so you need
--- [(Text, Value)] -> Either Text (a x)
---From there, I'd define the leaf:
---gNamedFromJson vals =
---  case List.lookup (fieldName @t) vals of
---    Nothing -> Left "nope"
---    Just value ->
---      parseJSON value
-------------------------------------------------------------------------------------------
-
-------------------------
-
---class Generic a => GNamedFromJSON a where
---    gNamedParseJSON :: Rep a x -> Value -> Parser a
---
----- instance (Datatype d) => GNamedFromJSON (M1 D d f) where
-----   gNamedParseJSON r = gNamedParseJSON (unM1 r)
---
---instance (Constructor c, JsonFieldName t) => GNamedFromJSON (M1 S c (Rec0 t) x) where
---  gNamedParseJSON a = \case
---    Object o -> do
---        o .: T.pack (conName a)
---    x -> fail $ "expected and object but got: " <> show x
 --------- Testing it ----------------
 data Apa = Apan
     deriving (Show, Eq, Ord, Generic)
 
 instance FromJSON Apa where
-  parseJSON _ = to <$> gNamedFromJSON []
+  parseJSON = gParseNamedJson
 
 data Bulle = Middag
     | Beer Int Text
@@ -111,21 +94,19 @@ data Fluff = Fluff Int Text
     deriving (Show, Eq, Ord, Generic)
 
 instance ToJSON Fluff where
-    toJSON = Object . HM.fromList . gNamedToJSON . from
+    toJSON = Object . HM.fromList . gToTupleList . from
 
 instance FromJSON Fluff where
-  parseJSON = \case
-    Object o -> to <$> gNamedFromJSON (HM.toList o)
+  parseJSON = gParseNamedJson
 
 instance FromJSON Bulle where
-  parseJSON = \case
-    Object o -> to <$> gNamedFromJSON (HM.toList o)
+  parseJSON = gParseNamedJson
 
 instance ToJSON Apa where
-    toJSON = Object . HM.fromList . gNamedToJSON . from
+    toJSON = Object . HM.fromList . gToTupleList . from
 
 instance ToJSON Bulle where
-    toJSON = Object . HM.fromList . gNamedToJSON . from
+    toJSON = Object . HM.fromList . gToTupleList . from
 
 
 test :: IO ()
@@ -134,6 +115,7 @@ test = do
     print $ encode Middag
     print $ encode $ Beer 2 "bulle"
     print $ encode $ Kaffe "kaffe!"
+
 
 bulleRep :: Rep Bulle x
 bulleRep = from $ Kaffe "hejsan"
