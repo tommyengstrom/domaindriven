@@ -2,10 +2,13 @@
 module DomainDriven.Server
     ( module DomainDriven.Server
     , liftIO
+    , module DomainDriven.Internal.NamedFields
+    , JsonFieldName(..)
     )
 where
 
 import           DomainDriven.Internal.Class
+import           DomainDriven.Internal.JsonFieldName (JsonFieldName(..))
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
@@ -16,6 +19,7 @@ import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
 import           GHC.Generics                   ( Generic )
+import           DomainDriven.Internal.NamedFields
 
 data ServerSpec = ServerSpec
     { gadtName :: Name -- ^ Name of the GADT representing the command
@@ -251,8 +255,9 @@ toReqBody args = mkBody
     mkBody :: Q (Maybe Type)
     mkBody = case args of
         []     -> pure Nothing
-        a : [] -> pure $ Just a
-        ts     -> pure . Just $ appAll (TupleT $ length ts) ts
+        ts     -> do
+            let n = length ts
+            pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
 
 
 -- | Define the servant endpoint type for non-hierarchical constructors. E.g.
@@ -337,15 +342,15 @@ mkEndpointHander :: Type -> EndpointData -> Q [Dec]
 mkEndpointHander runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
-    let varPat = TupP $ fmap VarP varNames
+    let varPat =  ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
         nrArgs = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
                 . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
                       []  -> handlerRetType
-                      [a] -> AppT (AppT ArrowT a) handlerRetType
-                      as  -> AppT (AppT ArrowT (foldl AppT (TupleT (length as)) as))
+                      as  -> AppT (AppT ArrowT (AppT (ConT $ mkName "NamedFields")
+                                $ foldl AppT (TupleT (length as)) as))
                                   handlerRetType
 
         funBodyBase = AppE (VarE runner)
@@ -353,7 +358,7 @@ mkEndpointHander runnerTy e = do
 
         funBody = case eConstructorReturns e of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
-            _        -> pure funBodyBase
+            _        -> pure $ funBodyBase
     funClause <- clause
         (pure (VarP runner) : (if nrArgs > 0 then [pure $ varPat] else []))
         (normalB [| liftIO $ $(funBody)  |])

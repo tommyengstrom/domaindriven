@@ -37,9 +37,11 @@ dependencies:
 - servant-server
 - stm
 - streaming
+- swagger2
 - template-haskell
 - text
 - transformers
+- unordered-containers
 - uuid
 
 default-extensions:
@@ -90,6 +92,8 @@ tests:
     - domain-driven
     - hspec
     - QuickCheck
+    - quickcheck-classes
+    - quickcheck-arbitrary-adt
 
 executables:
   simple:

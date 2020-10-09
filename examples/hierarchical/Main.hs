@@ -1,13 +1,12 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module contains simple example of how to write hierarchical models in
 -- domain-driven. Note that in real life you may not want to split these models up. The
 -- intent of this example is just to show the technique.
 module Main where
 
-import           DomainDriven.Server            ( mkCmdServer
-                                                , mkQueryServer
-                                                )
+import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
 import           Data.Bifunctor                 ( bimap )
@@ -31,23 +30,29 @@ import           Control.Monad
 import           Control.Exception              ( throwIO )
 import           Servant.Docs
 import           Data.UUID                      ( nil )
+import Data.Swagger (ToSchema)
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 data Item = Item
     { description :: Description
-    , price       :: Price
-    }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    , price :: Price
+    } deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
 
 newtype ItemKey = ItemKey UUID
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData)
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Description = Description String
-    deriving newtype (Show, Eq, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Price = EUR Int
-    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()
@@ -162,6 +167,9 @@ instance ToCapture (Capture "ItemKey" ItemKey) where
 
 instance ToCapture (Capture "Price" Price) where
     toCapture _ = DocCapture "Price" "Price in Euroes"
+
+instance ToSample a => ToSample (NamedFields a) where
+    toSamples _ =  fmap (fmap NamedFields) . toSamples $ Proxy @a
 
 instance ToSample ItemKey where
     toSamples _ = [("key", ItemKey nil)]
