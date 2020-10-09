@@ -162,6 +162,9 @@ server queryRunner cmdRunner = storeCmdServer cmdRunner :<|> storeQueryServer qu
 ------------------------------------------------------------------------------------------
 -- Servant-docs for documentation --------------------------------------------------------
 ------------------------------------------------------------------------------------------
+instance ToCapture (Capture "whatever" ItemKey) where
+    toCapture _ = DocCapture "ItemKey" "Item Id"
+
 instance ToCapture (Capture "ItemKey" ItemKey) where
     toCapture _ = DocCapture "ItemKey" "Item Id"
 

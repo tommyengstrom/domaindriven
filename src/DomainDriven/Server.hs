@@ -260,11 +260,11 @@ toReqBody args = mkBody
             pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
 
 
--- | Define the servant endpoint type for non-hierarchical constructors. E.g.
+-- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-epType :: ServerType -> Endpoint -> Q Type
-epType sType = \case
+cmdEndpointType:: Endpoint -> Q Type
+cmdEndpointType = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
@@ -283,10 +283,26 @@ epType sType = \case
         reqBody = toReqBody $ eConstructorArgs e
 
         reqReturn :: Q Type
-        reqReturn = case sType of
-            CmdServer -> [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
-            QueryServer -> [t| Put '[JSON] $(pure $ eHandlerReturn e) |]
+        reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
 
+-- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
+-- `GetBook :: BookId -> Query Book` will result in:
+-- "GetBook" :> Capture "BookId" BookId" :> Get '[JSON] Book
+queryEndpointType:: Endpoint -> Q Type
+queryEndpointType = \case
+    Endpoint e -> epSimpleType e
+    SubApi   e -> epSubApiType e
+  where
+    epSimpleType :: EndpointData -> Q Type
+    epSimpleType e = [t| $(pure queryName) :> $(params $ eConstructorArgs e) |]
+      where
+        queryName :: Type
+        queryName = LitT . StrTyLit $ eShortConstructor e
+
+        params :: [Type] -> Q Type
+        params = \case
+            [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
+            t0:ts -> appT (appT [t| (:>) |] [t| Capture "whatever" $(pure t0) |]) (params ts)
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
@@ -315,7 +331,9 @@ epSubApiType e = do
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: ServerType -> Endpoint -> Q [Dec]
 mkEndpointDec sType e = do
-    ty <- epType sType e
+    ty <- case sType of
+        CmdServer -> cmdEndpointType e
+        QueryServer -> queryEndpointType e
     pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
 mkSubServer :: ServerType -> Endpoint -> Q [Dec]
@@ -334,12 +352,41 @@ mkSubServer sTy = \case
 mkHandlers :: ServerSpec -> Q [Dec]
 mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
     runnerTy <- runnerType spec
-    case ep of
-        Endpoint e -> mkEndpointHander runnerTy e
-        SubApi   e -> mkSubAPiHandler runnerTy e
+    case (ep, serverType spec) of
+        (Endpoint e, CmdServer) -> mkCmdEPHandler runnerTy e
+        (Endpoint e, QueryServer) -> mkQueryEPHandler runnerTy e
+        (SubApi   e, _) -> mkSubAPiHandler runnerTy e
 
-mkEndpointHander :: Type -> EndpointData -> Q [Dec]
-mkEndpointHander runnerTy e = do
+mkQueryEPHandler :: Type -> EndpointData -> Q [Dec]
+mkQueryEPHandler runnerTy e = do
+    varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
+    handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
+    let varPat =  fmap VarP varNames
+        nrArgs = length @[] $ eConstructorArgs e
+        funSig =
+            SigD (eHandlerName e)
+                . AppT (AppT ArrowT runnerTy)
+                $ case eConstructorArgs e of
+                      []  -> handlerRetType
+                      t:ts -> foldl (AppT . AppT ArrowT) t (ts <> [handlerRetType])
+        funBodyBase = AppE (VarE runner)
+            $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)
+
+        funBody = case eConstructorReturns e of
+            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+            _        -> pure $ funBodyBase
+    funClause <- clause
+        (pure (VarP runner) : (if nrArgs > 0 then (fmap pure varPat) else []))
+        (normalB [| liftIO $ $(funBody)  |])
+        []
+    let funDef = FunD (eHandlerName e) [funClause]
+    pure [funSig, funDef]
+  where
+    runner :: Name
+    runner = mkName "runner"
+
+mkCmdEPHandler :: Type -> EndpointData -> Q [Dec]
+mkCmdEPHandler runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
     let varPat =  ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
