@@ -38,6 +38,8 @@ class ReadModel a => WriteModel a where
 -- run and generate events on the same state.
 type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
+type QueryHandler model query err
+    = forall a . Exception err => model -> query a -> IO (Either err a)
 
 type CmdRunner c = forall a . c a -> IO a
 type QueryRunner c = forall a . c a -> IO a

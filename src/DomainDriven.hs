@@ -1,5 +1,6 @@
 module DomainDriven
     ( CmdHandler
+    , QueryHandler
     , CmdRunner
     , ReadModel (..)
     , WriteModel(..)

@@ -144,7 +144,7 @@ data StoreQuery a where
     ListAllItems ::StoreQuery [(ItemKey, Item)]
     LookupItem ::ItemKey -> StoreQuery Item
 
-runStoreQuery :: StoreModel -> StoreQuery a -> IO (Either StoreError a)
+runStoreQuery :: QueryHandler StoreModel StoreQuery StoreError
 runStoreQuery m = \case
     ListAllItems    -> pure . Right $ M.toList m
     LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
