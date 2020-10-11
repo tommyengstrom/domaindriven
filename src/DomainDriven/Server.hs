@@ -275,7 +275,7 @@ toReqBody args = mkBody
 cmdEndpointType:: ServerOptions -> Endpoint -> Q Type
 cmdEndpointType opts = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType e
+    SubApi   e -> epSubApiType opts e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e = [t| $(pure cmdName) :> $middle |]
@@ -300,7 +300,7 @@ cmdEndpointType opts = \case
 queryEndpointType:: ServerOptions -> Endpoint -> Q Type
 queryEndpointType opts = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType e
+    SubApi   e -> epSubApiType opts e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e = [t| $(pure queryName) :> $(params $ eConstructorArgs e) |]
@@ -336,11 +336,11 @@ queryEndpointType opts = \case
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
-epSubApiType :: SubApiData -> Q Type
-epSubApiType e = do
+epSubApiType :: ServerOptions -> SubApiData -> Q Type
+epSubApiType opts e = do
 
     let cmdName :: Type
-        cmdName = LitT . StrTyLit $ feShortConstructor e
+        cmdName = LitT . StrTyLit . renameConstructor opts $ feShortConstructor e
 
         subApiType :: Type
         subApiType = ConT $ feSubApiName e
