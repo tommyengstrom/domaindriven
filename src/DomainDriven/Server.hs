@@ -302,7 +302,15 @@ queryEndpointType = \case
         params :: [Type] -> Q Type
         params = \case
             [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
-            t0:ts -> appT (appT [t| (:>) |] [t| Capture "whatever" $(pure t0) |]) (params ts)
+            t0:ts -> do
+                let tName = case t0 of
+                        ConT n -> n
+                        VarT n -> n
+                    nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
+                     (params ts)
+
+
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
