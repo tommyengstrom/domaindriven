@@ -300,15 +300,24 @@ queryEndpointType = \case
         queryName = LitT . StrTyLit $ eShortConstructor e
 
         params :: [Type] -> Q Type
-        params = \case
-            [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
-            t0:ts -> do
-                let tName = case t0 of
-                        ConT n -> n
-                        VarT n -> n
-                    nameLit = LitT . StrTyLit . show $ unqualifiedName tName
-                appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
-                     (params ts)
+        params ts = do
+            maybeType <- [t| Maybe |]
+            case ts of
+                [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
+                AppT x t0:ts | x == maybeType -> do
+                    let tName = case t0 of
+                            ConT n -> n
+                            VarT n -> n
+                        nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    appT (appT [t| (:>) |] [t| QueryParam $(pure nameLit) $(pure t0) |])
+                         (params ts)
+                t0:ts -> do
+                    let tName = case t0 of
+                            ConT n -> n
+                            VarT n -> n
+                        nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
+                         (params ts)
 
 
 -- | Define a servant endpoint ending in a reference to the sub API.

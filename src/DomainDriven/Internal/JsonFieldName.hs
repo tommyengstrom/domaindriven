@@ -49,6 +49,9 @@ instance {-# OVERLAPPABLE #-} JsonFieldName v => JsonFieldName [v] where
 instance JsonFieldName v => JsonFieldName (Vector v) where
     fieldName = "vectorOf" <> fieldName @v
 
+instance JsonFieldName v => JsonFieldName (Maybe v) where
+    fieldName = "m" <> fieldName @v
+
 class GJsonFieldName t where
   gfieldName :: t x -> Text
 
