@@ -59,6 +59,15 @@ data SubApiData = SubApiData
     , feSubServerName :: Name
     } deriving (Show, Generic)
 
+data ServerOptions = ServerOptions
+    { renameConstructor :: String -> String
+    } deriving (Generic)
+
+defaultServerOptions :: ServerOptions
+defaultServerOptions = ServerOptions
+    { renameConstructor = id
+    }
+
 fullConstructorName :: Lens' Endpoint Name
 fullConstructorName = lens getter setter
   where
@@ -207,17 +216,17 @@ mkServerSpec serverType n = do
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
-mkCmdServer :: Name -> Q [Dec]
-mkCmdServer = mkServerFromSpec <=< mkServerSpec CmdServer
+mkCmdServer :: ServerOptions -> Name -> Q [Dec]
+mkCmdServer opts = mkServerFromSpec opts <=< mkServerSpec CmdServer
 
-mkQueryServer :: Name -> Q [Dec]
-mkQueryServer = mkServerFromSpec <=< mkServerSpec QueryServer
+mkQueryServer ::ServerOptions ->  Name -> Q [Dec]
+mkQueryServer opts = mkServerFromSpec opts <=< mkServerSpec QueryServer
 
-mkServerFromSpec :: ServerSpec -> Q [Dec]
-mkServerFromSpec serverSpec = do
-    subServers <- fmap mconcat . traverse (mkSubServer $ serverType serverSpec)
+mkServerFromSpec :: ServerOptions -> ServerSpec -> Q [Dec]
+mkServerFromSpec opts serverSpec = do
+    subServers <- fmap mconcat . traverse (mkSubServer opts $ serverType serverSpec)
                 $ endpoints serverSpec
-    endpointDecs <- fmap mconcat . traverse (mkEndpointDec (serverType serverSpec)) $ endpoints serverSpec
+    endpointDecs <- fmap mconcat . traverse (mkEndpointDec opts (serverType serverSpec)) $ endpoints serverSpec
     handlers     <- mkHandlers serverSpec
     server       <- mkFullServer serverSpec
     pure $ subServers <> endpointDecs <> handlers <> server
@@ -263,8 +272,8 @@ toReqBody args = mkBody
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-cmdEndpointType:: Endpoint -> Q Type
-cmdEndpointType = \case
+cmdEndpointType:: ServerOptions -> Endpoint -> Q Type
+cmdEndpointType opts = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
@@ -272,7 +281,7 @@ cmdEndpointType = \case
     epSimpleType e = [t| $(pure cmdName) :> $middle |]
       where
         cmdName :: Type
-        cmdName = LitT . StrTyLit $ eShortConstructor e
+        cmdName = LitT . StrTyLit . renameConstructor opts $ eShortConstructor e
 
         middle :: Q Type
         middle = reqBody >>= \case
@@ -288,8 +297,8 @@ cmdEndpointType = \case
 -- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
 -- `GetBook :: BookId -> Query Book` will result in:
 -- "GetBook" :> Capture "BookId" BookId" :> Get '[JSON] Book
-queryEndpointType:: Endpoint -> Q Type
-queryEndpointType = \case
+queryEndpointType:: ServerOptions -> Endpoint -> Q Type
+queryEndpointType opts = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
@@ -297,25 +306,29 @@ queryEndpointType = \case
     epSimpleType e = [t| $(pure queryName) :> $(params $ eConstructorArgs e) |]
       where
         queryName :: Type
-        queryName = LitT . StrTyLit $ eShortConstructor e
+        queryName = LitT . StrTyLit  . renameConstructor opts $ eShortConstructor e
 
         params :: [Type] -> Q Type
-        params ts = do
+        params typeList = do
             maybeType <- [t| Maybe |]
-            case ts of
+            case typeList of
                 [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
                 AppT x t0:ts | x == maybeType -> do
-                    let tName = case t0 of
-                            ConT n -> n
-                            VarT n -> n
-                        nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    tName <- case t0 of
+                            ConT n -> pure n
+                            VarT n -> pure n
+                            err -> fail $ "Expected constructor parameter, got: "
+                                        <> show err
+                    let nameLit = LitT . StrTyLit . show $ unqualifiedName tName
                     appT (appT [t| (:>) |] [t| QueryParam $(pure nameLit) $(pure t0) |])
                          (params ts)
                 t0:ts -> do
-                    let tName = case t0 of
-                            ConT n -> n
-                            VarT n -> n
-                        nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    tName <- case t0 of
+                            ConT n -> pure n
+                            VarT n -> pure n
+                            err -> fail $ "Expected constructor parameter, got: "
+                                        <> show err
+                    let nameLit = LitT . StrTyLit . show $ unqualifiedName tName
                     appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
                          (params ts)
 
@@ -346,22 +359,22 @@ epSubApiType e = do
     pure $ foldr1 (\a b -> AppT (AppT bird a) b) (cmdName : captures <> [subApiType])
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: ServerType -> Endpoint -> Q [Dec]
-mkEndpointDec sType e = do
+mkEndpointDec :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
+mkEndpointDec opts sType e = do
     ty <- case sType of
-        CmdServer -> cmdEndpointType e
-        QueryServer -> queryEndpointType e
+        CmdServer -> cmdEndpointType opts e
+        QueryServer -> queryEndpointType opts e
     pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
 
-mkSubServer :: ServerType -> Endpoint -> Q [Dec]
-mkSubServer sTy = \case
+mkSubServer :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
+mkSubServer opts sTy = \case
     Endpoint _ -> pure []
     SubApi e -> do
         subServerSpec <-
             set (field @"apiName") (feSubApiName e)
             .   set (field @"serverName") (feSubServerName e)
             <$> mkServerSpec sTy (feSubCmd e)
-        subServerDecs <- mkServerFromSpec subServerSpec
+        subServerDecs <- mkServerFromSpec opts subServerSpec
         pure subServerDecs
 
 

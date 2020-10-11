@@ -38,9 +38,9 @@ data StoreLookup a where
     LookupAll ::StoreLookup [Item]
     LookupItem ::ItemKey -> StoreLookup Item
 
-$(mkCmdServer ''StoreCmd)
+$(mkCmdServer defaultServerOptions ''StoreCmd)
 
-$(mkQueryServer ''StoreLookup)
+$(mkQueryServer defaultServerOptions ''StoreLookup)
 
 spec :: Spec
 spec = pure ()
