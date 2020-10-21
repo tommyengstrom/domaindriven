@@ -37,6 +37,7 @@ data Item = Item
 data StoreLookup a where
     LookupAll ::StoreLookup [Item]
     LookupItem ::ItemKey -> StoreLookup Item
+    MultipleParameters :: ItemKey -> String -> Int -> StoreLookup Item
 
 $(mkCmdServer defaultServerOptions ''StoreCmd)
 

@@ -398,7 +398,7 @@ mkQueryEPHandler runnerTy e = do
                 . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
                       []  -> handlerRetType
-                      t:ts -> foldl (AppT . AppT ArrowT) t (ts <> [handlerRetType])
+                      ts -> foldr (AppT . AppT ArrowT) handlerRetType ts
         funBodyBase = AppE (VarE runner)
             $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)
 
