@@ -7,7 +7,8 @@ import           Database.PostgreSQL.Simple
 import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
 import           Data.UUID
---import qualified Database.PostgreSQL.Simple.FromField         as FF
+import qualified Database.PostgreSQL.Simple.FromField         as FF
+import qualified Database.PostgreSQL.Simple.ToField         as TF
 
 
 data PersistanceError
@@ -26,14 +27,8 @@ data EventTable = EventTable
     }
     deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
 
-mkTestConn :: IO Connection
-mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
-                                   , connectPort     = 5432
-                                   , connectUser     = "postgres"
-                                   , connectPassword = "test"
-                                   , connectDatabase = "domaindriven"
-                                   }
-
+-- instance ToJSON a => ToField (EventTable a) where
+--   toField = Escape $ encode
 decodeEventRow :: FromJSON e => EventTable -> IO (Stored e)
 decodeEventRow (EventTable k ts rawEvent) = do
     ev <- either (throwM . EncodingError) pure $ eitherDecodeStrict rawEvent
@@ -67,11 +62,12 @@ simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
         traverse decodeStateRow =<< query conn "select * from ?" [stateTable]
     , writeState    = \conn (BL.toStrict . encode -> s) -> execute
         conn
-        "insert into ? values ? on conflict (key) do update set state = ?"
-        (stateTable, s, s)
-    , writeEvents   = \conn storedEvents -> executeMany conn
-                                                        "insert into ? values ?"
-                                                        (fmap toEventTable storedEvents)
+        "insert into states(model, state) values (?, ?)"
+        ("fixme" :: Text, s)
+    , writeEvents   = \conn storedEvents -> executeMany
+        conn
+        "insert into events (id, timestamp, event) values (?, ?, ?)"
+        (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) storedEvents)
     , app           = app'
     , seed          = seed'
     }
@@ -94,8 +90,7 @@ data PostgresStateAndEvent model event = PostgresStateAndEvent
     deriving Generic
 
 
-instance (FromRow m, FromRow (Stored e), ToRow m)
-        => ReadModel (PostgresStateAndEvent m e) where
+instance ReadModel (PostgresStateAndEvent m e) where
     type Model (PostgresStateAndEvent m e) = m
     type Event (PostgresStateAndEvent m e) = e
     applyEvent pg = app pg
@@ -124,8 +119,7 @@ instance (FromRow m, FromRow (Stored e), ToRow m)
         conn <- getConnection pg
         (queryEvents pg) conn
 
-instance (FromRow m, ToRow m, FromRow (Stored e), ToRow (Stored e))
-        => WriteModel (PostgresStateAndEvent m e) where
+instance WriteModel (PostgresStateAndEvent m e) where
     transactionalUpdate pg evalCmd = do
         conn <- getConnection pg
         withTransaction conn $ do

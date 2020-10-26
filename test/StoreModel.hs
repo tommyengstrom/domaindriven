@@ -12,7 +12,7 @@ import           Control.Monad.Except
 import           GHC.Enum
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num)
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num, ToJSONKey, FromJSONKey)
     deriving stock (Generic, Functor)
 
 type ItemKey = Wrap "ItemKey" Int
