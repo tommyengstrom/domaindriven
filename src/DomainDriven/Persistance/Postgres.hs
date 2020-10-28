@@ -57,13 +57,14 @@ simplePostgres
 simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
     , queryEvents   = \conn ->
-        traverse decodeEventRow =<< query conn "select * from ?" [eventTable]
+        traverse decodeEventRow =<< query_ conn "select * from events order by timestamp"
     , queryState    = \conn ->
-        traverse decodeStateRow =<< query conn "select * from ?" [stateTable]
+        traverse decodeStateRow =<< query_ conn "select * from state"
     , writeState    = \conn (BL.toStrict . encode -> s) -> execute
         conn
-        "insert into states(model, state) values (?, ?)"
-        ("fixme" :: Text, s)
+        "insert into states(model, state) values (?, ?) \
+            \on conflict (model) do update set state=(?)"
+        ("fixme" :: Text, s, s)
     , writeEvents   = \conn storedEvents -> executeMany
         conn
         "insert into events (id, timestamp, event) values (?, ?, ?)"
