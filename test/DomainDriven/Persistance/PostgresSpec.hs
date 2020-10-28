@@ -95,8 +95,25 @@ queryEventsSpec :: Connection -> Spec
 queryEventsSpec conn = describe "queryEvents" $ do
     it "Can query events" $ do
         evs <- queryEvents p conn
+        evs `shouldSatisfy` (>= 1) . length
+    it "Events come out in temporal order" $ do
+        -- write few more events before
+        --
+        _ <- do
+            id1 <- mkId
+            let ev1 = Store.Restocked 1 4
+            writeEvents p conn [ Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
+
+            id2 <- mkId
+            let ev2 = Store.Restocked 1 10
+            writeEvents p conn [ Stored ev2 (UTCTime (fromGregorian 2020 10 18) 1) id2]
+
+        evs <- queryEvents p conn
         evs `shouldSatisfy` (> 1) . length
-    it "Events come out in temporal order" False
+        let timestamps = fmap storedTimestamp evs
+        (evs, "temporal order") `shouldSatisfy`
+            (\(x, _) -> and $ zipWith (<=) timestamps (drop 1 timestamps))
+
 
 queryStateSpec :: Connection -> Spec
 queryStateSpec conn = describe "queryState" $ do

@@ -7,8 +7,10 @@ import           Database.PostgreSQL.Simple
 import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
 import           Data.UUID
-import qualified Database.PostgreSQL.Simple.FromField         as FF
+import  Database.PostgreSQL.Simple.FromField         as FF
 import qualified Database.PostgreSQL.Simple.ToField         as TF
+import Database.PostgreSQL.Simple.FromRow as FR
+
 
 
 data PersistanceError
@@ -20,19 +22,24 @@ data PersistanceError
 type EventTableName = String
 type StateTableName = String
 
-data EventTable = EventTable
+decodeEventRow :: (UUID, UTCTime, e) -> Stored e
+decodeEventRow (k, ts, e) = Stored e ts k
+
+data EventRow e = EventRow
     { key       :: UUID
     , timestamp :: UTCTime
-    , event     :: ByteString
+    , event     :: e
     }
-    deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
+    deriving (Show, Eq, Ord, Generic)
 
--- instance ToJSON a => ToField (EventTable a) where
---   toField = Escape $ encode
-decodeEventRow :: FromJSON e => EventTable -> IO (Stored e)
-decodeEventRow (EventTable k ts rawEvent) = do
-    ev <- either (throwM . EncodingError) pure $ eitherDecodeStrict rawEvent
-    pure $ Stored { storedEvent = ev, storedTimestamp = ts, storedUUID = k }
+fromEventRow :: EventRow e -> Stored e
+fromEventRow (EventRow k ts e) = Stored e ts k
+
+toEventRow :: Stored e -> EventRow e
+toEventRow (Stored e ts k) = EventRow k ts e
+
+instance (Typeable e, FromJSON e) => FromRow (EventRow e) where
+  fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
 
 data StateTable = StateTable
     { key       :: UUID
@@ -47,7 +54,7 @@ decodeStateRow (StateTable _ _ rawState) =
 
 
 simplePostgres
-    :: (FromJSON e, ToJSON e, FromJSON m, ToJSON m)
+    :: (FromJSON e, Typeable e, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
     -> EventTableName
     -> StateTableName
@@ -57,7 +64,7 @@ simplePostgres
 simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
     , queryEvents   = \conn ->
-        traverse decodeEventRow =<< query_ conn "select * from events order by timestamp"
+        fmap fromEventRow <$> query_ conn "select * from events order by timestamp"
     , queryState    = \conn ->
         traverse decodeStateRow =<< query_ conn "select * from state"
     , writeState    = \conn (BL.toStrict . encode -> s) -> execute
@@ -73,9 +80,6 @@ simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     , seed          = seed'
     }
 
-toEventTable :: ToJSON event => Stored event -> EventTable
-toEventTable (Stored ev ts key) =
-    EventTable { key = key, timestamp = ts, event = BL.toStrict $ encode ev }
 
 
 -- | Keep the events and state in postgres!
