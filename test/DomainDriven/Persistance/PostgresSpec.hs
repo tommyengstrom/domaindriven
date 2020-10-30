@@ -16,8 +16,8 @@ spec = do
     conn <- runIO mkTestConn
     runIO $ do
         dropTables conn
-        createEventTable conn
-        createStateTable conn
+        createEventTable p conn
+        createStateTable p conn
     writeEventsSpec conn
     writeStateSpec conn
     queryEventsSpec conn
@@ -36,23 +36,7 @@ p = simplePostgres mkTestConn "events" "state" Store.applyStoreEvent mempty
 dropTables :: Connection -> IO Int64
 dropTables conn = do
     execute_ conn "drop table if exists events"
-    execute_ conn "drop table if exists states"
-
-createEventTable :: Connection -> IO Int64
-createEventTable conn =
-    execute_ conn "create table events \
-            \( id uuid primary key\
-            \, timestamp timestamptz not null default now()\
-            \, event jsonb not null\
-            \);"
-
-createStateTable :: Connection -> IO Int64
-createStateTable conn =
-    execute_ conn "create table states \
-            \( model text primary key\
-            \, timestamp timestamptz not null default now()\
-            \, state jsonb not null\
-            \);"
+    execute_ conn "drop table if exists state"
 
 writeEventsSpec :: Connection -> Spec
 writeEventsSpec conn =  describe "queryEvents" $ do
@@ -111,11 +95,14 @@ queryEventsSpec conn = describe "queryEvents" $ do
         evs <- queryEvents p conn
         evs `shouldSatisfy` (> 1) . length
         let timestamps = fmap storedTimestamp evs
-        (evs, "temporal order") `shouldSatisfy`
-            (\(x, _) -> and $ zipWith (<=) timestamps (drop 1 timestamps))
+        ("temporal order") `shouldSatisfy`
+            (const. and $ zipWith (<=) timestamps (drop 1 timestamps))
 
 
 queryStateSpec :: Connection -> Spec
 queryStateSpec conn = describe "queryState" $ do
-    it "Can query state" False
+    it "Can query state" $ do
+        s <- queryState p conn
+        s `shouldSatisfy` const True
+
 

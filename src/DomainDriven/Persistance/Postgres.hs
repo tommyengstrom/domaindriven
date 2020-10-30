@@ -6,7 +6,7 @@ import           RIO.Time
 import           Database.PostgreSQL.Simple
 import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
-import           Data.UUID
+import           Data.UUID (UUID)
 import  Database.PostgreSQL.Simple.FromField         as FF
 import qualified Database.PostgreSQL.Simple.ToField         as TF
 import Database.PostgreSQL.Simple.FromRow as FR
@@ -41,20 +41,22 @@ toEventRow (Stored e ts k) = EventRow k ts e
 instance (Typeable e, FromJSON e) => FromRow (EventRow e) where
   fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
 
-data StateTable = StateTable
-    { key       :: UUID
+data StateRow m = StateRow
+    { modelName :: Text
     , timestamp :: UTCTime
-    , state     :: ByteString
+    , state     :: m
     }
-    deriving (Show, Eq, Ord, Generic, FromRow, ToRow)
+    deriving (Show, Eq, Ord, Generic)
 
-decodeStateRow :: FromJSON e => StateTable -> IO e
-decodeStateRow (StateTable _ _ rawState) =
-    either (throwM . EncodingError) pure $ eitherDecodeStrict rawState
+instance (Typeable m, FromJSON m) => FromRow (StateRow m) where
+  fromRow = StateRow <$> field <*> field <*> fieldWith fromJSONField
+
+fromStateRow :: StateRow s -> s
+fromStateRow = state
 
 
 simplePostgres
-    :: (FromJSON e, Typeable e, ToJSON e, FromJSON m, ToJSON m)
+    :: (FromJSON e, Typeable e, Typeable m, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
     -> EventTableName
     -> StateTableName
@@ -63,18 +65,36 @@ simplePostgres
     -> PostgresStateAndEvent m e
 simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
+    , createEventTable = \conn ->
+        execute_ conn $ "create table \"" <> fromString eventTable <> "\" \
+                        \( id uuid primary key\
+                        \, timestamp timestamptz not null default now()\
+                        \, event jsonb not null\
+                        \);"
+    , createStateTable = \conn ->
+        execute_ conn $ "create table \"" <> fromString stateTable <> "\" \
+                \( model text primary key\
+                \, timestamp timestamptz not null default now()\
+                \, state jsonb not null\
+                \);"
     , queryEvents   = \conn ->
-        fmap fromEventRow <$> query_ conn "select * from events order by timestamp"
+        fmap fromEventRow <$> query_ conn
+            ("select * from \"" <> fromString eventTable <> "\" order by timestamp")
     , queryState    = \conn ->
-        traverse decodeStateRow =<< query_ conn "select * from state"
-    , writeState    = \conn (BL.toStrict . encode -> s) -> execute
-        conn
-        "insert into states(model, state) values (?, ?) \
-            \on conflict (model) do update set state=(?)"
-        ("fixme" :: Text, s, s)
+        fmap fromStateRow <$> query_ conn
+            ("select * from \"" <> fromString stateTable <> "\"")
+    , writeState    = \conn (BL.toStrict . encode -> s) -> do
+        now <- getCurrentTime
+        execute
+            conn
+            ("insert into \"" <> fromString stateTable <> "\"(model, state, timestamp) \
+            \values (?, ?, ?) \
+            \on conflict (model) do update set state=(?), timestamp=(?)")
+            ("model_id" :: Text, s, now, s, now)
     , writeEvents   = \conn storedEvents -> executeMany
         conn
-        "insert into events (id, timestamp, event) values (?, ?, ?)"
+        ("insert into \"" <> fromString eventTable <> "\" (id, timestamp, event) \
+        \values (?, ?, ?)")
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) storedEvents)
     , app           = app'
     , seed          = seed'
@@ -85,8 +105,10 @@ simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
     { getConnection :: IO Connection
+    , createEventTable :: Connection -> IO Int64
+    , createStateTable :: Connection -> IO Int64
     , queryEvents   :: Connection -> IO [Stored event]
-    , queryState    :: Connection -> IO [model]
+    , queryState    :: Connection -> IO [model] -- FIXME: One model only!
     , writeState    :: Connection -> model -> IO Int64 -- ^ Insert to write the state
     , writeEvents   :: Connection -> [Stored event] -> IO Int64 -- ^ Insert to write an event
     , app           :: model -> Stored event -> model
@@ -116,7 +138,7 @@ instance ReadModel (PostgresStateAndEvent m e) where
         recalculateState :: Connection -> IO m
         recalculateState conn = do
             s <- foldl' (app pg) (seed pg) <$> getEvents pg
-            _ <- (writeState pg) conn s  -- FIXME: Not thread safe!
+            _ <- writeState pg conn s  -- FIXME: Not thread safe!
             pure s
 
 
