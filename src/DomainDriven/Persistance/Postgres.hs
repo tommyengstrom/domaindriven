@@ -71,6 +71,8 @@ simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
                         \, timestamp timestamptz not null default now()\
                         \, event jsonb not null\
                         \);"
+    , clearStateTable = \conn ->
+        execute_ conn $ "delete from \"" <> fromString stateTable <> "\""
     , createStateTable = \conn ->
         execute_ conn $ "create table \"" <> fromString stateTable <> "\" \
                 \( model text primary key\
@@ -107,6 +109,7 @@ data PostgresStateAndEvent model event = PostgresStateAndEvent
     { getConnection :: IO Connection
     , createEventTable :: Connection -> IO Int64
     , createStateTable :: Connection -> IO Int64
+    , clearStateTable :: Connection -> IO Int64
     , queryEvents   :: Connection -> IO [Stored event]
     , queryState    :: Connection -> IO [model] -- FIXME: One model only!
     , writeState    :: Connection -> model -> IO Int64 -- ^ Insert to write the state

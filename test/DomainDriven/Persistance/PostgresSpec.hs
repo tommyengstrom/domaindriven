@@ -25,6 +25,7 @@ spec = do
     writeStateSpec conn
     queryEventsSpec conn
     queryStateSpec conn
+    clearStateSpec conn
 
 mkTestConn :: IO Connection
 mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
@@ -115,6 +116,15 @@ queryStateSpec conn = describe "queryState" $ do
     it "Can query state" $ do
         s <- queryState p conn
         s `shouldSatisfy` const True
+
+
+clearStateSpec :: Connection -> Spec
+clearStateSpec conn = describe "clearStateTable" $ do
+    it "Clears all states" $ do
+        s <- queryState p conn
+        s `shouldSatisfy` (>0) . length
+        i <- clearStateTable p conn
+        fromIntegral i `shouldBe` length s
 
 
 storeModelSpec :: Connection -> Spec
