@@ -9,6 +9,8 @@ import           Database.PostgreSQL.Simple
 import qualified StoreModel as Store
 import Data.UUID (nil)
 import RIO.Time
+import qualified Data.Map as M
+import           Safe                           ( headNote )
 
 
 spec :: Spec
@@ -18,6 +20,7 @@ spec = do
         dropTables conn
         createEventTable p conn
         createStateTable p conn
+    storeModelSpec conn
     writeEventsSpec conn
     writeStateSpec conn
     queryEventsSpec conn
@@ -30,13 +33,21 @@ mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
                                    , connectPassword = "postgres"
                                    , connectDatabase = "domaindriven"
                                    }
+
+
+eventTable :: EventTableName
+eventTable = "events"
+
+stateTable :: StateTableName
+stateTable = "state"
+
 p :: PostgresStateAndEvent Store.StoreModel Store.StoreEvent
-p = simplePostgres mkTestConn "events" "state" Store.applyStoreEvent mempty
+p = simplePostgres mkTestConn eventTable stateTable Store.applyStoreEvent mempty
 
 dropTables :: Connection -> IO Int64
 dropTables conn = do
-    execute_ conn "drop table if exists events"
-    execute_ conn "drop table if exists state"
+    execute_ conn $ "drop table if exists \"" <> fromString eventTable <> "\""
+    execute_ conn $ "drop table if exists \"" <> fromString stateTable <> "\""
 
 writeEventsSpec :: Connection -> Spec
 writeEventsSpec conn =  describe "queryEvents" $ do
@@ -106,3 +117,28 @@ queryStateSpec conn = describe "queryState" $ do
         s `shouldSatisfy` const True
 
 
+storeModelSpec :: Connection -> Spec
+storeModelSpec conn = describe "Test basic functionality" $ do
+    let es = p
+
+
+    it "Can add item" $ do
+        let item :: Store.ItemInfo
+            item = Store.ItemInfo 10 49
+        iKey <- runCmd es Store.handleStoreCmd $ Store.AddItem item
+        getModel es `shouldReturn` M.singleton iKey item
+
+    it "Can buy item" $ do
+        iKey <- headNote "Ops" . M.keys <$> getModel es
+        runCmd es Store.handleStoreCmd $ Store.BuyItem iKey 7
+        getModel es `shouldReturn` M.singleton (Store.Wrap 1) (Store.ItemInfo 3 49)
+
+
+    it "Can run Query" $ do
+        runQuery es Store.queryHandler Store.ProductCount `shouldReturn` 1
+
+        let item :: Store.ItemInfo
+            item = Store.ItemInfo 4 33
+        _ <- runCmd es Store.handleStoreCmd $ Store.AddItem item
+
+        runQuery es Store.queryHandler Store.ProductCount `shouldReturn` 2
