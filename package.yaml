@@ -21,25 +21,28 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 
 dependencies:
 - base >= 4.7 && < 5
-- rio
-- random
-- uuid
-- mtl
+- aeson
 - containers
-- transformers
+- deepseq
+- directory
 - generic-lens
 - lens
-- aeson
-- stm
-- streaming
-- deepseq
-- safe
-- directory
-- text
 - monad-loops
+- mtl
+- postgresql-simple
+- random
+- rio
+- safe
 - servant
 - servant-server
+- stm
+- streaming
+- swagger2
 - template-haskell
+- text
+- transformers
+- unordered-containers
+- uuid
 
 default-extensions:
 - Arrows
@@ -89,6 +92,8 @@ tests:
     - domain-driven
     - hspec
     - QuickCheck
+    - quickcheck-classes
+    - quickcheck-arbitrary-adt
 
 executables:
   simple:

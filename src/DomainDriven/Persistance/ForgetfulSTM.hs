@@ -5,34 +5,43 @@ import           RIO
 import           GHC.IO.Unsafe                  ( unsafePerformIO )
 
 
-data PersistanceError = EncodingError String
-    deriving (Show, Eq, Typeable, Exception)
+createForgetfulSTM
+    :: (model -> Stored event -> model)
+    -> model -- ^ initial model
+    -> IO (ForgetfulSTM model event)
+createForgetfulSTM appEvent m0 = do
+    state <- newTVarIO m0
+    evs <- newTVarIO []
+    pure $ ForgetfulSTM state appEvent m0 evs
 
 -- | STM state without event persistance
 data ForgetfulSTM model event = ForgetfulSTM
     { stateTVar :: TVar model
+    , app       :: model -> Stored event -> model
+    , seed      :: model
+    , events    :: TVar [Stored event]
     }
     deriving Generic
 
---
-createForgetfulSTM
-    :: (model -> Stored event -> model)
-    -> model -- ^ initial model
-    -> IO (DomainModel (ForgetfulSTM model event) model event)
-createForgetfulSTM appEvent m0 = do
-    tvar <- newTVarIO m0
-    pure $ DomainModel (ForgetfulSTM tvar) appEvent
+instance ReadModel (ForgetfulSTM m e) where
+    type Model (ForgetfulSTM m e) = m
+    type Event (ForgetfulSTM m e) = e
+    applyEvent  ff = app ff
+    getModel ff = readTVarIO $ stateTVar ff
+    getEvents ff = readTVarIO $ events ff
 
-instance PersistanceHandler (ForgetfulSTM model event) model event where
-    getModel (ForgetfulSTM tvar) = readTVarIO tvar
-    getEvents _ = pure [] -- ^ Events are not persisted
-    transactionalUpdate (ForgetfulSTM tvar) appEvent evalCmd = do
+instance WriteModel (ForgetfulSTM m e) where
+    transactionalUpdate ff evalCmd =
         atomically $ do
+            let tvar = stateTVar ff
             m         <- readTVar tvar
             (r, evs)  <- either throwM pure $ evalCmd m
             storedEvs <- for evs $ \e -> do
                 let s = unsafePerformIO $ toStored e
                 pure s
-            let newModel = foldl' appEvent m storedEvs
+            let newModel = foldl' (app ff) m storedEvs
+            modifyTVar (events ff) (<> storedEvs)
             writeTVar tvar newModel
+
             pure r
+

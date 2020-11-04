@@ -1,18 +1,16 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module contains simple example of how to write hierarchical models in
 -- domain-driven. Note that in real life you may not want to split these models up. The
 -- intent of this example is just to show the technique.
 module Main where
 
-import           DomainDriven.Server            ( mkCmdServer
-                                                , mkQueryServer
-                                                )
+import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
 import           Data.Bifunctor                 ( bimap )
 import           Servant                        ( serve
-                                                , Capture
                                                 , FromHttpApiData
                                                 , Proxy(..)
                                                 , Server
@@ -21,7 +19,7 @@ import           Servant                        ( serve
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
-import           DomainDriven.Persistance.FileAndSTM
+import           DomainDriven.Persistance.FileWithSTM
 import           GHC.Generics                   ( Generic )
 import           Data.Aeson                     ( FromJSON
                                                 , ToJSON
@@ -29,25 +27,29 @@ import           Data.Aeson                     ( FromJSON
 import qualified Data.Map                                     as M
 import           Control.Monad
 import           Control.Exception              ( throwIO )
-import           Servant.Docs
-import           Data.UUID                      ( nil )
+import Data.Swagger (ToSchema)
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 data Item = Item
     { description :: Description
-    , price       :: Price
-    }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    , price :: Price
+    } deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
 
 newtype ItemKey = ItemKey UUID
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData)
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Description = Description String
-    deriving newtype (Show, Eq, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 newtype Price = EUR Int
-    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON)
+    deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON, ToSchema)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()
@@ -57,6 +59,11 @@ data ItemEvent
     = ChangedDescription Description
     | ChangedPrice Price
     deriving (Show, Generic, FromJSON, ToJSON)
+
+newtype SearchTerm = SearchTerm String
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, ToSchema, FromHttpApiData)
+    deriving stock (Generic)
+    deriving anyclass (JsonFieldName)
 
 applyItemEvent :: Item -> Stored ItemEvent -> Item
 applyItemEvent m (Stored e _ _) = case e of
@@ -129,22 +136,22 @@ handleStoreCmd = \case
                     $ itemContinuation i
             Nothing -> Left NoSuchItem
 
-$(mkCmdServer ''StoreCmd)
+$(mkCmdServer defaultServerOptions ''StoreCmd)
 
 ------------------------------------------------------------------------------------------
 -- Store queries -------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 
 data StoreQuery a where
-    ListAllItems ::StoreQuery [(ItemKey, Item)]
+    ListItems :: Maybe SearchTerm -> StoreQuery [(ItemKey, Item)]
     LookupItem ::ItemKey -> StoreQuery Item
 
-runStoreQuery :: StoreModel -> StoreQuery a -> Either StoreError a
+runStoreQuery :: QueryHandler StoreModel StoreQuery StoreError
 runStoreQuery m = \case
-    ListAllItems    -> Right $ M.toList m
-    LookupItem iKey -> maybe (Left NoSuchItem) Right $ M.lookup iKey m
+    ListItems _  -> pure . Right $ M.toList m
+    LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
 
-$(mkQueryServer ''StoreQuery)
+$(mkQueryServer defaultServerOptions ''StoreQuery)
 
 -- We can assemble the individual APIs as we would with any other Servant APIs.
 type Api = StoreCmdApi :<|> StoreQueryApi
@@ -154,35 +161,13 @@ server :: QueryRunner StoreQuery -> CmdRunner StoreCmd -> Server Api
 server queryRunner cmdRunner = storeCmdServer cmdRunner :<|> storeQueryServer queryRunner
 
 
-------------------------------------------------------------------------------------------
--- Servant-docs for documentation --------------------------------------------------------
-------------------------------------------------------------------------------------------
-instance ToCapture (Capture "ItemKey" ItemKey) where
-    toCapture _ = DocCapture "ItemKey" "Item Id"
-
-instance ToCapture (Capture "Price" Price) where
-    toCapture _ = DocCapture "Price" "Price in Euroes"
-
-instance ToSample ItemKey where
-    toSamples _ = [("key", ItemKey nil)]
-
-instance ToSample Price where
-    toSamples _ = [("a cheap thing", EUR 3)]
-
-instance ToSample Item where
-    toSamples _ = [("item", Item (Description "sample item") (EUR 35))]
-
-
-instance ToSample Description where
-    toSamples _ = []
 -- | Start a server running on port 8765
 main :: IO ()
 main = do
     -- Then we need to create the model
-    dm <- createFileAndStm "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
+    dm <- createFileWithSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
     -- Print the API documentation before starting the server
-    putStrLn . markdown . docs $ Proxy @Api
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
     run 8765 $ serve (Proxy @Api)
