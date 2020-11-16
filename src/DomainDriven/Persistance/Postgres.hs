@@ -8,7 +8,6 @@ import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
 import           Data.UUID (UUID)
 import  Database.PostgreSQL.Simple.FromField         as FF
-import qualified Database.PostgreSQL.Simple.ToField         as TF
 import Database.PostgreSQL.Simple.FromRow as FR
 
 
@@ -54,7 +53,18 @@ instance (Typeable m, FromJSON m) => FromRow (StateRow m) where
 fromStateRow :: StateRow s -> s
 fromStateRow = state
 
+-- | Create the table required for storing state and events, if they do not yet exist.
+createTables :: PostgresStateAndEvent m e -> IO ()
+createTables runner = do
+  conn <- getConnection runner
+  void (getModel runner)
+    `catch` ( const @_ @SqlError $ do
+                _ <- createEventTable runner conn
+                _ <- createStateTable runner conn
+                void (getModel runner)
+            )
 
+-- | Setup the persistance model and verify that the tables exist.
 simplePostgres
     :: (FromJSON e, Typeable e, Typeable m, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
@@ -62,8 +72,21 @@ simplePostgres
     -> StateTableName
     -> (m -> Stored e -> m)
     -> m
+    -> IO (PostgresStateAndEvent m e)
+simplePostgres getConn eventTable stateTable app' seed' = do
+    let runner = createPostgresPersistance getConn eventTable stateTable app' seed'
+    createTables runner
+    pure runner
+
+createPostgresPersistance
+    :: (FromJSON e, Typeable e, Typeable m, ToJSON e, FromJSON m, ToJSON m)
+    => IO Connection
+    -> EventTableName
+    -> StateTableName
+    -> (m -> Stored e -> m)
+    -> m
     -> PostgresStateAndEvent m e
-simplePostgres getConn eventTable stateTable app' seed' = PostgresStateAndEvent
+createPostgresPersistance getConn eventTable stateTable app' seed' = PostgresStateAndEvent
     { getConnection = getConn
     , createEventTable = \conn ->
         execute_ conn $ "create table \"" <> fromString eventTable <> "\" \

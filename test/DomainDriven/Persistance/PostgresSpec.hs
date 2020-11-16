@@ -17,10 +17,9 @@ spec :: Spec
 spec = do
     conn <- runIO mkTestConn
     runIO $ do
-        dropTables conn
-        createEventTable p conn
-        createStateTable p conn
-    storeModelSpec conn
+        _ <- dropTables conn
+        createTables p
+    storeModelSpec
     writeEventsSpec conn
     writeStateSpec conn
     queryEventsSpec conn
@@ -43,12 +42,12 @@ stateTable :: StateTableName
 stateTable = "state"
 
 p :: PostgresStateAndEvent Store.StoreModel Store.StoreEvent
-p = simplePostgres mkTestConn eventTable stateTable Store.applyStoreEvent mempty
+p = createPostgresPersistance mkTestConn eventTable stateTable Store.applyStoreEvent mempty
 
 dropTables :: Connection -> IO Int64
-dropTables conn = do
-    execute_ conn $ "drop table if exists \"" <> fromString eventTable <> "\""
-    execute_ conn $ "drop table if exists \"" <> fromString stateTable <> "\""
+dropTables conn =
+    (+) <$> execute_ conn ("drop table if exists \"" <> fromString eventTable <> "\"")
+        <*> execute_ conn ("drop table if exists \"" <> fromString stateTable <> "\"")
 
 writeEventsSpec :: Connection -> Spec
 writeEventsSpec conn =  describe "queryEvents" $ do
@@ -98,7 +97,7 @@ queryEventsSpec conn = describe "queryEvents" $ do
         _ <- do
             id1 <- mkId
             let ev1 = Store.Restocked 1 4
-            writeEvents p conn [ Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
+            _ <- writeEvents p conn [ Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
 
             id2 <- mkId
             let ev2 = Store.Restocked 1 10
@@ -107,7 +106,7 @@ queryEventsSpec conn = describe "queryEvents" $ do
         evs <- queryEvents p conn
         evs `shouldSatisfy` (> 1) . length
         let timestamps = fmap storedTimestamp evs
-        ("temporal order") `shouldSatisfy`
+        ("temporal order" :: Text) `shouldSatisfy`
             (const. and $ zipWith (<=) timestamps (drop 1 timestamps))
 
 
@@ -127,28 +126,25 @@ clearStateSpec conn = describe "clearStateTable" $ do
         fromIntegral i `shouldBe` length s
 
 
-storeModelSpec :: Connection -> Spec
-storeModelSpec conn = describe "Test basic functionality" $ do
-    let es = p
-
-
+storeModelSpec :: Spec
+storeModelSpec = describe "Test basic functionality" $ do
     it "Can add item" $ do
         let item :: Store.ItemInfo
             item = Store.ItemInfo 10 49
-        iKey <- runCmd es Store.handleStoreCmd $ Store.AddItem item
-        getModel es `shouldReturn` M.singleton iKey item
+        iKey <- runCmd p Store.handleStoreCmd $ Store.AddItem item
+        getModel p `shouldReturn` M.singleton iKey item
 
     it "Can buy item" $ do
-        iKey <- headNote "Ops" . M.keys <$> getModel es
-        runCmd es Store.handleStoreCmd $ Store.BuyItem iKey 7
-        getModel es `shouldReturn` M.singleton (Store.Wrap 1) (Store.ItemInfo 3 49)
+        iKey <- headNote "Ops" . M.keys <$> getModel p
+        runCmd p Store.handleStoreCmd $ Store.BuyItem iKey 7
+        getModel p `shouldReturn` M.singleton (Store.Wrap 1) (Store.ItemInfo 3 49)
 
 
     it "Can run Query" $ do
-        runQuery es Store.queryHandler Store.ProductCount `shouldReturn` 1
+        runQuery p Store.queryHandler Store.ProductCount `shouldReturn` 1
 
         let item :: Store.ItemInfo
             item = Store.ItemInfo 4 33
-        _ <- runCmd es Store.handleStoreCmd $ Store.AddItem item
+        _ <- runCmd p Store.handleStoreCmd $ Store.AddItem item
 
-        runQuery es Store.queryHandler Store.ProductCount `shouldReturn` 2
+        runQuery p Store.queryHandler Store.ProductCount `shouldReturn` 2
