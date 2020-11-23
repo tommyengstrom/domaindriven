@@ -6,9 +6,9 @@ import           RIO.Time
 import           Database.PostgreSQL.Simple
 import qualified RIO.ByteString.Lazy                          as BL
 import           Data.Aeson
-import           Data.UUID (UUID)
-import  Database.PostgreSQL.Simple.FromField         as FF
-import Database.PostgreSQL.Simple.FromRow as FR
+import           Data.UUID                      ( UUID )
+import           Database.PostgreSQL.Simple.FromField         as FF
+import           Database.PostgreSQL.Simple.FromRow           as FR
 
 
 
@@ -18,6 +18,7 @@ data PersistanceError
     deriving (Show, Eq, Typeable, Exception)
 
 
+type PreviosEventTableName = String
 type EventTableName = String
 type StateTableName = String
 
@@ -38,7 +39,7 @@ toEventRow :: Stored e -> EventRow e
 toEventRow (Stored e ts k) = EventRow k ts e
 
 instance (Typeable e, FromJSON e) => FromRow (EventRow e) where
-  fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
+    fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
 
 data StateRow m = StateRow
     { modelName :: Text
@@ -48,7 +49,7 @@ data StateRow m = StateRow
     deriving (Show, Eq, Ord, Generic)
 
 instance (Typeable m, FromJSON m) => FromRow (StateRow m) where
-  fromRow = StateRow <$> field <*> field <*> fieldWith fromJSONField
+    fromRow = StateRow <$> field <*> field <*> fieldWith fromJSONField
 
 fromStateRow :: StateRow s -> s
 fromStateRow = state
@@ -56,13 +57,13 @@ fromStateRow = state
 -- | Create the table required for storing state and events, if they do not yet exist.
 createTables :: PostgresStateAndEvent m e -> IO ()
 createTables runner = do
-  conn <- getConnection runner
-  void (getModel runner)
-    `catch` ( const @_ @SqlError $ do
-                _ <- createEventTable runner conn
-                _ <- createStateTable runner conn
-                void (getModel runner)
-            )
+    conn <- getConnection runner
+    void (getModel runner)
+        `catch` (const @_ @SqlError $ do
+                    _ <- createEventTable runner conn
+                    _ <- createStateTable runner conn
+                    void (getModel runner)
+                )
 
 -- | Setup the persistance model and verify that the tables exist.
 simplePostgres
@@ -86,46 +87,76 @@ createPostgresPersistance
     -> (m -> Stored e -> m)
     -> m
     -> PostgresStateAndEvent m e
-createPostgresPersistance getConn eventTable stateTable app' seed' = PostgresStateAndEvent
-    { getConnection = getConn
-    , createEventTable = \conn ->
-        execute_ conn $ "create table \"" <> fromString eventTable <> "\" \
+createPostgresPersistance getConn eventTable stateTable app' seed' =
+    PostgresStateAndEvent { getConnection    = getConn
+                          , createEventTable = flip createEventTable' eventTable
+                          , clearStateTable  = flip clearStateTable' stateTable
+                          , createStateTable = flip createStateTable' stateTable
+                          , queryEvents      = flip queryEvents' eventTable
+                          , queryState       = flip queryState' stateTable
+                          , writeState       = \conn s -> writeState' conn stateTable s
+                          , writeEvents = \conn evs -> writeEvents' conn eventTable evs
+                          , app              = app'
+                          , seed             = seed'
+                          }
+
+clearStateTable' :: Connection -> StateTableName -> IO Int64
+clearStateTable' conn stateTable =
+    execute_ conn $ "delete from \"" <> fromString stateTable <> "\""
+
+createEventTable' :: Connection -> EventTableName -> IO Int64
+createEventTable' conn eventTable =
+    execute_ conn
+        $ "create table \""
+        <> fromString eventTable
+        <> "\" \
                         \( id uuid primary key\
                         \, timestamp timestamptz not null default now()\
                         \, event jsonb not null\
                         \);"
-    , clearStateTable = \conn ->
-        execute_ conn $ "delete from \"" <> fromString stateTable <> "\""
-    , createStateTable = \conn ->
-        execute_ conn $ "create table \"" <> fromString stateTable <> "\" \
-                \( model text primary key\
-                \, timestamp timestamptz not null default now()\
-                \, state jsonb not null\
-                \);"
-    , queryEvents   = \conn ->
-        fmap fromEventRow <$> query_ conn
-            ("select * from \"" <> fromString eventTable <> "\" order by timestamp")
-    , queryState    = \conn ->
-        fmap fromStateRow <$> query_ conn
-            ("select * from \"" <> fromString stateTable <> "\"")
-    , writeState    = \conn (BL.toStrict . encode -> s) -> do
-        now <- getCurrentTime
-        execute
-            conn
-            ("insert into \"" <> fromString stateTable <> "\"(model, state, timestamp) \
-            \values (?, ?, ?) \
-            \on conflict (model) do update set state=(?), timestamp=(?)")
-            ("model_id" :: Text, s, now, s, now)
-    , writeEvents   = \conn storedEvents -> executeMany
+
+createStateTable' :: Connection -> StateTableName -> IO Int64
+createStateTable' conn stateTable =
+    execute_ conn
+        $ "create table \""
+        <> fromString stateTable
+        <> "\" \
+        \( model text primary key\
+        \, timestamp timestamptz not null default now()\
+        \, state jsonb not null\
+        \);"
+
+queryEvents' :: (Typeable a, FromJSON a) => Connection -> EventTableName -> IO [Stored a]
+queryEvents' conn eventTable = fmap fromEventRow <$> query_
+    conn
+    ("select * from \"" <> fromString eventTable <> "\" order by timestamp")
+
+queryState' :: (FromJSON a, Typeable a) => Connection -> StateTableName -> IO [a]
+queryState' conn stateTable = fmap fromStateRow
+    <$> query_ conn ("select * from \"" <> fromString stateTable <> "\"")
+
+writeEvents' :: ToJSON a => Connection -> EventTableName -> [Stored a] -> IO Int64
+writeEvents' conn eventTable storedEvents = executeMany
+    conn
+    (  "insert into \""
+    <> fromString eventTable
+    <> "\" (id, timestamp, event) \
+        \values (?, ?, ?)"
+    )
+    (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) storedEvents)
+
+writeState' :: ToJSON a => Connection -> StateTableName -> a -> IO Int64
+writeState' conn stateTable (BL.toStrict . encode -> s) = do
+    now <- getCurrentTime
+    execute
         conn
-        ("insert into \"" <> fromString eventTable <> "\" (id, timestamp, event) \
-        \values (?, ?, ?)")
-        (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) storedEvents)
-    , app           = app'
-    , seed          = seed'
-    }
-
-
+        ("insert into \""
+        <> fromString stateTable
+        <> "\"(model, state, timestamp) \
+    \values (?, ?, ?) \
+    \on conflict (model) do update set state=(?), timestamp=(?)"
+        )
+        ("model_id" :: Text, s, now, s, now)
 
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
@@ -186,3 +217,15 @@ instance WriteModel (PostgresStateAndEvent m e) where
                     _ <- (writeEvents pg) conn storedEvs
                     _ <- (writeState pg) conn newM
                     pure ret
+
+
+migrate1to1
+    :: Connection
+    -> PreviosEventTableName
+    -> EventTableName
+    -> (Value -> Value)
+    -> IO Int64
+migrate1to1 conn prevTName tName f = do
+    _             <- createEventTable' conn tName
+    currentEvents <- queryEvents' @Value conn prevTName
+    writeEvents' conn tName $ fmap (fmap f) currentEvents
