@@ -46,6 +46,9 @@ instance (Ord v, JsonFieldName v) => JsonFieldName (Set v) where
 instance {-# OVERLAPPABLE #-} JsonFieldName v => JsonFieldName [v] where
     fieldName = "listOf" <> fieldName @v
 
+instance {-# OVERLAPPING #-} JsonFieldName String where
+    fieldName = "string"
+
 instance JsonFieldName v => JsonFieldName (Vector v) where
     fieldName = "vectorOf" <> fieldName @v
 

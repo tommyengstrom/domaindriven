@@ -27,14 +27,15 @@ import           Data.Aeson                     ( FromJSON
 import qualified Data.Map                                     as M
 import           Control.Monad
 import           Control.Exception              ( throwIO )
-import Data.Swagger (ToSchema)
+import           Data.Swagger                   ( ToSchema )
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 data Item = Item
     { description :: Description
-    , price :: Price
-    } deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
+    , price       :: Price
+    }
+    deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
 
 newtype ItemKey = ItemKey UUID
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
@@ -138,17 +139,27 @@ handleStoreCmd = \case
 
 $(mkCmdServer defaultServerOptions ''StoreCmd)
 
+-- $(mkCmdServer
+--    ServerOptions
+--        { renameConstructor = \case
+--                                  "AddItem"    -> []
+--                                  "RemoveItem" -> ["Remove"]
+--                                  "UpdateItem" -> ["Update", "Item"]
+--                                  s            -> [s]
+--        }
+--      ''StoreCmd)
+
 ------------------------------------------------------------------------------------------
 -- Store queries -------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 
 data StoreQuery a where
-    ListItems :: Maybe SearchTerm -> StoreQuery [(ItemKey, Item)]
+    ListItems ::Maybe SearchTerm -> StoreQuery [(ItemKey, Item)]
     LookupItem ::ItemKey -> StoreQuery Item
 
 runStoreQuery :: QueryHandler StoreModel StoreQuery StoreError
 runStoreQuery m = \case
-    ListItems _  -> pure . Right $ M.toList m
+    ListItems  _    -> pure . Right $ M.toList m
     LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
 
 $(mkQueryServer defaultServerOptions ''StoreQuery)

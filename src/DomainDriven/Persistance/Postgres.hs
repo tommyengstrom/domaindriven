@@ -160,16 +160,16 @@ writeState' conn stateTable (BL.toStrict . encode -> s) = do
 
 -- | Keep the events and state in postgres!
 data PostgresStateAndEvent model event = PostgresStateAndEvent
-    { getConnection :: IO Connection
+    { getConnection    :: IO Connection
     , createEventTable :: Connection -> IO Int64
     , createStateTable :: Connection -> IO Int64
-    , clearStateTable :: Connection -> IO Int64
-    , queryEvents   :: Connection -> IO [Stored event]
-    , queryState    :: Connection -> IO [model] -- FIXME: One model only!
-    , writeState    :: Connection -> model -> IO Int64 -- ^ Insert to write the state
-    , writeEvents   :: Connection -> [Stored event] -> IO Int64 -- ^ Insert to write an event
-    , app           :: model -> Stored event -> model
-    , seed          :: model
+    , clearStateTable  :: Connection -> IO Int64
+    , queryEvents      :: Connection -> IO [Stored event]
+    , queryState       :: Connection -> IO [model] -- FIXME: One model only!
+    , writeState       :: Connection -> model -> IO Int64 -- ^ Insert to write the state
+    , writeEvents      :: Connection -> [Stored event] -> IO Int64 -- ^ Insert to write an event
+    , app              :: model -> Stored event -> model
+    , seed             :: model
     }
     deriving Generic
 
