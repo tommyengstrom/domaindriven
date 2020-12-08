@@ -53,6 +53,7 @@ $(mkCmdServer
     ServerOptions {renameConstructor = \case "ItemAction" -> []
                                              "AddToCart" -> ["cart", "add"]
                                              s -> [fmap toLower s]
+                  , prefix = ""
                   }
     ''StoreCmd)
 

@@ -45,6 +45,7 @@ data Endpoint
 data EndpointData = EndpointData
     { eFullConstructorName :: Name
     , eShortConstructor    :: String
+    , eEpPathPrefix        :: [TyLit]
     , eEpName              :: Name
     , eHandlerName         :: Name
     , eConstructorArgs     :: [Type]
@@ -56,6 +57,7 @@ data EndpointData = EndpointData
 data SubApiData = SubApiData
     { feFullConstructorName :: Name
     , feShortConstructor    :: String
+    , feEpPathPrefix        :: [TyLit]
     , feEpName              :: Name
     , feHandlerName         :: Name
     , feConstructorArgs     :: [Type]
@@ -67,11 +69,12 @@ data SubApiData = SubApiData
 
 data ServerOptions = ServerOptions
     { renameConstructor :: String -> [String]
+    , prefix            :: String
     }
     deriving Generic
 
 defaultServerOptions :: ServerOptions
-defaultServerOptions = ServerOptions { renameConstructor = pure }
+defaultServerOptions = ServerOptions { renameConstructor = pure, prefix = "" }
 
 fullConstructorName :: Lens' Endpoint Name
 fullConstructorName = lens getter setter
@@ -166,8 +169,8 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
 
 type Prefix = String
 
-toEndpoint :: Prefix -> Con -> Q Endpoint
-toEndpoint prefix = \case
+toEndpoint :: ServerOptions -> Con -> Q Endpoint
+toEndpoint opts = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
         hRetType <- unitToNoContent retType
@@ -175,8 +178,9 @@ toEndpoint prefix = \case
         pure . Endpoint $ EndpointData
             { eFullConstructorName = name
             , eShortConstructor    = shortName
-            , eEpName              = mkName $ prefix <> shortName
-            , eHandlerName         = mkName $ lowerFirst $ prefix <> shortName
+            , eEpPathPrefix        = StrTyLit <$> renameConstructor opts shortName
+            , eEpName              = mkName $ prefix opts <> shortName
+            , eHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
             , eConstructorArgs     = fmap snd bangArgs
             , eConstructorReturns  = retType
             , eHandlerReturn       = hRetType
@@ -193,13 +197,14 @@ toEndpoint prefix = \case
                 pure (reverse rest, subCmd)
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let apiName    = mkName $ prefix <> shortName <> "Api"
-            serverName = mkName $ lowerFirst $ prefix <> shortName <> "Server"
+        let apiName    = mkName $ prefix opts <> shortName <> "Api"
+            serverName = mkName $ lowerFirst $ prefix opts <> shortName <> "Server"
         pure . SubApi $ SubApiData
             { feFullConstructorName = name
             , feShortConstructor    = shortName
-            , feEpName              = mkName $ prefix <> shortName
-            , feHandlerName         = mkName $ lowerFirst $ prefix <> shortName
+            , feEpPathPrefix        = StrTyLit <$> renameConstructor opts shortName
+            , feEpName              = mkName $ prefix opts <> shortName
+            , feHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
             , feConstructorArgs     = args
             , feSubCmd              = subCmd
             , feSubApiName          = apiName
@@ -216,6 +221,11 @@ lowerFirst = \case
     c : cs -> toLower c : cs
     []     -> []
 
+upperFirst :: String -> String
+upperFirst = \case
+    c : cs -> toUpper c : cs
+    []     -> []
+
 unitToNoContent :: Type -> Q Type
 unitToNoContent = \case
     TupleT 0 -> [t| NoContent |]
@@ -223,13 +233,14 @@ unitToNoContent = \case
 
 -- | Create a ServerSpec from a GADT
 -- The GADT must have one parameter representing the return type
-mkServerSpec :: ServerType -> Name -> Q ServerSpec
-mkServerSpec serverType n = do
-    let prefix = show $ unqualifiedName n
-    eps <- traverse (toEndpoint prefix) =<< getConstructors =<< getCmdDec n
+mkServerSpec :: ServerOptions -> ServerType -> Name -> Q ServerSpec
+mkServerSpec opts' serverType n = do
+    let opts = opts' & field @"prefix" %~ (upperFirst . (<> show (unqualifiedName n)))
+    eps <- traverse (toEndpoint opts) =<< getConstructors =<< getCmdDec n
+
     pure ServerSpec { gadtName   = n
-                    , apiName    = mkName $ prefix <> "Api"
-                    , serverName = mkName $ lowerFirst prefix <> "Server"
+                    , apiName    = mkName $ prefix opts <> "Api"
+                    , serverName = mkName $ lowerFirst (prefix opts <> "Server")
                     , endpoints  = eps
                     , serverType = serverType
                     }
@@ -237,10 +248,10 @@ mkServerSpec serverType n = do
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
 mkCmdServer :: ServerOptions -> Name -> Q [Dec]
-mkCmdServer opts = mkServerFromSpec opts <=< mkServerSpec CmdServer
+mkCmdServer opts = mkServerFromSpec opts <=< mkServerSpec opts CmdServer
 
 mkQueryServer :: ServerOptions -> Name -> Q [Dec]
-mkQueryServer opts = mkServerFromSpec opts <=< mkServerSpec QueryServer
+mkQueryServer opts = mkServerFromSpec opts <=< mkServerSpec opts QueryServer
 
 mkServerFromSpec :: ServerOptions -> ServerSpec -> Q [Dec]
 mkServerFromSpec opts serverSpec = do
@@ -248,7 +259,7 @@ mkServerFromSpec opts serverSpec = do
         fmap mconcat . traverse (mkSubServer opts $ serverType serverSpec) $ endpoints
             serverSpec
     endpointDecs <-
-        fmap mconcat . traverse (mkEndpointDec opts (serverType serverSpec)) $ endpoints
+        fmap mconcat . traverse (mkEndpointDec (serverType serverSpec)) $ endpoints
             serverSpec
     handlers <- mkHandlers serverSpec
     server   <- mkFullServer serverSpec
@@ -301,14 +312,14 @@ toReqBody args = do
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-cmdEndpointType :: ServerOptions -> Endpoint -> Q Type
-cmdEndpointType opts = \case
+cmdEndpointType :: Endpoint -> Q Type
+cmdEndpointType = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType opts e
+    SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e =
-        [t| $(mkServantEpName opts (eShortConstructor e) middle) |]
+        [t| $(mkServantEpName (eEpPathPrefix e) middle) |]
       where
         middle :: Q Type
         middle = reqBody >>= \case
@@ -324,20 +335,15 @@ cmdEndpointType opts = \case
 -- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
 -- `GetBook :: BookId -> Query Book` will result in:
 -- "GetBook" :> Capture "BookId" BookId" :> Get '[JSON] Book
-queryEndpointType :: ServerOptions -> Endpoint -> Q Type
-queryEndpointType opts = \case
+queryEndpointType :: Endpoint -> Q Type
+queryEndpointType = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType opts e
+    SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
-    --epSimpleType e = [t| $(pure queryName) :> $(params $ eConstructorArgs e) |]
     epSimpleType e =
-        [t| $(mkServantEpName opts (eShortConstructor e) (params $ eConstructorArgs e)) |]
+        [t| $(mkServantEpName (eEpPathPrefix e) (params $ eConstructorArgs e)) |]
       where
-        --queryName :: Type
-        --queryName = LitT . StrTyLit . renameConstructor opts $ eShortConstructor e
---        queryNames :: [Type]
---        queryNames = LitT . StrTyLit <$> renameConstructor opts (eShortConstructor e)
 
         params :: [Type] -> Q Type
         params typeList = do
@@ -363,17 +369,15 @@ queryEndpointType opts = \case
                          (params ts)
 
 
-mkServantEpName :: ServerOptions -> String -> Q Type -> Q Type
-mkServantEpName opts conName rest = foldr (\a b -> [t| $(pure a) :> $b |]) rest tyLits
-  where
-    tyLits :: [Type]
-    tyLits = LitT . StrTyLit <$> renameConstructor opts conName
+mkServantEpName :: [TyLit] -> Q Type -> Q Type
+mkServantEpName tyLits rest =
+    foldr (\a b -> [t| $(pure a) :> $b |]) rest (fmap LitT tyLits)
 
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
-epSubApiType :: ServerOptions -> SubApiData -> Q Type
-epSubApiType opts e = do
+epSubApiType :: SubApiData -> Q Type
+epSubApiType e = do
 
     let subApiType :: Type
         subApiType = ConT $ feSubApiName e
@@ -390,26 +394,26 @@ epSubApiType opts e = do
             _      -> "typename"
     captures <- traverse mkCapture $ feConstructorArgs e
     mkServantEpName
-        opts
-        (feShortConstructor e)
+        (feEpPathPrefix e)
         (pure $ foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
-mkEndpointDec opts sType e = do
+mkEndpointDec :: ServerType -> Endpoint -> Q [Dec]
+mkEndpointDec sType e = do
     ty <- case sType of
-        CmdServer   -> cmdEndpointType opts e
-        QueryServer -> queryEndpointType opts e
+        CmdServer   -> cmdEndpointType e
+        QueryServer -> queryEndpointType e
     pure $ [TySynD (view epName e) [] ty]
 
 mkSubServer :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
-mkSubServer opts sTy = \case
+mkSubServer opts' sTy = \case
     Endpoint _ -> pure []
     SubApi   e -> do
+        let opts = opts' & field @"prefix" %~ (<> feShortConstructor e)
         subServerSpec <-
             set (field @"apiName") (feSubApiName e)
             .   set (field @"serverName") (feSubServerName e)
-            <$> mkServerSpec sTy (feSubCmd e)
+            <$> mkServerSpec opts sTy (feSubCmd e)
         subServerDecs <- mkServerFromSpec opts subServerSpec
         pure subServerDecs
 
