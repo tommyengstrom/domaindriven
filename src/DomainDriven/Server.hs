@@ -43,7 +43,8 @@ data Endpoint
 
 data EndpointData = EndpointData
     { eFullConstructorName :: Name
-    , eShortConstructor    :: String  -- ^ Name of the endpoint
+    , eShortConstructor    :: String
+    , eEpName              :: Name
     , eHandlerName         :: Name
     , eConstructorArgs     :: [Type]
     , eConstructorReturns  :: Type
@@ -53,7 +54,8 @@ data EndpointData = EndpointData
 
 data SubApiData = SubApiData
     { feFullConstructorName :: Name
-    , feShortConstructor    :: String  -- ^ Name of the endpoint
+    , feShortConstructor    :: String
+    , feEpName              :: Name
     , feHandlerName         :: Name
     , feConstructorArgs     :: [Type]
     , feSubCmd              :: Name
@@ -93,6 +95,16 @@ shortConstructor = lens getter setter
         Endpoint a -> Endpoint a { eShortConstructor = b }
         SubApi   a -> SubApi a { feShortConstructor = b }
 
+epName :: Lens' Endpoint Name
+epName = lens getter setter
+  where
+    getter = \case
+        Endpoint a -> eEpName a
+        SubApi   a -> feEpName a
+
+    setter s b = case s of
+        Endpoint a -> Endpoint a { eEpName = b }
+        SubApi   a -> SubApi a { feEpName = b }
 
 handlerName :: Lens' Endpoint Name
 handlerName = lens getter setter
@@ -151,20 +163,23 @@ unqualifiedName name = case reverse $ unfoldr f (show name) of
         (x , '.' : rest) -> Just (x, rest)
         (x , rest      ) -> Just (x, rest)
 
+type Prefix = String
 
-toEndpoint :: Con -> Q Endpoint
-toEndpoint = \case
+toEndpoint :: Prefix -> Con -> Q Endpoint
+toEndpoint prefix = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
         hRetType <- unitToNoContent retType
         let shortName = show $ unqualifiedName name
-        pure . Endpoint $ EndpointData { eFullConstructorName = name
-                                       , eShortConstructor    = shortName
-                                       , eHandlerName = mkName $ lowerFirst shortName
-                                       , eConstructorArgs     = fmap snd bangArgs
-                                       , eConstructorReturns  = retType
-                                       , eHandlerReturn       = hRetType
-                                       }
+        pure . Endpoint $ EndpointData
+            { eFullConstructorName = name
+            , eShortConstructor    = shortName
+            , eEpName              = mkName $ prefix <> shortName
+            , eHandlerName         = mkName $ lowerFirst $ prefix <> shortName
+            , eConstructorArgs     = fmap snd bangArgs
+            , eConstructorReturns  = retType
+            , eHandlerReturn       = hRetType
+            }
     -- When the constructor contain references to other domain models
     ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ _retType)) -> do
         let shortName = show $ unqualifiedName name
@@ -177,16 +192,18 @@ toEndpoint = \case
                 pure (reverse rest, subCmd)
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let apiName    = mkName $ shortName <> "Api"
-            serverName = mkName $ lowerFirst shortName <> "Server"
-        pure . SubApi $ SubApiData { feFullConstructorName = name
-                                   , feShortConstructor    = shortName
-                                   , feHandlerName         = mkName $ lowerFirst shortName
-                                   , feConstructorArgs     = args
-                                   , feSubCmd              = subCmd
-                                   , feSubApiName          = apiName
-                                   , feSubServerName       = serverName
-                                   }
+        let apiName    = mkName $ prefix <> shortName <> "Api"
+            serverName = mkName $ lowerFirst $ prefix <> shortName <> "Server"
+        pure . SubApi $ SubApiData
+            { feFullConstructorName = name
+            , feShortConstructor    = shortName
+            , feEpName              = mkName $ prefix <> shortName
+            , feHandlerName         = mkName $ lowerFirst $ prefix <> shortName
+            , feConstructorArgs     = args
+            , feSubCmd              = subCmd
+            , feSubApiName          = apiName
+            , feSubServerName       = serverName
+            }
     c ->
         error
             $  "Expected a GATD constructor representing an endpoint but got:\n"
@@ -207,8 +224,8 @@ unitToNoContent = \case
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: ServerType -> Name -> Q ServerSpec
 mkServerSpec serverType n = do
-    eps <- traverse toEndpoint =<< getConstructors =<< getCmdDec n
     let prefix = show $ unqualifiedName n
+    eps <- traverse (toEndpoint prefix) =<< getConstructors =<< getCmdDec n
     pure ServerSpec { gadtName   = n
                     , apiName    = mkName $ prefix <> "Api"
                     , serverName = mkName $ lowerFirst prefix <> "Server"
@@ -237,7 +254,7 @@ mkServerFromSpec opts serverSpec = do
     pure $ subServers <> endpointDecs <> handlers <> server
 
 mkApiType :: [Endpoint] -> Q Type
-mkApiType endpoints = case mkName . view shortConstructor <$> endpoints of
+mkApiType endpoints = case view epName <$> endpoints of
     []     -> error "Server has no endpoints"
     x : xs -> do
         let f :: Type -> Name -> Q Type
@@ -247,13 +264,12 @@ mkApiType endpoints = case mkName . view shortConstructor <$> endpoints of
 -- | Create a typealias for the API
 -- type Api = EpA :<|> EpB :<|> EpC ...
 mkApiDec :: ServerSpec -> Q Dec
-mkApiDec spec =
-    TySynD (apiName spec) [] <$> case mkName . view shortConstructor <$> endpoints spec of
-        []     -> error "Server has no endpoints"
-        x : xs -> do
-            let f :: Type -> Name -> Q Type
-                f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
-            foldM f (ConT x) xs
+mkApiDec spec = TySynD (apiName spec) [] <$> case view epName <$> endpoints spec of
+    []     -> error "Server has no endpoints"
+    x : xs -> do
+        let f :: Type -> Name -> Q Type
+            f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
+        foldM f (ConT x) xs
 
 -- | Create a request body by turning multiple arguments into a tuple
 -- `BuyThing ItemKey Quantity` yields `ReqBody '[JSON] (ItemKey, Quantity)`
@@ -376,7 +392,7 @@ mkEndpointDec opts sType e = do
     ty <- case sType of
         CmdServer   -> cmdEndpointType opts e
         QueryServer -> queryEndpointType opts e
-    pure $ [TySynD (mkName $ view shortConstructor e) [] ty]
+    pure $ [TySynD (view epName e) [] ty]
 
 mkSubServer :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
 mkSubServer opts sTy = \case

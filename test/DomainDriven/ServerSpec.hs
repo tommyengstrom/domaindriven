@@ -75,6 +75,7 @@ handleItemCmd = \case
 applyStoreEvent :: StoreModel -> Stored StoreEvent -> StoreModel
 applyStoreEvent _ _ = ()
 
+
 -- | Compare with StoreCmdApi if you run into issues
 type ExpectedStoreCmdApi
     = "cart" :> "add" :> ReqBody '[JSON] (NamedFields ItemKey) :> Post '[JSON] NoContent
