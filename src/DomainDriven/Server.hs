@@ -45,7 +45,7 @@ data Endpoint
 data EndpointData = EndpointData
     { eFullConstructorName :: Name
     , eShortConstructor    :: String
-    , eEpPathPrefix        :: [TyLit]
+    , eEpPathPrefix        :: [String]
     , eEpName              :: Name
     , eHandlerName         :: Name
     , eConstructorArgs     :: [Type]
@@ -57,7 +57,7 @@ data EndpointData = EndpointData
 data SubApiData = SubApiData
     { feFullConstructorName :: Name
     , feShortConstructor    :: String
-    , feEpPathPrefix        :: [TyLit]
+    , feEpPathPrefix        :: [String]
     , feEpName              :: Name
     , feHandlerName         :: Name
     , feConstructorArgs     :: [Type]
@@ -109,6 +109,17 @@ epName = lens getter setter
     setter s b = case s of
         Endpoint a -> Endpoint a { eEpName = b }
         SubApi   a -> SubApi a { feEpName = b }
+
+epPathPrefix :: Lens' Endpoint [String]
+epPathPrefix = lens getter setter
+  where
+    getter = \case
+        Endpoint a -> eEpPathPrefix a
+        SubApi   a -> feEpPathPrefix a
+
+    setter s b = case s of
+        Endpoint a -> Endpoint a { eEpPathPrefix = b }
+        SubApi   a -> SubApi a { feEpPathPrefix = b }
 
 handlerName :: Lens' Endpoint Name
 handlerName = lens getter setter
@@ -178,7 +189,7 @@ toEndpoint opts = \case
         pure . Endpoint $ EndpointData
             { eFullConstructorName = name
             , eShortConstructor    = shortName
-            , eEpPathPrefix        = StrTyLit <$> renameConstructor opts shortName
+            , eEpPathPrefix        = renameConstructor opts shortName
             , eEpName              = mkName $ prefix opts <> shortName
             , eHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
             , eConstructorArgs     = fmap snd bangArgs
@@ -202,7 +213,7 @@ toEndpoint opts = \case
         pure . SubApi $ SubApiData
             { feFullConstructorName = name
             , feShortConstructor    = shortName
-            , feEpPathPrefix        = StrTyLit <$> renameConstructor opts shortName
+            , feEpPathPrefix        = renameConstructor opts shortName
             , feEpName              = mkName $ prefix opts <> shortName
             , feHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
             , feConstructorArgs     = args
@@ -238,12 +249,29 @@ mkServerSpec opts' serverType n = do
     let opts = opts' & field @"prefix" %~ (upperFirst . (<> show (unqualifiedName n)))
     eps <- traverse (toEndpoint opts) =<< getConstructors =<< getCmdDec n
 
+    ensureUniquePaths eps
     pure ServerSpec { gadtName   = n
                     , apiName    = mkName $ prefix opts <> "Api"
                     , serverName = mkName $ lowerFirst (prefix opts <> "Server")
                     , endpoints  = eps
                     , serverType = serverType
                     }
+  where
+    ensureUniquePaths :: [Endpoint] -> Q ()
+    ensureUniquePaths eps = do
+
+        let paths :: [[String]]
+            paths       = eps ^.. folded . epPathPrefix
+
+            uniquePaths = L.nub paths
+            duplicates  = L.foldl' (flip L.delete) paths uniquePaths
+
+        unless
+            (null duplicates)
+            (fail $ "Api contains duplicated paths:\n * " <> L.intercalate
+                "\n * "
+                (show . L.intercalate "/" <$> duplicates)
+            )
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
@@ -369,9 +397,9 @@ queryEndpointType = \case
                          (params ts)
 
 
-mkServantEpName :: [TyLit] -> Q Type -> Q Type
+mkServantEpName :: [String] -> Q Type -> Q Type
 mkServantEpName tyLits rest =
-    foldr (\a b -> [t| $(pure a) :> $b |]) rest (fmap LitT tyLits)
+    foldr (\a b -> [t| $(pure a) :> $b |]) rest (fmap (LitT . StrTyLit) tyLits)
 
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
