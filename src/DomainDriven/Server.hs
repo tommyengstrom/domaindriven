@@ -12,6 +12,7 @@ import           DomainDriven.Internal.JsonFieldName
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
+import qualified Data.List                                    as L
 import           Data.List                      ( unfoldr )
 import           Servant
 import           Data.Char
@@ -274,8 +275,15 @@ mkApiDec spec = TySynD (apiName spec) [] <$> case view epName <$> endpoints spec
 -- | Create a request body by turning multiple arguments into a tuple
 -- `BuyThing ItemKey Quantity` yields `ReqBody '[JSON] (ItemKey, Quantity)`
 toReqBody :: [Type] -> Q (Maybe Type)
-toReqBody args = mkBody
-    >>= maybe (pure Nothing) (\b -> fmap Just [t| ReqBody '[JSON] $(pure b) |])
+toReqBody args = do
+    unless
+        (args == L.nub args)
+        (fail
+        $ "Each argument to the constructor must have a unique type.\
+           \\nGot request body containing: "
+        <> L.intercalate ", " (args ^.. folded . types @Name . to show)
+        )
+    mkBody >>= maybe (pure Nothing) (\b -> fmap Just [t| ReqBody '[JSON] $(pure b) |])
   where
     appAll :: Type -> [Type] -> Type
     appAll t = \case
