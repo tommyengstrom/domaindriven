@@ -94,6 +94,10 @@ tests:
     - QuickCheck
     - quickcheck-classes
     - quickcheck-arbitrary-adt
+    - async
+    - servant-client
+    - warp
+    - http-client
 
 executables:
   simple:
