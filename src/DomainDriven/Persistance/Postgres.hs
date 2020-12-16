@@ -25,20 +25,30 @@ type StateTableName = String
 decodeEventRow :: (UUID, UTCTime, e) -> Stored e
 decodeEventRow (k, ts, e) = Stored e ts k
 
-data EventRow e = EventRow
+data EventRow = EventRow
     { key       :: UUID
     , timestamp :: UTCTime
-    , event     :: e
+    , event     :: Value
     }
-    deriving (Show, Eq, Ord, Generic)
+    deriving (Show, Eq, Generic)
 
-fromEventRow :: EventRow e -> Stored e
-fromEventRow (EventRow k ts e) = Stored e ts k
+fromEventRow :: (MonadThrow m, FromJSON e) => EventRow -> m (Stored e)
+fromEventRow (EventRow k ts ev) = case fromJSON ev of
+    Success a -> pure $ Stored a ts k
+    Error err ->
+        throwM
+            .  EncodingError
+            $  "Failed to parse event "
+            <> show k
+            <> ": "
+            <> err
+            <> "\nWhen trying to parse:\n"
+            <> show ev
 
-toEventRow :: Stored e -> EventRow e
-toEventRow (Stored e ts k) = EventRow k ts e
+toEventRow :: ToJSON e => Stored e -> EventRow
+toEventRow (Stored e ts k) = EventRow k ts (toJSON e)
 
-instance (Typeable e, FromJSON e) => FromRow (EventRow e) where
+instance FromRow EventRow where
     fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
 
 data StateRow m = StateRow
@@ -127,7 +137,7 @@ createStateTable' conn stateTable =
         \);"
 
 queryEvents' :: (Typeable a, FromJSON a) => Connection -> EventTableName -> IO [Stored a]
-queryEvents' conn eventTable = fmap fromEventRow <$> query_
+queryEvents' conn eventTable = traverse fromEventRow =<< query_
     conn
     ("select * from \"" <> fromString eventTable <> "\" order by timestamp")
 
