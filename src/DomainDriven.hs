@@ -1,19 +1,21 @@
 module DomainDriven
     ( CmdHandler
-    , QueryHandler
     , CmdRunner
-    , ReadModel (..)
-    , WriteModel(..)
     , mkId
+    , module X
+    , QueryHandler
     , QueryRunner
+    , ReadModel(..)
     , runCmd
     , runQuery
     , Stored(..)
     , UUID
-    , module X
-    )
-where
+    , WithNamedField(..)
+    , WriteModel(..)
+    ) where
 
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.JsonFieldName as X
+import           DomainDriven.Internal.JsonFieldName          as X
+import           DomainDriven.Internal.WithNamedField
+                                                ( WithNamedField(..) )
 import           Data.UUID
