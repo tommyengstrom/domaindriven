@@ -79,6 +79,8 @@ default-extensions:
 
 library:
   source-dirs: src
+  dependencies:
+    - ghc-prim
 
 tests:
   domain-driven-test:
