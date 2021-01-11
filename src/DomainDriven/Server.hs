@@ -184,7 +184,10 @@ toEndpoint :: ServerOptions -> Con -> Q Endpoint
 toEndpoint opts = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
-        hRetType <- unitToNoContent retType
+        hRetType <- case retType of
+            TupleT 0 -> [t| NoContent |]
+            t        -> pure t
+
         let shortName = show $ unqualifiedName name
         pure . Endpoint $ EndpointData
             { eFullConstructorName = name
@@ -237,10 +240,6 @@ upperFirst = \case
     c : cs -> toUpper c : cs
     []     -> []
 
-unitToNoContent :: Type -> Q Type
-unitToNoContent = \case
-    TupleT 0 -> [t| NoContent |]
-    t        -> pure t
 
 -- | Create a ServerSpec from a GADT
 -- The GADT must have one parameter representing the return type
