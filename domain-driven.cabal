@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: acede7012fda918ad1e3f54c0e8727420568a16cf18e05ec9dc6d3c202a40ebb
+-- hash: 6f5951274427ce32df8f56c567919bee7ba7b25b4f065cce7d44f900488d16cb
 
 name:           domain-driven
 version:        0.1.0.0
@@ -52,6 +52,7 @@ library
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -60,7 +61,6 @@ library
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -87,6 +87,7 @@ executable hierarchical
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -96,7 +97,6 @@ executable hierarchical
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -125,6 +125,7 @@ executable simple
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -133,7 +134,6 @@ executable simple
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -173,6 +173,7 @@ test-suite domain-driven-test
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , quickcheck-arbitrary-adt
     , quickcheck-classes
@@ -184,7 +185,6 @@ test-suite domain-driven-test
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers

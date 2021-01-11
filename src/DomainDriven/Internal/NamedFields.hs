@@ -7,7 +7,7 @@ import           Control.Lens                   ( (.~)
                                                 , (?~)
                                                 )
 import           Data.Aeson
-import           Data.Swagger
+import           Data.OpenApi
 import           DomainDriven.Internal.JsonFieldName
 import           RIO hiding ((.~))
 
@@ -24,7 +24,7 @@ instance {-# OVERLAPPABLE #-} (JsonFieldName a) => ToSchema (NamedFields a) wher
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a)]
 instance
@@ -55,7 +55,7 @@ instance (JsonFieldName a, JsonFieldName b) => ToSchema (NamedFields (a, b)) whe
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a), (fieldName @b, b)]
 
@@ -74,7 +74,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a), (fieldName @b, b), (fieldName @c, c)]
 
@@ -95,7 +95,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -122,7 +122,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -152,7 +152,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -185,7 +185,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -221,7 +221,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)

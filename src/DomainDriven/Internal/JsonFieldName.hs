@@ -5,7 +5,7 @@ module DomainDriven.Internal.JsonFieldName where
 
 import           Data.Aeson
 import           Data.Char                      ( toLower )
-import           Data.Swagger
+import           Data.OpenApi
 import           GHC.Generics
 import           RIO
 import qualified RIO.Text                                     as T

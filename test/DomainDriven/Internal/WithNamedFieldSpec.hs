@@ -15,7 +15,7 @@ import           Control.Monad
 import           Test.Hspec
 import           Data.String
 import           Test.Hspec.QuickCheck
-import           Data.Swagger
+import           Data.OpenApi
 
 data Apa = Apan
     { namedField1 :: Int

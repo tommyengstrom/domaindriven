@@ -37,9 +37,9 @@ dependencies:
 - servant-server
 - stm
 - streaming
-- swagger2
 - template-haskell
 - text
+- openapi3
 - transformers
 - unordered-containers
 - uuid

@@ -17,7 +17,7 @@ import           Network.HTTP.Client            ( newManager
                                                 , defaultManagerSettings
                                                 )
 import           Network.Wai.Handler.Warp       ( run )
-import           Data.Swagger                   ( ToSchema )
+import           Data.OpenApi                   ( ToSchema )
 import           Servant.Client
 
 newtype ItemKey = ItemKey String
