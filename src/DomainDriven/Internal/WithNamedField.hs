@@ -14,6 +14,15 @@ import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as HM
 import           Control.Applicative
 import           Control.Monad.State
+import           Data.OpenApi            hiding ( put
+                                                , get
+                                                )
+import           Data.Kind                      ( Type )
+import           Data.OpenApi.Declare
+import           Data.Proxy
+import           Control.Lens            hiding ( to
+                                                , from
+                                                )
 
 newtype WithNamedField a = WithNamedField a
 
@@ -26,6 +35,196 @@ instance (GNamedFromJSON (Rep a), Generic a) => FromJSON (WithNamedField a) wher
 gToNamedJson :: (GNamedToJSON (Rep a), Generic a) => a -> Value
 gToNamedJson a = Object . HM.fromList $ evalState (gToTupleList $ from a) []
 
+-----------------------------------------ToSchema-----------------------------------------
+
+data Fancy = Fancy
+    { firstField  :: Int
+    , secondField :: Maybe String
+    }
+        | Simple
+        {firstField :: Int}
+    deriving (Show, Generic, ToJSON, FromJSON, ToSchema)
+-- > BL.putStrLn . encode $ toSchema $ Proxy @Fancy
+-- {
+--    "type" : "object",
+--    "oneOf" : [
+--       {
+--          "properties" : {
+--             "tag" : {
+--                "type" : "string",
+--                "enum" : [
+--                   "Fancy"
+--                ]
+--             },
+--             "secondField" : {
+--                "type" : "string"
+--             },
+--             "firstField" : {
+--                "type" : "integer",
+--                "minimum" : -9223372036854775808,
+--                "maximum" : 9223372036854775807
+--             }
+--          },
+--          "type" : "object",
+--          "required" : [
+--             "firstField",
+--             "tag"
+--          ]
+--       },
+--       {
+--          "required" : [
+--             "firstField",
+--             "tag"
+--          ],
+--          "type" : "object",
+--          "properties" : {
+--             "tag" : {
+--                "type" : "string",
+--                "enum" : [
+--                   "Simple"
+--                ]
+--             },
+--             "firstField" : {
+--                "type" : "integer",
+--                "minimum" : -9223372036854775808,
+--                "maximum" : 9223372036854775807
+--             }
+--          }
+--       }
+--    ]
+-- }
+
+data Apa = Apa Int | Bulle String deriving (Show, Generic)
+--type instance Rep Apa
+--  = D1
+--      ('MetaData
+--         "Apa" "DomainDriven.Internal.WithNamedField" "main" 'False)
+--      (C1
+--         ('MetaCons "Apa" 'PrefixI 'False)
+--         (S1
+--            ('MetaSel
+--               'Nothing 'NoSourceUnpackedness 'NoSourceStrictness 'DecidedLazy)
+--            (Rec0 Int))
+--       :+: C1
+--             ('MetaCons "Bulle" 'PrefixI 'False)
+--             (S1
+--                ('MetaSel
+--                   'Nothing 'NoSourceUnpackedness 'NoSourceStrictness 'DecidedLazy)
+--                (Rec0 String)))
+
+data Test = Test
+    { firstField  :: Int
+    , secondField :: Maybe String
+    }
+    deriving (Show, Generic, ToJSON, FromJSON, ToSchema)
+--type instance Rep Test
+--  = D1
+--      ('MetaData
+--         "Test" "DomainDriven.Internal.WithNamedField" "main" 'False)
+--      (C1
+--         ('MetaCons "Test" 'PrefixI 'True)
+--         (S1
+--            ('MetaSel
+--               ('Just "firstField")
+--               'NoSourceUnpackedness
+--               'NoSourceStrictness
+--               'DecidedLazy)
+--            (Rec0 Int)
+--          :*: S1
+--                ('MetaSel
+--                   ('Just "secondField")
+--                   'NoSourceUnpackedness
+--                   'NoSourceStrictness
+--                   'DecidedLazy)
+--                (Rec0 (Maybe String))))
+
+--instance ToSchema Test where
+--    declareNamedSchema _ = gDeclareNamedSchema (Proxy @(Rep Test))
+
+
+-------------------------------------------------
+data Proxy3 a b c = Proxy3
+
+class GNamedToSchema (f :: Type -> Type) where
+    gDeclareNamedSchema :: Proxy f -> Declare (Definitions Schema) NamedSchema
+
+setSchemaName :: String -> NamedSchema -> NamedSchema
+setSchemaName newName (NamedSchema _ s) = NamedSchema (Just $ T.pack newName) s
+
+-- Grab the name of the datatype
+instance (Datatype d, GNamedToSchema f) => GNamedToSchema (D1 d f) where
+    gDeclareNamedSchema _ = do
+        let dtName :: String
+            dtName = datatypeName $ Proxy3 @d @f
+        NamedSchema _ rest <- gDeclareNamedSchema (Proxy @f)
+        pure $ NamedSchema (Just $ T.pack dtName) rest
+
+-- Grab the name of the constructor to use for the `tag` field content.
+instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
+    gDeclareNamedSchema _ = do
+        NamedSchema _ s <- gDeclareNamedSchema (Proxy @f)
+        let constructorName :: Text
+            constructorName = T.pack . conName $ Proxy3 @c @f
+
+            tagFieldSchema :: Schema
+            tagFieldSchema =
+                mempty
+                    &   properties
+                    <>~ [ ( "tag"
+                          , Inline
+                          $  mempty
+                          &  type_
+                          ?~ OpenApiString
+                          &  enum_
+                          ?~ [String constructorName]
+                          )
+                        ]
+                    &   required
+                    <>~ ["tag"]
+        pure $ NamedSchema Nothing $ tagFieldSchema <> s
+
+-- Grab the name of the field, but not not set it as required
+instance {-# OVERLAPPING #-} (ToSchema f, JsonFieldName f, Selector s)
+        => GNamedToSchema (S1 s (Rec0 (Maybe f))) where
+    gDeclareNamedSchema _ = do
+        pure
+            .   NamedSchema Nothing
+            $   mempty
+            &   properties
+            <>~ [(fieldName @(Maybe f), Inline $ toSchema $ Proxy @f)]
+
+-- Grab the name of the field and set it as required
+instance {-# OVERLAPPABLE #-} (ToSchema f, JsonFieldName f, Selector s)
+        => GNamedToSchema (S1 s (Rec0 f)) where
+    gDeclareNamedSchema _ = do
+        pure
+            .   NamedSchema Nothing
+            $   mempty
+            &   properties
+            <>~ [(fieldName @f, Inline $ toSchema $ Proxy @f)]
+            &   required
+            <>~ [fieldName @f]
+
+instance GNamedToSchema U1 where
+    gDeclareNamedSchema _ = pure $ NamedSchema Nothing mempty
+
+instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :*: g) where
+    gDeclareNamedSchema _ = do
+        NamedSchema _ a <- gDeclareNamedSchema (Proxy @f)
+        NamedSchema _ b <- gDeclareNamedSchema (Proxy @g)
+        pure (NamedSchema Nothing $ a <> b)
+
+
+data Simplest = Simplest Int (Maybe String)
+    deriving (Show, Generic)
+
+instance ToSchema Simplest where
+    declareNamedSchema _ = gDeclareNamedSchema (Proxy @(Rep Simplest))
+
+--class GToSchema (f :: * -> *) where
+--  gdeclareNamedSchema :: SchemaOptions -> Proxy f -> Schema -> Declare (Definitions Schema) NamedSchema
+
+------------------------------------------ToJSON------------------------------------------
 type UsedName = Text
 
 class GNamedToJSON a where
@@ -68,7 +267,7 @@ actualFieldName used fName = fName <> case length (filter (== fName) used) of
     0 -> ""
     i -> "_" <> (T.pack $ show (i + 1))
 
------------------------------------------------------------------------------
+-----------------------------------------FromJSON-----------------------------------------
 
 lookupKey :: Text -> Value -> StateT [UsedName] Parser Value
 lookupKey k = \case
