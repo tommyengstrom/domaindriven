@@ -12,19 +12,10 @@ import qualified RIO.Text                                     as T
 import           RIO.Time
 import           GHC.Tuple
 
-class (FromJSON t, ToJSON t, ToSchema t) => JsonFieldName t where
+class JsonFieldName t where
   fieldName :: Text
   default fieldName :: (Generic t, GJsonFieldName (Rep t)) => Text
   fieldName = gfieldName $ from (undefined :: t)
-
-instance ToJSON a => ToJSON (Unit a) where
-    toJSON (Unit a) = toJSON a
-
-instance FromJSON a => FromJSON (Unit a) where
-    parseJSON = fmap Unit . parseJSON
-
-instance ToSchema a => ToSchema (Unit a) where
-    declareNamedSchema _ = declareNamedSchema (Proxy @a)
 
 instance JsonFieldName a => JsonFieldName (Unit a) where
     fieldName = fieldName @a

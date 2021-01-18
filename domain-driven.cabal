@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6f5951274427ce32df8f56c567919bee7ba7b25b4f065cce7d44f900488d16cb
+-- hash: cf4b9a7f43c034eba748de76c3097be8f40bde93a660d3493b336e843c5f8889
 
 name:           domain-driven
 version:        0.1.0.0
@@ -31,7 +31,7 @@ library
       DomainDriven.Internal.Class
       DomainDriven.Internal.JsonFieldName
       DomainDriven.Internal.NamedFields
-      DomainDriven.Internal.WithNamedField
+      DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.FileWithSTM
       DomainDriven.Persistance.ForgetfulSTM
       DomainDriven.Persistance.Postgres
@@ -43,6 +43,7 @@ library
   default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
@@ -78,6 +79,7 @@ executable hierarchical
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
@@ -116,6 +118,7 @@ executable simple
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
@@ -147,7 +150,7 @@ test-suite domain-driven-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      DomainDriven.Internal.WithNamedFieldSpec
+      DomainDriven.Internal.NamedJsonFieldsSpec
       DomainDriven.Persistance.FileWithSTMSpec
       DomainDriven.Persistance.ForgetfulSTMSpec
       DomainDriven.Persistance.PostgresSpec
@@ -161,6 +164,7 @@ test-suite domain-driven-test
   build-depends:
       QuickCheck
     , aeson
+    , aeson-pretty
     , async
     , base >=4.7 && <5
     , containers

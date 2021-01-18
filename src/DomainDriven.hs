@@ -10,12 +10,12 @@ module DomainDriven
     , runQuery
     , Stored(..)
     , UUID
-    , WithNamedField(..)
+    , NamedJsonFields(..)
     , WriteModel(..)
     ) where
 
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.JsonFieldName          as X
-import           DomainDriven.Internal.WithNamedField
-                                                ( WithNamedField(..) )
+import           DomainDriven.Internal.NamedJsonFields
+                                                ( NamedJsonFields(..) )
 import           Data.UUID
