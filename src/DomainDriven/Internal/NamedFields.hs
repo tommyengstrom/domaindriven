@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module DomainDriven.Internal.NamedFields where
 
@@ -7,29 +6,33 @@ import           Control.Lens                   ( (.~)
                                                 , (?~)
                                                 )
 import           Data.Aeson
-import           Data.Swagger
+import           Data.OpenApi
 import           DomainDriven.Internal.JsonFieldName
-import           RIO hiding ((.~))
+import           RIO                     hiding ( (.~) )
 
-data NamedFields a = NamedFields {unNamedFields :: a}
-  deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
+data NamedFields a = NamedFields
+    { unNamedFields :: a
+    }
+    deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
 
-instance {-# OVERLAPPABLE #-} ( JsonFieldName a) => ToJSON (NamedFields a) where
+instance {-# OVERLAPPABLE #-} ( JsonFieldName a, ToJSON a)
+        => ToJSON (NamedFields a) where
     toJSON (NamedFields a) = Object [(fieldName @a, toJSON a)]
 
-instance {-# OVERLAPPABLE #-} (JsonFieldName a) => ToSchema (NamedFields a) where
+instance {-# OVERLAPPABLE #-} (JsonFieldName a, ToSchema a)
+        => ToSchema (NamedFields a) where
     declareNamedSchema _ = do
         a <- declareSchemaRef $ Proxy @a
         pure
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a)]
 instance
   {-# OVERLAPPABLE #-}
-  ( JsonFieldName a
+  ( JsonFieldName a, FromJSON a
   ) =>
   FromJSON (NamedFields a)
   where
@@ -39,15 +42,17 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b
+  ( JsonFieldName a, ToJSON a,
+    JsonFieldName b, ToJSON b
   ) =>
   ToJSON (NamedFields (a, b))
   where
     toJSON (NamedFields (a, b)) =
         Object [(fieldName @a, toJSON a), (fieldName @b, toJSON b)]
 
-instance (JsonFieldName a, JsonFieldName b) => ToSchema (NamedFields (a, b)) where
+instance (JsonFieldName a, ToSchema a
+         , JsonFieldName b, ToSchema b
+         ) => ToSchema (NamedFields (a, b)) where
     declareNamedSchema _ = do
         a <- declareSchemaRef $ Proxy @a
         b <- declareSchemaRef $ Proxy @b
@@ -55,14 +60,14 @@ instance (JsonFieldName a, JsonFieldName b) => ToSchema (NamedFields (a, b)) whe
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a), (fieldName @b, b)]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c
   ) =>
   ToSchema (NamedFields (a, b, c))
   where
@@ -74,15 +79,15 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [(fieldName @a, a), (fieldName @b, b), (fieldName @c, c)]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c,
+    JsonFieldName d, ToSchema d
   ) =>
   ToSchema (NamedFields (a, b, c, d))
   where
@@ -95,7 +100,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -104,11 +109,11 @@ instance
                ]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c,
+    JsonFieldName d, ToSchema d,
+    JsonFieldName e, ToSchema e
   ) =>
   ToSchema (NamedFields (a, b, c, d, e))
   where
@@ -122,7 +127,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -132,12 +137,12 @@ instance
                ]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c,
+    JsonFieldName d, ToSchema d,
+    JsonFieldName e, ToSchema e,
+    JsonFieldName f, ToSchema f
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f))
   where
@@ -152,7 +157,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -163,13 +168,13 @@ instance
                ]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c,
+    JsonFieldName d, ToSchema d,
+    JsonFieldName e, ToSchema e,
+    JsonFieldName f, ToSchema f,
+    JsonFieldName g, ToSchema g
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f, g))
   where
@@ -185,7 +190,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -197,14 +202,14 @@ instance
                ]
 
 instance
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g,
-    JsonFieldName h
+  ( JsonFieldName a, ToSchema a,
+    JsonFieldName b, ToSchema b,
+    JsonFieldName c, ToSchema c,
+    JsonFieldName d, ToSchema d,
+    JsonFieldName e, ToSchema e,
+    JsonFieldName f, ToSchema f,
+    JsonFieldName g, ToSchema g,
+    JsonFieldName h, ToSchema h
   ) =>
   ToSchema (NamedFields (a, b, c, d, e, f, g, h))
   where
@@ -221,7 +226,7 @@ instance
             $  NamedSchema Nothing
             $  mempty
             &  type_
-            ?~ SwaggerObject
+            ?~ OpenApiObject
             &  properties
             .~ [ (fieldName @a, a)
                , (fieldName @b, b)
@@ -235,9 +240,9 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c
   ) =>
   ToJSON (NamedFields (a, b, c))
   where
@@ -246,10 +251,10 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d
   ) =>
   ToJSON (NamedFields (a, b, c, d))
   where
@@ -262,11 +267,11 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e
   ) =>
   ToJSON (NamedFields (a, b, c, d, e))
   where
@@ -280,12 +285,12 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f))
   where
@@ -300,13 +305,13 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f,
+    JsonFieldName g, ToJSON  g, FromJSON g
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f, g))
   where
@@ -322,14 +327,14 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g,
-    JsonFieldName h
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f,
+    JsonFieldName g, ToJSON  g, FromJSON g,
+    JsonFieldName h, ToJSON  h, FromJSON h
   ) =>
   ToJSON (NamedFields (a, b, c, d, e, f, g, h))
   where
@@ -347,8 +352,8 @@ instance
 ------------------------------------------------------------------------------------------
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b
   ) =>
   FromJSON (NamedFields (a, b))
   where
@@ -357,9 +362,9 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c
   ) =>
   FromJSON (NamedFields (a, b, c))
   where
@@ -368,10 +373,10 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d
   ) =>
   FromJSON (NamedFields (a, b, c, d))
   where
@@ -388,11 +393,11 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e
   ) =>
   FromJSON (NamedFields (a, b, c, d, e))
   where
@@ -411,12 +416,12 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f))
   where
@@ -437,13 +442,13 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f,
+    JsonFieldName g, ToJSON  g, FromJSON g
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f, g))
   where
@@ -466,14 +471,14 @@ instance
 
 instance
   {-# OVERLAPPING #-}
-  ( JsonFieldName a,
-    JsonFieldName b,
-    JsonFieldName c,
-    JsonFieldName d,
-    JsonFieldName e,
-    JsonFieldName f,
-    JsonFieldName g,
-    JsonFieldName h
+  ( JsonFieldName a, ToJSON  a, FromJSON a,
+    JsonFieldName b, ToJSON  b, FromJSON b,
+    JsonFieldName c, ToJSON  c, FromJSON c,
+    JsonFieldName d, ToJSON  d, FromJSON d,
+    JsonFieldName e, ToJSON  e, FromJSON e,
+    JsonFieldName f, ToJSON  f, FromJSON f,
+    JsonFieldName g, ToJSON  g, FromJSON g,
+    JsonFieldName h, ToJSON  h, FromJSON h
   ) =>
   FromJSON (NamedFields (a, b, c, d, e, f, g, h))
   where

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: acede7012fda918ad1e3f54c0e8727420568a16cf18e05ec9dc6d3c202a40ebb
+-- hash: 96960f65650699c9f2d19b509e445940bbf92cd867848bf7a94934693ae6ea30
 
 name:           domain-driven
 version:        0.1.0.0
@@ -31,7 +31,7 @@ library
       DomainDriven.Internal.Class
       DomainDriven.Internal.JsonFieldName
       DomainDriven.Internal.NamedFields
-      DomainDriven.Internal.WithNamedField
+      DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.FileWithSTM
       DomainDriven.Persistance.ForgetfulSTM
       DomainDriven.Persistance.Postgres
@@ -43,15 +43,16 @@ library
   default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
     , directory
     , generic-lens
-    , ghc-prim
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -60,7 +61,6 @@ library
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -78,6 +78,7 @@ executable hierarchical
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
@@ -87,6 +88,7 @@ executable hierarchical
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -96,7 +98,6 @@ executable hierarchical
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -116,6 +117,7 @@ executable simple
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
   build-depends:
       aeson
+    , aeson-pretty
     , base >=4.7 && <5
     , containers
     , deepseq
@@ -125,6 +127,7 @@ executable simple
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , random
     , rio
@@ -133,7 +136,6 @@ executable simple
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers
@@ -147,7 +149,7 @@ test-suite domain-driven-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      DomainDriven.Internal.WithNamedFieldSpec
+      DomainDriven.Internal.NamedJsonFieldsSpec
       DomainDriven.Persistance.FileWithSTMSpec
       DomainDriven.Persistance.ForgetfulSTMSpec
       DomainDriven.Persistance.PostgresSpec
@@ -161,6 +163,7 @@ test-suite domain-driven-test
   build-depends:
       QuickCheck
     , aeson
+    , aeson-pretty
     , async
     , base >=4.7 && <5
     , containers
@@ -173,6 +176,7 @@ test-suite domain-driven-test
     , lens
     , monad-loops
     , mtl
+    , openapi3
     , postgresql-simple
     , quickcheck-arbitrary-adt
     , quickcheck-classes
@@ -184,7 +188,6 @@ test-suite domain-driven-test
     , servant-server
     , stm
     , streaming
-    , swagger2
     , template-haskell
     , text
     , transformers

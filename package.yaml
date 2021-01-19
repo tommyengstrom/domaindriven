@@ -22,6 +22,7 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 dependencies:
 - base >= 4.7 && < 5
 - aeson
+- aeson-pretty
 - containers
 - deepseq
 - directory
@@ -37,9 +38,9 @@ dependencies:
 - servant-server
 - stm
 - streaming
-- swagger2
 - template-haskell
 - text
+- openapi3
 - transformers
 - unordered-containers
 - uuid
@@ -79,8 +80,6 @@ default-extensions:
 
 library:
   source-dirs: src
-  dependencies:
-    - ghc-prim
 
 tests:
   domain-driven-test:

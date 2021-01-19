@@ -27,7 +27,7 @@ import           Data.Aeson                     ( FromJSON
 import qualified Data.Map                                     as M
 import           Control.Monad
 import           Control.Exception              ( throwIO )
-import           Data.Swagger                   ( ToSchema )
+import           Data.OpenApi                   ( ToSchema )
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
@@ -55,7 +55,6 @@ newtype Price = EUR Int
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()
     ChangePrice ::Price -> ItemCmd ()
-
 data ItemEvent
     = ChangedDescription Description
     | ChangedPrice Price

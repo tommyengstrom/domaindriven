@@ -331,6 +331,8 @@ toReqBody args = do
     mkBody :: Q (Maybe Type)
     mkBody = case args of
         [] -> pure Nothing
+        [t] ->  -- As of GHC 8.10 TH will generate 1-tuples
+            pure . Just $ AppT (ConT $ mkName "NamedFields") t
         ts -> do
             let n = length ts
             pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
@@ -486,13 +488,18 @@ mkCmdEPHandler :: Type -> EndpointData -> Q [Dec]
 mkCmdEPHandler runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
-    let varPat = ConP (mkName "NamedFields") [TupP $ fmap VarP varNames]
+    let varPat = ConP (mkName "NamedFields") $ case varNames of
+            [varName] -> [VarP varName] -- No 1-tuples
+            _         -> [TupP $ fmap VarP varNames]
         nrArgs = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
                 . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
-                      [] -> handlerRetType
+                      []  -> handlerRetType
+                      [a] -> AppT -- No 1-tuples
+                          (AppT ArrowT (AppT (ConT $ mkName "NamedFields") a))
+                          handlerRetType
                       as -> AppT
                           (AppT
                               ArrowT
