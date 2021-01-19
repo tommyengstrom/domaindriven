@@ -10,15 +10,11 @@ import           GHC.Generics
 import           RIO
 import qualified RIO.Text                                     as T
 import           RIO.Time
-import           GHC.Tuple
 
 class JsonFieldName t where
   fieldName :: Text
   default fieldName :: (Generic t, GJsonFieldName (Rep t)) => Text
   fieldName = gfieldName $ from (undefined :: t)
-
-instance JsonFieldName a => JsonFieldName (Unit a) where
-    fieldName = fieldName @a
 
 instance JsonFieldName Int where
     fieldName = "int"

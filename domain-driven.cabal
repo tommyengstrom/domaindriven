@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cf4b9a7f43c034eba748de76c3097be8f40bde93a660d3493b336e843c5f8889
+-- hash: 96960f65650699c9f2d19b509e445940bbf92cd867848bf7a94934693ae6ea30
 
 name:           domain-driven
 version:        0.1.0.0
@@ -49,7 +49,6 @@ library
     , deepseq
     , directory
     , generic-lens
-    , ghc-prim
     , lens
     , monad-loops
     , mtl
