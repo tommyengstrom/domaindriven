@@ -14,6 +14,7 @@ import qualified Data.Text                                    as T
 import qualified Data.HashMap.Strict                          as HM
 import           Control.Applicative
 import           Control.Monad.State
+import           Data.Generics.Product
 import           Data.OpenApi            hiding ( put
                                                 , get
                                                 )
@@ -23,6 +24,7 @@ import           Data.Proxy
 import           Control.Lens            hiding ( to
                                                 , from
                                                 )
+import           Data.Text.Lens                 ( packed )
 
 newtype NamedJsonFields a = NamedJsonFields a
 
@@ -33,38 +35,60 @@ instance (GNamedFromJSON (Rep a), Generic a) => FromJSON (NamedJsonFields a) whe
     parseJSON = fmap NamedJsonFields . gParseNamedJson
 
 instance (GNamedToSchema (Rep a), Generic a) => ToSchema (NamedJsonFields a) where
-    declareNamedSchema _ = evalStateT (gDeclareNamedSchema $ Proxy @(Rep a)) ["tag"]
+    declareNamedSchema _ =
+        evalStateT (gDeclareNamedSchema defaultNamedJsonOptions $ Proxy @(Rep a)) []
 
 gToNamedJson :: (GNamedToJSON (Rep a), Generic a) => a -> Value
-gToNamedJson a = Object . HM.fromList $ evalState (gToTupleList $ from a) []
+gToNamedJson a =
+    Object . HM.fromList $ evalState (gToTupleList defaultNamedJsonOptions $ from a) []
 
+-----------------------------------------Options------------------------------------------
+
+data NamedJsonOptions = NamedJsonOptions
+    { constructorTagModifier :: String -> String
+    , tagFieldName           :: String
+    }
+    deriving Generic
+
+defaultNamedJsonOptions :: NamedJsonOptions
+defaultNamedJsonOptions = NamedJsonOptions
+    { constructorTagModifier = \s -> "hejsan_" <> s
+    , tagFieldName           = "taggen"
+    }
 -----------------------------------------ToSchema-----------------------------------------
 data Proxy3 a b c = Proxy3
 
 class GNamedToSchema (f :: Type -> Type) where
-    gDeclareNamedSchema :: Proxy f
+    gDeclareNamedSchema :: NamedJsonOptions
+                        -> Proxy f
                         -> StateT [UsedName] (Declare (Definitions Schema)) NamedSchema
 
 -- Grab the name of the datatype
 instance (Datatype d, GNamedToSchema f) => GNamedToSchema (D1 d f) where
-    gDeclareNamedSchema _ = do
+    gDeclareNamedSchema opts _ = do
         let dtName :: String
             dtName = datatypeName $ Proxy3 @d @f
-        NamedSchema _ rest <- gDeclareNamedSchema (Proxy @f)
+        NamedSchema _ rest <- gDeclareNamedSchema opts (Proxy @f)
         pure $ NamedSchema (Just $ T.pack dtName) rest
 
 -- Grab the name of the constructor to use for the `tag` field content.
 instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
-    gDeclareNamedSchema _ = do
-        NamedSchema _ s <- gDeclareNamedSchema (Proxy @f)
+    gDeclareNamedSchema opts _ = do
+        let tagName = opts ^. field @"tagFieldName" . packed
+        state $ \s -> ((), tagName : s)
+        NamedSchema _ s <- gDeclareNamedSchema opts (Proxy @f)
         let constructorName :: Text
-            constructorName = T.pack . conName $ Proxy3 @c @f
+            constructorName =
+                T.pack
+                    . (opts ^. field @"constructorTagModifier")
+                    . conName
+                    $ Proxy3 @c @f
 
             tagFieldSchema :: Schema
             tagFieldSchema =
                 mempty
                     &   properties
-                    <>~ [ ( "tag"
+                    <>~ [ ( tagName
                           , Inline
                           $  mempty
                           &  type_
@@ -74,13 +98,13 @@ instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
                           )
                         ]
                     &   required
-                    <>~ ["tag"]
+                    <>~ [tagName]
         pure $ NamedSchema Nothing $ tagFieldSchema <> s
 
 -- Grab the name of the field, but not not set it as required
 instance {-# OVERLAPPING #-} (ToSchema f, JsonFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 (Maybe f))) where
-    gDeclareNamedSchema _ = do
+    gDeclareNamedSchema _opts _ = do
         let fName = fieldName @(Maybe f)
         usedNames <- state (\used -> (used, fName : used))
         pure
@@ -92,7 +116,7 @@ instance {-# OVERLAPPING #-} (ToSchema f, JsonFieldName f, Selector s)
 -- Grab the name of the field and set it as required
 instance {-# OVERLAPPABLE #-} (ToSchema f, JsonFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 f)) where
-    gDeclareNamedSchema _ = do
+    gDeclareNamedSchema _opts _ = do
         let fName = fieldName @f
         usedNames <- state (\used -> (used, fName : used))
         pure
@@ -104,19 +128,19 @@ instance {-# OVERLAPPABLE #-} (ToSchema f, JsonFieldName f, Selector s)
             <>~ [actualFieldName usedNames fName]
 
 instance GNamedToSchema U1 where
-    gDeclareNamedSchema _ = pure $ NamedSchema Nothing mempty
+    gDeclareNamedSchema _opts _ = pure $ NamedSchema Nothing mempty
 
 instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :*: g) where
-    gDeclareNamedSchema _ = do
-        NamedSchema _ a <- gDeclareNamedSchema (Proxy @f)
-        NamedSchema _ b <- gDeclareNamedSchema (Proxy @g)
+    gDeclareNamedSchema opts _ = do
+        NamedSchema _ a <- gDeclareNamedSchema opts (Proxy @f)
+        NamedSchema _ b <- gDeclareNamedSchema opts (Proxy @g)
         pure (NamedSchema Nothing $ a <> b)
 
 instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :+: g) where
-    gDeclareNamedSchema _ = do
+    gDeclareNamedSchema opts _ = do
         -- Sum types do not share fields, thus we do not need to adjust the names
-        NamedSchema _ a <- lift $ evalStateT (gDeclareNamedSchema (Proxy @f)) []
-        NamedSchema _ b <- lift $ evalStateT (gDeclareNamedSchema (Proxy @g)) []
+        NamedSchema _ a <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @f)) []
+        NamedSchema _ b <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @g)) []
         pure $ NamedSchema Nothing $ mempty & oneOf .~ Just [Inline a, Inline b]
 
 
@@ -124,38 +148,43 @@ instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :+: g) where
 type UsedName = Text
 
 class GNamedToJSON a where
-    gToTupleList :: a x -> State [UsedName] [(Text, Value)]
+    gToTupleList :: NamedJsonOptions -> a x -> State [UsedName] [(Text, Value)]
 
 instance (GNamedToJSON f, Datatype d) => GNamedToJSON (M1 D d f) where
-    gToTupleList = gToTupleList . unM1
+    gToTupleList opts = gToTupleList opts . unM1
 
 instance (GNamedToJSON f, Constructor c) => GNamedToJSON (M1 C c f) where
-    gToTupleList a = do
+    gToTupleList opts a = do
         usedNames <- get
-        put $ usedNames <> ["tag"]
-        rest <- gToTupleList $ unM1 a
-        pure $ [("tag", String . T.pack $ conName a)] <> rest
+        put $ usedNames <> [opts ^. field @"tagFieldName" . packed]
+        rest <- gToTupleList opts $ unM1 a
+        pure
+            $  [ ( (opts ^. field @"tagFieldName" . packed)
+                 , String . T.pack . (opts ^. field @"constructorTagModifier") $ conName a
+                 )
+               ]
+            <> rest
 
 instance (ToJSON t, JsonFieldName t) => GNamedToJSON (M1 S c (Rec0 t)) where
-    gToTupleList a = do
+    gToTupleList _opts a = do
         usedNames <- get
         let fName = fieldName @t
         put $ usedNames <> [fName]
         pure [(actualFieldName usedNames fName, toJSON . unK1 $ unM1 a)]
 
 instance GNamedToJSON U1 where
-    gToTupleList U1 = pure []
+    gToTupleList _opts U1 = pure []
 
 instance (GNamedToJSON a, GNamedToJSON b) => GNamedToJSON (a :*: b) where
-    gToTupleList (a :*: b) = do
-        p1 <- gToTupleList a
-        p2 <- gToTupleList b
+    gToTupleList opts (a :*: b) = do
+        p1 <- gToTupleList opts a
+        p2 <- gToTupleList opts b
         pure $ p1 <> p2
 
 instance (GNamedToJSON a, GNamedToJSON b) => GNamedToJSON (a :+: b) where
-    gToTupleList = \case
-        L1 a -> gToTupleList a
-        R1 a -> gToTupleList a
+    gToTupleList opts = \case
+        L1 a -> gToTupleList opts a
+        R1 a -> gToTupleList opts a
 
 
 actualFieldName :: [UsedName] -> Text -> Text
@@ -174,37 +203,40 @@ lookupKey k = \case
     _ -> fail $ "Expected " <> show k <> " to be an object."
 
 gParseNamedJson :: (GNamedFromJSON (Rep a), Generic a) => Value -> Parser a
-gParseNamedJson v = to <$> evalStateT (gNamedFromJSON v) []
+gParseNamedJson v = to <$> evalStateT (gNamedFromJSON defaultNamedJsonOptions v) []
 
 class GNamedFromJSON a where
-  gNamedFromJSON :: Value -> StateT [UsedName] Parser (a x)
+  gNamedFromJSON :: NamedJsonOptions -> Value -> StateT [UsedName] Parser (a x)
 
 instance GNamedFromJSON p => GNamedFromJSON (M1 D f p) where
-    gNamedFromJSON v = M1 <$> gNamedFromJSON v
+    gNamedFromJSON opts v = M1 <$> gNamedFromJSON opts v
 
 instance (Constructor f, GNamedFromJSON p) => GNamedFromJSON (M1 C f p) where
-    gNamedFromJSON v = do
-        c   <- M1 <$> gNamedFromJSON v
-        tag <- lookupKey "tag" v
+    gNamedFromJSON opts v = do
+        c <- M1 <$> gNamedFromJSON opts v
+        let constructorName =
+                T.pack . (opts ^. field @"constructorTagModifier") $ conName c
+        tag <- lookupKey (opts ^. field @"tagFieldName" . packed) v
         case tag of
-            String t | T.unpack t == conName c -> pure c
-            _ -> fail "Unknown tag"
+            String t | t == constructorName -> pure c
+            _                               -> fail "Unknown tag"
 
 instance GNamedFromJSON U1 where
-    gNamedFromJSON _ = pure U1
+    gNamedFromJSON _opts _ = pure U1
 
 instance (GNamedFromJSON a, GNamedFromJSON b) => GNamedFromJSON (a :+: b) where
-    gNamedFromJSON vals = L1 <$> gNamedFromJSON vals <|> R1 <$> gNamedFromJSON vals
+    gNamedFromJSON opts vals =
+        L1 <$> gNamedFromJSON opts vals <|> R1 <$> gNamedFromJSON opts vals
 
 
 instance (GNamedFromJSON a, GNamedFromJSON b) => GNamedFromJSON (a :*: b) where
-    gNamedFromJSON vals = do
-        p1 <- gNamedFromJSON vals
-        p2 <- gNamedFromJSON vals
+    gNamedFromJSON opts vals = do
+        p1 <- gNamedFromJSON opts vals
+        p2 <- gNamedFromJSON opts vals
         pure $ p1 :*: p2
 
 instance (FromJSON t, JsonFieldName t) => GNamedFromJSON (M1 S c (Rec0 t)) where
-    gNamedFromJSON vals = do
+    gNamedFromJSON _opts vals = do
         usedNames <- get
         let fName = fieldName @t
         v <- lookupKey (actualFieldName usedNames fName) vals
