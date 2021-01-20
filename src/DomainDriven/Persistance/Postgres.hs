@@ -112,6 +112,7 @@ createPostgresPersistance getConn eventTable stateTable app' seed' =
                           , createStateTable = flip createStateTable' stateTable
                           , queryEvents      = flip queryEvents' eventTable
                           , queryState       = flip queryState' stateTable
+                          , lockState        = flip lockState' stateTable
                           , writeState       = \conn s -> writeState' conn stateTable s
                           , writeEvents = \conn evs -> writeEvents' conn eventTable evs
                           , app              = app'
@@ -153,6 +154,10 @@ queryState' :: (FromJSON a, Typeable a) => Connection -> StateTableName -> IO [a
 queryState' conn stateTable = fmap fromStateRow
     <$> query_ conn ("select * from \"" <> fromString stateTable <> "\"")
 
+lockState' :: Connection -> StateTableName -> IO Int64
+lockState' conn stateTable =
+    execute_ conn ("lock \"" <> fromString stateTable <> "\" in exclusive mode")
+
 writeEvents' :: ToJSON a => Connection -> EventTableName -> [Stored a] -> IO Int64
 writeEvents' conn eventTable storedEvents = executeMany
     conn
@@ -184,6 +189,7 @@ data PostgresStateAndEvent model event = PostgresStateAndEvent
     , clearStateTable  :: Connection -> IO Int64
     , queryEvents      :: Connection -> IO [Stored event]
     , queryState       :: Connection -> IO [model] -- FIXME: One model only!
+    , lockState        :: Connection -> IO Int64 -- ^ Get an exclusive lock on the model
     , writeState       :: Connection -> model -> IO Int64 -- ^ Insert to write the state
     , writeEvents      :: Connection -> [Stored event] -> IO Int64 -- ^ Insert to write an event
     , app              :: model -> Stored event -> model
@@ -198,7 +204,7 @@ instance ReadModel (PostgresStateAndEvent m e) where
     applyEvent pg = app pg
     getModel pg = do
         conn <- getConnection pg
-        r    <- (queryState pg) conn
+        r    <- queryState pg conn
             `catch` const @_ @ResultError (pure <$> recalculateState conn)
         case r of
             []  -> recalculateState conn
@@ -225,6 +231,7 @@ instance WriteModel (PostgresStateAndEvent m e) where
     transactionalUpdate pg evalCmd = do
         conn <- getConnection pg
         withTransaction conn $ do
+            _ <- lockState pg conn
             m <- getModel pg
             case evalCmd m of
                 Left  err        -> throwM err
