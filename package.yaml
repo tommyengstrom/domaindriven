@@ -4,7 +4,7 @@ github:              "tommyengstrom/domain-driven"
 license:             BSD3
 author:              "Tommy Engström"
 maintainer:          "tommy@tommyengstrom.com"
-copyright:           "2019 Tommy Engström"
+copyright:           "2021 Tommy Engström"
 
 extra-source-files:
 - README.md

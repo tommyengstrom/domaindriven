@@ -14,6 +14,7 @@ import           Data.String                    ( fromString )
 import           Data.Text                      ( Text )
 import qualified Data.Map                                     as M
 import           Safe                           ( headNote )
+import           Control.Concurrent.Async
 
 
 spec :: Spec
@@ -162,3 +163,15 @@ storeModelSpec = describe "Test basic functionality" $ do
         _ <- runCmd p Store.handleStoreCmd $ Store.AddItem item
 
         runQuery p Store.queryHandler Store.ProductCount `shouldReturn` 2
+    it "Concurrent commands work" $ do
+        -- This test relies on the postgres max connections being reasonably high.
+        c0 <- runQuery p Store.queryHandler Store.ProductCount
+        let newItems :: [Store.ItemInfo]
+            newItems = replicate n $ Store.ItemInfo (Store.Wrap 1) 10
+
+            n :: Int
+            n = 20
+        mapConcurrently_ (runCmd p Store.handleStoreCmd . Store.AddItem) newItems
+
+        c1 <- runQuery p Store.queryHandler Store.ProductCount
+        c1 - c0 `shouldBe` n

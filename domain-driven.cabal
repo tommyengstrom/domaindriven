@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 009af30233fdf45cc1a755fa60cbf437b02f3e769b3e8fac55041e6f17bfc9dd
+-- hash: ebb270fa706b57b7ab4f12966f19fc92bb08080d1c8bc0c6e816335405510dde
 
 name:           domain-driven
 version:        0.1.0.0
@@ -13,7 +13,7 @@ homepage:       https://github.com/tommyengstrom/domain-driven#readme
 bug-reports:    https://github.com/tommyengstrom/domain-driven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
-copyright:      2019 Tommy Engström
+copyright:      2021 Tommy Engström
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
