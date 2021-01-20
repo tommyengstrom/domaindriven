@@ -51,10 +51,8 @@ data NamedJsonOptions = NamedJsonOptions
     deriving Generic
 
 defaultNamedJsonOptions :: NamedJsonOptions
-defaultNamedJsonOptions = NamedJsonOptions
-    { constructorTagModifier = \s -> "hejsan_" <> s
-    , tagFieldName           = "taggen"
-    }
+defaultNamedJsonOptions =
+    NamedJsonOptions { constructorTagModifier = id, tagFieldName = "tag" }
 -----------------------------------------ToSchema-----------------------------------------
 data Proxy3 a b c = Proxy3
 
