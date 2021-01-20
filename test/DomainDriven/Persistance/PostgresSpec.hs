@@ -1,14 +1,17 @@
 {-# LANGUAGE OverloadedLists #-}
 module DomainDriven.Persistance.PostgresSpec where
 
-import           RIO
+import           Prelude
 import           DomainDriven
 import           DomainDriven.Persistance.Postgres
 import           Test.Hspec
 import           Database.PostgreSQL.Simple
 import qualified StoreModel                                   as Store
 import           Data.UUID                      ( nil )
-import           RIO.Time
+import           Data.Time
+import           Data.Int                       ( Int64 )
+import           Data.String                    ( fromString )
+import           Data.Text                      ( Text )
 import qualified Data.Map                                     as M
 import           Safe                           ( headNote )
 

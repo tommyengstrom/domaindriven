@@ -1,7 +1,12 @@
 module DomainDriven.Persistance.ForgetfulSTM where
 
 import           DomainDriven.Internal.Class
-import           RIO
+import           Prelude
+import           GHC.Generics                   ( Generic )
+import           Control.Concurrent.STM  hiding ( stateTVar )
+import           Control.Monad.Catch
+import           Data.Traversable
+import           Data.List                      ( foldl' )
 import           GHC.IO.Unsafe                  ( unsafePerformIO )
 
 
@@ -11,7 +16,7 @@ createForgetfulSTM
     -> IO (ForgetfulSTM model event)
 createForgetfulSTM appEvent m0 = do
     state <- newTVarIO m0
-    evs <- newTVarIO []
+    evs   <- newTVarIO []
     pure $ ForgetfulSTM state appEvent m0 evs
 
 -- | STM state without event persistance
@@ -26,22 +31,20 @@ data ForgetfulSTM model event = ForgetfulSTM
 instance ReadModel (ForgetfulSTM m e) where
     type Model (ForgetfulSTM m e) = m
     type Event (ForgetfulSTM m e) = e
-    applyEvent  ff = app ff
+    applyEvent ff = app ff
     getModel ff = readTVarIO $ stateTVar ff
     getEvents ff = readTVarIO $ events ff
 
 instance WriteModel (ForgetfulSTM m e) where
-    transactionalUpdate ff evalCmd =
-        atomically $ do
-            let tvar = stateTVar ff
-            m         <- readTVar tvar
-            (r, evs)  <- either throwM pure $ evalCmd m
-            storedEvs <- for evs $ \e -> do
-                let s = unsafePerformIO $ toStored e
-                pure s
-            let newModel = foldl' (app ff) m storedEvs
-            modifyTVar (events ff) (<> storedEvs)
-            writeTVar tvar newModel
+    transactionalUpdate ff evalCmd = atomically $ do
+        let tvar = stateTVar ff
+        m         <- readTVar tvar
+        (r, evs)  <- either throwM pure $ evalCmd m
+        storedEvs <- for evs $ \e -> do
+            let s = unsafePerformIO $ toStored e
+            pure s
+        let newModel = foldl' (app ff) m storedEvs
+        modifyTVar (events ff) (<> storedEvs)
+        writeTVar tvar newModel
 
-            pure r
-
+        pure r

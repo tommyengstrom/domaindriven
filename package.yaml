@@ -23,16 +23,19 @@ dependencies:
 - base >= 4.7 && < 5
 - aeson
 - aeson-pretty
+- async
+- bytestring
 - containers
 - deepseq
 - directory
+- exceptions
 - generic-lens
 - lens
 - monad-loops
 - mtl
+- openapi3
 - postgresql-simple
 - random
-- rio
 - safe
 - servant
 - servant-server
@@ -40,8 +43,9 @@ dependencies:
 - streaming
 - template-haskell
 - text
-- openapi3
+- time
 - transformers
+- vector
 - unordered-containers
 - uuid
 

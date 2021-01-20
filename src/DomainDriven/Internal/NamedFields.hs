@@ -2,13 +2,13 @@
 
 module DomainDriven.Internal.NamedFields where
 
-import           Control.Lens                   ( (.~)
-                                                , (?~)
-                                                )
 import           Data.Aeson
 import           Data.OpenApi
 import           DomainDriven.Internal.JsonFieldName
-import           RIO                     hiding ( (.~) )
+import           Prelude
+import           GHC.Generics                   ( Generic )
+import           Data.Proxy
+import           Control.Lens
 
 data NamedFields a = NamedFields
     { unNamedFields :: a

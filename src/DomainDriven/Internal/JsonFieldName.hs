@@ -7,9 +7,14 @@ import           Data.Aeson
 import           Data.Char                      ( toLower )
 import           Data.OpenApi
 import           GHC.Generics
-import           RIO
-import qualified RIO.Text                                     as T
-import           RIO.Time
+import           Prelude
+import qualified Data.Text                                    as T
+import           Data.Text                      ( Text )
+import           Data.Set                       ( Set )
+import           Data.Vector                    ( Vector )
+import qualified Data.Map                                     as M
+import qualified Data.HashMap.Strict                          as HM
+import           Data.Time
 
 class JsonFieldName t where
   fieldName :: Text
@@ -36,7 +41,13 @@ instance JsonFieldName UTCTime where
 
 instance
   ( FromJSONKey k,ToJSONKey k,Ord k,JsonFieldName v,ToSchema k) =>
-  JsonFieldName (Map k v)
+  JsonFieldName (M.Map k v)
+  where
+    fieldName = "mapOf" <> fieldName @v
+
+instance
+  ( FromJSONKey k,ToJSONKey k,Ord k,JsonFieldName v,ToSchema k) =>
+  JsonFieldName (HM.HashMap k v)
   where
     fieldName = "mapOf" <> fieldName @v
 

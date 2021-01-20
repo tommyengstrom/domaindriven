@@ -5,9 +5,11 @@ import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.UUID
 import           Data.Kind
-import           RIO
-import           RIO.Time
+import           Prelude
+import           Data.Time
 import           System.Random
+import           Control.Monad.Catch
+import           GHC.Generics                   ( Generic )
 
 class ReadModel a where
     type Model a :: Type
@@ -82,4 +84,4 @@ mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO
 
 toStored :: MonadIO m => e -> m (Stored e)
-toStored e = Stored e <$> getCurrentTime <*> mkId
+toStored e = Stored e <$> liftIO getCurrentTime <*> mkId

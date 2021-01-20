@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 96960f65650699c9f2d19b509e445940bbf92cd867848bf7a94934693ae6ea30
+-- hash: 009af30233fdf45cc1a755fa60cbf437b02f3e769b3e8fac55041e6f17bfc9dd
 
 name:           domain-driven
 version:        0.1.0.0
@@ -44,10 +44,13 @@ library
   build-depends:
       aeson
     , aeson-pretty
+    , async
     , base >=4.7 && <5
+    , bytestring
     , containers
     , deepseq
     , directory
+    , exceptions
     , generic-lens
     , lens
     , monad-loops
@@ -55,7 +58,6 @@ library
     , openapi3
     , postgresql-simple
     , random
-    , rio
     , safe
     , servant
     , servant-server
@@ -63,9 +65,11 @@ library
     , streaming
     , template-haskell
     , text
+    , time
     , transformers
     , unordered-containers
     , uuid
+    , vector
   default-language: Haskell2010
 
 executable hierarchical
@@ -79,11 +83,14 @@ executable hierarchical
   build-depends:
       aeson
     , aeson-pretty
+    , async
     , base >=4.7 && <5
+    , bytestring
     , containers
     , deepseq
     , directory
     , domain-driven
+    , exceptions
     , generic-lens
     , lens
     , monad-loops
@@ -91,7 +98,6 @@ executable hierarchical
     , openapi3
     , postgresql-simple
     , random
-    , rio
     , safe
     , servant
     , servant-docs
@@ -100,9 +106,11 @@ executable hierarchical
     , streaming
     , template-haskell
     , text
+    , time
     , transformers
     , unordered-containers
     , uuid
+    , vector
     , wai
     , warp
   default-language: Haskell2010
@@ -118,11 +126,14 @@ executable simple
   build-depends:
       aeson
     , aeson-pretty
+    , async
     , base >=4.7 && <5
+    , bytestring
     , containers
     , deepseq
     , directory
     , domain-driven
+    , exceptions
     , generic-lens
     , lens
     , monad-loops
@@ -130,7 +141,6 @@ executable simple
     , openapi3
     , postgresql-simple
     , random
-    , rio
     , safe
     , servant
     , servant-server
@@ -138,9 +148,11 @@ executable simple
     , streaming
     , template-haskell
     , text
+    , time
     , transformers
     , unordered-containers
     , uuid
+    , vector
     , wai
     , warp
   default-language: Haskell2010
@@ -166,10 +178,12 @@ test-suite domain-driven-test
     , aeson-pretty
     , async
     , base >=4.7 && <5
+    , bytestring
     , containers
     , deepseq
     , directory
     , domain-driven
+    , exceptions
     , generic-lens
     , hspec
     , http-client
@@ -181,7 +195,6 @@ test-suite domain-driven-test
     , quickcheck-arbitrary-adt
     , quickcheck-classes
     , random
-    , rio
     , safe
     , servant
     , servant-client
@@ -190,8 +203,10 @@ test-suite domain-driven-test
     , streaming
     , template-haskell
     , text
+    , time
     , transformers
     , unordered-containers
     , uuid
+    , vector
     , warp
   default-language: Haskell2010

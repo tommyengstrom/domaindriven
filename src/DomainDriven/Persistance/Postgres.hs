@@ -1,10 +1,18 @@
 module DomainDriven.Persistance.Postgres where
 
 import           DomainDriven.Internal.Class
-import           RIO
-import           RIO.Time
+import           Prelude
+import           Data.Time
 import           Database.PostgreSQL.Simple
-import qualified RIO.ByteString.Lazy                          as BL
+import qualified Data.ByteString.Lazy                         as BL
+import           Data.Int
+import           Data.String
+import           Control.Monad
+import           Data.List                      ( foldl' )
+import           Data.Typeable
+import           Control.Monad.Catch
+import           GHC.Generics                   ( Generic )
+import           Data.Text                      ( Text )
 import           Data.Aeson
 import           Data.UUID                      ( UUID )
 import           Database.PostgreSQL.Simple.FromField         as FF

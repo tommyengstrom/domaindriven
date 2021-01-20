@@ -1,15 +1,20 @@
 module StoreModel where
 
 
-import qualified RIO.List                                     as L
 import qualified Data.Map                                     as M
 import           DomainDriven
-import           RIO
+import           Prelude
 import           Data.Aeson
 import           GHC.TypeLits
 import           Data.Generics.Product
+import           Control.Monad.Catch
+import           Safe                           ( maximumMay )
+import           Data.Typeable
+import           Data.Map                       ( Map )
+import           GHC.Generics                   ( Generic )
+import           Control.Lens
 import           Control.Monad.Except
-import           GHC.Enum
+import           Data.Maybe
 
 newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num, ToJSONKey, FromJSONKey)
@@ -57,7 +62,7 @@ handleStoreCmd = \case
         when (M.notMember iKey m) $ throwError NoSuchItem
         pure ((), [Restocked iKey q])
     AddItem iInfo -> pure $ \m -> runExcept $ do
-        let iKey = succ <$> fromMaybe (Wrap 0) (L.maximumMaybe $ M.keys m)
+        let iKey = succ <$> fromMaybe (Wrap 0) (maximumMay $ M.keys m)
         pure (iKey, [AddedItem iKey iInfo])
     RemoveItem iKey -> pure $ \m -> runExcept $ do
         when (M.notMember iKey m) $ throwError NoSuchItem

@@ -1,5 +1,5 @@
 module DomainDriven.Persistance.ForgetfulSTMSpec where
-import           RIO
+import           Prelude
 import           DomainDriven.Internal.Class
 import qualified Data.Map                                     as M
 import           Test.Hspec

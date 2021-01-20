@@ -1,6 +1,8 @@
 module DomainDriven.Persistance.FileWithSTMSpec where
 
-import           RIO
+import           Prelude
+import           Control.Monad
+import           Control.Concurrent
 import           DomainDriven.Internal.Class
 import qualified Data.Map                                     as M
 import           Test.Hspec
