@@ -139,7 +139,10 @@ instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :+: g) where
         -- Sum types do not share fields, thus we do not need to adjust the names
         NamedSchema _ a <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @f)) []
         NamedSchema _ b <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @g)) []
-        pure $ NamedSchema Nothing $ mempty & oneOf .~ Just [Inline a, Inline b]
+        let unwrapOneOf :: Schema -> [Referenced Schema]
+            unwrapOneOf x = (maybe [Inline x] id $ x ^. oneOf)
+        pure $ NamedSchema Nothing $ mempty & oneOf .~ Just
+            (unwrapOneOf a <> unwrapOneOf b)
 
 
 ------------------------------------------ToJSON------------------------------------------
