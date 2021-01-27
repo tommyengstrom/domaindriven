@@ -60,12 +60,35 @@ data Duplicated
     --deriving anyclass (FromJSON, ToJSON, ToSchema)
     deriving (FromJSON, ToJSON, ToSchema) via (NamedJsonFields Duplicated)
 
+newtype DuplicatedNoTag = DuplicatedNoTag Duplicated
+    deriving stock Generic
+    deriving newtype (Show, Eq, Arbitrary)
+
+noTagOpts :: NamedJsonOptions
+noTagOpts = defaultNamedJsonOptions { skipTagField = True }
+
+instance FromJSON DuplicatedNoTag where
+    parseJSON = fmap DuplicatedNoTag . gNamedParseJson noTagOpts
+
+instance ToJSON DuplicatedNoTag where
+    toJSON (DuplicatedNoTag a) = gNamedToJson noTagOpts a
+
+instance ToSchema DuplicatedNoTag where
+    declareNamedSchema _ = gNamedDeclareNamedSchema noTagOpts (Proxy @Duplicated)
+
 spec :: Spec
 spec = do
     describe "ToJSON and FromJSON instances" $ do
-        void $ traverse (uncurry prop) (lawsProperties $ jsonLaws $ Proxy @Test1)
-        void $ traverse (uncurry prop) (lawsProperties $ jsonLaws $ Proxy @Test2)
-        void $ traverse (uncurry prop) (lawsProperties $ jsonLaws $ Proxy @Duplicated)
+        describe "Test1" . void $ traverse (uncurry prop)
+                                           (lawsProperties $ jsonLaws $ Proxy @Test1)
+        describe "Test2" . void $ traverse (uncurry prop)
+                                           (lawsProperties $ jsonLaws $ Proxy @Test2)
+        describe "Duplicated" . void $ traverse
+            (uncurry prop)
+            (lawsProperties $ jsonLaws $ Proxy @Duplicated)
+        describe "DuplicatedNoTag" . void $ traverse
+            (uncurry prop)
+            (lawsProperties $ jsonLaws $ Proxy @DuplicatedNoTag)
     describe "ToSchema instances" $ do
         prop "Test1" $ \(a :: Test1) -> validateToJSON a == []
         prop "Test2" $ \(a :: Test2) -> validateToJSON a == []
