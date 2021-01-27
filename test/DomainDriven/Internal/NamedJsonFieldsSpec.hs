@@ -41,9 +41,12 @@ instance Arbitrary Duplicated where
 instance Arbitrary MyText where
     arbitrary = elements ["hej", "hopp", "kalle", "anka", "ekorre"]
 
-data Test2 = Test2a
+data Test2
+    = Test2a
     | Test2b Int MyText
     | Test2c MyText
+    | Test2d String String
+    | Test2e String
     deriving (Show, Eq, Ord, Generic)
     deriving (FromJSON, ToJSON, ToSchema) via (NamedJsonFields Test2)
 
