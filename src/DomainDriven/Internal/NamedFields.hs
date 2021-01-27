@@ -1,6 +1,12 @@
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 
-module DomainDriven.Internal.NamedFields where
+module DomainDriven.Internal.NamedFields
+    ( NamedFields1 (..)
+    , NamedFields2 (..)
+    , NamedFields3 (..)
+    , NamedFields4 (..)
+    ) where
 
 import           Data.Aeson
 import           Data.OpenApi
@@ -9,7 +15,119 @@ import           Prelude
 import           GHC.Generics                   ( Generic )
 import           Data.Proxy
 import           Control.Lens
+import           DomainDriven.Internal.NamedJsonFields
+import           GHC.TypeLits
 
+opts :: forall name . KnownSymbol name => NamedJsonOptions
+opts = defaultNamedJsonOptions { skipTagField         = True
+                               , datatypeNameModifier = const (symbolVal $ Proxy @name)
+                               }
+
+---------------------------------------------------------------
+data NamedFields1 (name :: Symbol) a  = NamedFields1 a
+    deriving (Show, Eq, Ord, Generic)
+
+instance (KnownSymbol name
+        , ToJSON a, JsonFieldName a)
+        =>  ToJSON (NamedFields1 name a ) where
+    toJSON = gNamedToJson (opts @name)
+
+instance (KnownSymbol name
+        , ToSchema a, JsonFieldName a)
+    =>  ToSchema (NamedFields1 name a ) where
+    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
+
+instance (KnownSymbol name
+        , FromJSON a, JsonFieldName a)
+    =>  FromJSON (NamedFields1 name a ) where
+    parseJSON = gNamedParseJson (opts @name)
+---------------------------------------------------------------
+data NamedFields2 (name :: Symbol) a b = NamedFields2 a b
+    deriving (Show, Eq, Ord, Generic)
+
+instance (KnownSymbol name
+        , ToJSON a, JsonFieldName a
+        , ToJSON b, JsonFieldName b)
+        =>  ToJSON (NamedFields2 name a b) where
+    toJSON = gNamedToJson (opts @name)
+
+instance (KnownSymbol name
+        , ToSchema a, JsonFieldName a
+        , ToSchema b, JsonFieldName b)
+    =>  ToSchema (NamedFields2 name a b) where
+    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
+
+instance (KnownSymbol name
+        , FromJSON a, JsonFieldName a
+        , FromJSON b, JsonFieldName b)
+    =>  FromJSON (NamedFields2 name a b) where
+    parseJSON = gNamedParseJson (opts @name)
+
+---------------------------------------------------------------
+data NamedFields3 (name :: Symbol) a b c = NamedFields3 a b c
+    deriving (Show, Eq, Ord, Generic)
+
+instance (KnownSymbol name
+        , ToJSON a, JsonFieldName a
+        , ToJSON b, JsonFieldName b
+        , ToJSON c, JsonFieldName c)
+        =>  ToJSON (NamedFields3 name a b c) where
+    toJSON = gNamedToJson (opts @name)
+
+instance (KnownSymbol name
+        , ToSchema a, JsonFieldName a
+        , ToSchema b, JsonFieldName b
+        , ToSchema c, JsonFieldName c)
+    =>  ToSchema (NamedFields3 name a b c) where
+    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
+
+instance (KnownSymbol name
+        , FromJSON a, JsonFieldName a
+        , FromJSON b, JsonFieldName b
+        , FromJSON c, JsonFieldName c)
+    =>  FromJSON (NamedFields3 name a b c) where
+    parseJSON = gNamedParseJson (opts @name)
+
+---------------------------------------------------------------
+data NamedFields4 (name :: Symbol) a b c d = NamedFields4 a b c d
+    deriving (Show, Eq, Ord, Generic)
+
+instance (KnownSymbol name
+        , ToJSON a, JsonFieldName a
+        , ToJSON b, JsonFieldName b
+        , ToJSON c, JsonFieldName c
+        , ToJSON d, JsonFieldName d)
+        =>  ToJSON (NamedFields4 name a b c d) where
+    toJSON = gNamedToJson (opts @name)
+
+instance (KnownSymbol name
+        , ToSchema a, JsonFieldName a
+        , ToSchema b, JsonFieldName b
+        , ToSchema c, JsonFieldName c
+        , ToSchema d, JsonFieldName d)
+    =>  ToSchema (NamedFields4 name a b c d) where
+    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
+
+instance (KnownSymbol name
+        , FromJSON a, JsonFieldName a
+        , FromJSON b, JsonFieldName b
+        , FromJSON c, JsonFieldName c
+        , FromJSON d, JsonFieldName d)
+    =>  FromJSON (NamedFields4 name a b c d) where
+    parseJSON = gNamedParseJson (opts @name)
+
+
+
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------------
 data NamedFields a = NamedFields
     { unNamedFields :: a
     }
