@@ -3,12 +3,12 @@ module DomainDriven.Server
     ( module DomainDriven.Server
     , liftIO
     , module DomainDriven.Internal.NamedFields
-    , JsonFieldName(..)
+    , HasFieldName(..)
     ) where
 
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.JsonFieldName
-                                                ( JsonFieldName(..) )
+import           DomainDriven.Internal.HasFieldName
+                                                ( HasFieldName(..) )
 import           Prelude
 import           Language.Haskell.TH
 import           Control.Monad
@@ -310,10 +310,12 @@ mkApiDec spec = TySynD (apiName spec) [] <$> case view epName <$> endpoints spec
             f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
         foldM f (ConT x) xs
 
--- | Create a request body by turning multiple arguments into a tuple
--- `BuyThing ItemKey Quantity` yields `ReqBody '[JSON] (ItemKey, Quantity)`
-toReqBody :: [Type] -> Q (Maybe Type)
-toReqBody args = do
+-- | Create a request body by turning multiple arguments into a NamedFieldsN
+-- `BuyThing ItemKey Quantity`
+-- yields:
+-- `ReqBody '[JSON] (NamedFields2 "BuyThing" ItemKey Quantity)`
+toReqBody :: EndpointData -> [Type] -> Q (Maybe Type)
+toReqBody e args = do
     unless
         (args == L.nub args)
         (fail
@@ -323,20 +325,14 @@ toReqBody args = do
         )
     mkBody >>= maybe (pure Nothing) (\b -> fmap Just [t| ReqBody '[JSON] $(pure b) |])
   where
-    appAll :: Type -> [Type] -> Type
-    appAll t = \case
-        []     -> t
-        x : xs -> appAll (AppT t x) xs
-
     mkBody :: Q (Maybe Type)
     mkBody = case args of
         [] -> pure Nothing
-        [t] ->  -- As of GHC 8.10 TH will generate 1-tuples
-            pure . Just $ AppT (ConT $ mkName "NamedFields") t
         ts -> do
-            let n = length ts
-            pure . Just . AppT (ConT $ mkName "NamedFields") $ appAll (TupleT n) ts
-
+            let n           = length ts
+                constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+                                   (LitT . StrTyLit . show $ eEpName e)
+            pure . Just $ foldl AppT constructor ts
 
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
@@ -356,7 +352,7 @@ cmdEndpointType = \case
             Just b  -> [t| $(pure b) :>  $reqReturn |]
 
         reqBody :: Q (Maybe Type)
-        reqBody = toReqBody $ eConstructorArgs e
+        reqBody = toReqBody e $ eConstructorArgs e
 
         reqReturn :: Q Type
         reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
@@ -488,26 +484,21 @@ mkCmdEPHandler :: Type -> EndpointData -> Q [Dec]
 mkCmdEPHandler runnerTy e = do
     varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
     handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
-    let varPat = ConP (mkName "NamedFields") $ case varNames of
-            [varName] -> [VarP varName] -- No 1-tuples
-            _         -> [TupP $ fmap VarP varNames]
-        nrArgs = length @[] $ eConstructorArgs e
+    let varPat          = ConP constructorName (fmap VarP varNames)
+        constructorName = mkName $ "NamedFields" <> show (length varNames)
+        nrArgs          = length @[] $ eConstructorArgs e
         funSig =
             SigD (eHandlerName e)
                 . AppT (AppT ArrowT runnerTy)
                 $ case eConstructorArgs e of
-                      []  -> handlerRetType
-                      [a] -> AppT -- No 1-tuples
-                          (AppT ArrowT (AppT (ConT $ mkName "NamedFields") a))
-                          handlerRetType
-                      as -> AppT
-                          (AppT
-                              ArrowT
-                              ( AppT (ConT $ mkName "NamedFields")
-                              $ foldl AppT (TupleT (length as)) as
-                              )
-                          )
-                          handlerRetType
+                      [] -> handlerRetType
+                      as ->
+                          let
+                              nfType :: Type
+                              nfType = AppT (ConT constructorName)
+                                            (LitT . StrTyLit . show $ eEpName e)
+                          in
+                              AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
         funBodyBase = AppE (VarE runner)
             $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)

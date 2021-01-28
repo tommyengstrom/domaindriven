@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ebb270fa706b57b7ab4f12966f19fc92bb08080d1c8bc0c6e816335405510dde
+-- hash: cf7a1b6bf1758597b7f04f204fcf714c3a99f89f0afd3c925b67cee2d973facc
 
 name:           domain-driven
 version:        0.1.0.0
@@ -29,7 +29,7 @@ library
   exposed-modules:
       DomainDriven
       DomainDriven.Internal.Class
-      DomainDriven.Internal.JsonFieldName
+      DomainDriven.Internal.HasFieldName
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.FileWithSTM

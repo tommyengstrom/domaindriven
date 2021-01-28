@@ -5,7 +5,7 @@
 module DomainDriven.Internal.NamedJsonFields where
 
 import           Prelude
-import           DomainDriven.Internal.JsonFieldName
+import           DomainDriven.Internal.HasFieldName
 import           GHC.Generics
 import           Data.Aeson
 import           Data.Aeson.Types
@@ -119,7 +119,7 @@ instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
                 pure $ NamedSchema Nothing $ tagFieldSchema <> s
 
 -- Grab the name of the field, but not not set it as required
-instance {-# OVERLAPPING #-} (ToSchema f, JsonFieldName f, Selector s)
+instance {-# OVERLAPPING #-} (ToSchema f, HasFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 (Maybe f))) where
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @(Maybe f)
@@ -131,7 +131,7 @@ instance {-# OVERLAPPING #-} (ToSchema f, JsonFieldName f, Selector s)
             <>~ [(actualFieldName usedNames fName, Inline $ toSchema $ Proxy @f)]
 
 -- Grab the name of the field and set it as required
-instance {-# OVERLAPPABLE #-} (ToSchema f, JsonFieldName f, Selector s)
+instance {-# OVERLAPPABLE #-} (ToSchema f, HasFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 f)) where
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @f
@@ -191,7 +191,7 @@ instance (GNamedToJSON f, Constructor c) => GNamedToJSON (M1 C c f) where
         rest <- gToTupleList opts $ unM1 a
         pure $ tag <> rest
 
-instance (ToJSON t, JsonFieldName t) => GNamedToJSON (M1 S c (Rec0 t)) where
+instance (ToJSON t, HasFieldName t) => GNamedToJSON (M1 S c (Rec0 t)) where
     gToTupleList _opts a = do
         usedNames <- get
         let fName = fieldName @t
@@ -260,7 +260,7 @@ instance (GNamedFromJSON a, GNamedFromJSON b) => GNamedFromJSON (a :*: b) where
         p2 <- gNamedFromJSON opts vals
         pure $ p1 :*: p2
 
-instance (FromJSON t, JsonFieldName t) => GNamedFromJSON (M1 S c (Rec0 t)) where
+instance (FromJSON t, HasFieldName t) => GNamedFromJSON (M1 S c (Rec0 t)) where
     gNamedFromJSON _opts vals = do
         usedNames <- get
         let fName = fieldName @t

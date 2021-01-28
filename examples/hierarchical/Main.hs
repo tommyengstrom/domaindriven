@@ -35,22 +35,22 @@ data Item = Item
     { description :: Description
     , price       :: Price
     }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
+    deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, HasFieldName)
 
 newtype ItemKey = ItemKey UUID
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 newtype Description = Description String
     deriving newtype (Show, Eq, FromJSON, ToJSON, ToSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 newtype Price = EUR Int
     deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON, ToSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()
@@ -63,7 +63,7 @@ data ItemEvent
 newtype SearchTerm = SearchTerm String
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, ToSchema, FromHttpApiData)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 applyItemEvent :: Item -> Stored ItemEvent -> Item
 applyItemEvent m (Stored e _ _) = case e of
