@@ -101,6 +101,7 @@ tests:
     - quickcheck-arbitrary-adt
     - async
     - servant-client
+    - servant-openapi3
     - warp
     - http-client
 
@@ -127,6 +128,7 @@ executables:
     - wai
     - warp
     - servant-docs
+    - servant-openapi3
     ghc-options:
     - -threaded
     - -rtsopts

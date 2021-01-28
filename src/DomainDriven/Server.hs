@@ -331,7 +331,7 @@ toReqBody e args = do
         ts -> do
             let n           = length ts
                 constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-                                   (LitT . StrTyLit . show $ eEpName e)
+                                   (LitT . StrTyLit $ (show $ eEpName e) <> "Body")
             pure . Just $ foldl AppT constructor ts
 
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
@@ -495,8 +495,9 @@ mkCmdEPHandler runnerTy e = do
                       as ->
                           let
                               nfType :: Type
-                              nfType = AppT (ConT constructorName)
-                                            (LitT . StrTyLit . show $ eEpName e)
+                              nfType = AppT
+                                  (ConT constructorName)
+                                  (LitT . StrTyLit $ (show $ eEpName e) <> "Body")
                           in
                               AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 

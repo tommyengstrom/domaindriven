@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cf7a1b6bf1758597b7f04f204fcf714c3a99f89f0afd3c925b67cee2d973facc
+-- hash: 82b9489ac87c86d7f97c92382eb4cf4006f1e9c0715c0bc786e25bfd537b6c5c
 
 name:           domain-driven
 version:        0.1.0.0
@@ -101,6 +101,7 @@ executable hierarchical
     , safe
     , servant
     , servant-docs
+    , servant-openapi3
     , servant-server
     , stm
     , streaming
@@ -198,6 +199,7 @@ test-suite domain-driven-test
     , safe
     , servant
     , servant-client
+    , servant-openapi3
     , servant-server
     , stm
     , streaming
