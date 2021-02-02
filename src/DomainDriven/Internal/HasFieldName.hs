@@ -1,7 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
 
-module DomainDriven.Internal.JsonFieldName where
+module DomainDriven.Internal.HasFieldName where
 
 import           Data.Aeson
 import           Data.Char                      ( toLower )
@@ -16,60 +16,60 @@ import qualified Data.Map                                     as M
 import qualified Data.HashMap.Strict                          as HM
 import           Data.Time
 
-class JsonFieldName t where
+class HasFieldName t where
   fieldName :: Text
-  default fieldName :: (Generic t, GJsonFieldName (Rep t)) => Text
+  default fieldName :: (Generic t, GHasFieldName (Rep t)) => Text
   fieldName = gfieldName $ from (undefined :: t)
 
-instance JsonFieldName Int where
+instance HasFieldName Int where
     fieldName = "int"
 
-instance JsonFieldName Double where
+instance HasFieldName Double where
     fieldName = "double"
 
-instance JsonFieldName Text where
+instance HasFieldName Text where
     fieldName = "text"
 
-instance JsonFieldName Bool where
+instance HasFieldName Bool where
     fieldName = "bool"
 
-instance JsonFieldName Day where
+instance HasFieldName Day where
     fieldName = "day"
 
-instance JsonFieldName UTCTime where
+instance HasFieldName UTCTime where
     fieldName = "utcTime"
 
 instance
-  ( FromJSONKey k,ToJSONKey k,Ord k,JsonFieldName v,ToSchema k) =>
-  JsonFieldName (M.Map k v)
+  ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
+  HasFieldName (M.Map k v)
   where
     fieldName = "mapOf" <> fieldName @v
 
 instance
-  ( FromJSONKey k,ToJSONKey k,Ord k,JsonFieldName v,ToSchema k) =>
-  JsonFieldName (HM.HashMap k v)
+  ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
+  HasFieldName (HM.HashMap k v)
   where
     fieldName = "mapOf" <> fieldName @v
 
-instance (Ord v, JsonFieldName v) => JsonFieldName (Set v) where
+instance (Ord v, HasFieldName v) => HasFieldName (Set v) where
     fieldName = "setOf" <> fieldName @v
 
-instance {-# OVERLAPPABLE #-} JsonFieldName v => JsonFieldName [v] where
+instance {-# OVERLAPPABLE #-} HasFieldName v => HasFieldName [v] where
     fieldName = "listOf" <> fieldName @v
 
-instance {-# OVERLAPPING #-} JsonFieldName String where
+instance {-# OVERLAPPING #-} HasFieldName String where
     fieldName = "string"
 
-instance JsonFieldName v => JsonFieldName (Vector v) where
+instance HasFieldName v => HasFieldName (Vector v) where
     fieldName = "vectorOf" <> fieldName @v
 
-instance JsonFieldName v => JsonFieldName (Maybe v) where
+instance HasFieldName v => HasFieldName (Maybe v) where
     fieldName = "m" <> fieldName @v
 
-class GJsonFieldName t where
+class GHasFieldName t where
   gfieldName :: t x -> Text
 
-instance Datatype c => GJsonFieldName (M1 i c f) where
+instance Datatype c => GHasFieldName (M1 i c f) where
     gfieldName = T.pack . lowerFirst . datatypeName
       where
         lowerFirst :: String -> String

@@ -6,7 +6,7 @@ import           GHC.Generics
 import           Data.Aeson
 import           Data.Text                      ( Text )
 import           DomainDriven.Internal.NamedJsonFields
-import           DomainDriven.Internal.JsonFieldName
+import           DomainDriven.Internal.HasFieldName
 import           Test.QuickCheck
 import           Test.QuickCheck.Arbitrary.ADT
 import           Test.QuickCheck.Classes
@@ -30,7 +30,7 @@ instance Arbitrary Test1 where
 newtype MyText = MyText Text
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (FromJSON, ToJSON, IsString, ToSchema)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 ------------------------------------------------------------------------------
 

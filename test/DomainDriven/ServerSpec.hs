@@ -23,7 +23,7 @@ import           Servant.Client
 newtype ItemKey = ItemKey String
     deriving newtype (Show, Eq)
     deriving stock (Generic)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, JsonFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
 
 newtype Price = Euros Int
     deriving newtype (Show, Eq, FromJSON, ToJSON)
@@ -79,10 +79,10 @@ applyStoreEvent _ _ = ()
 
 -- | Compare with StoreCmdApi if you run into issues
 type ExpectedStoreCmdApi
-    = "cart" :> "add" :> ReqBody '[JSON] (NamedFields ItemKey) :> Post '[JSON] NoContent
+    = "cart" :> "add" :> ReqBody '[JSON] (NamedFields1 "Add" ItemKey) :> Post '[JSON] NoContent
     :<|> Capture "Int" Int :> "subop1" :> Post '[JSON] NoContent
 
-cartAdd :: NamedFields ItemKey -> ClientM NoContent
+cartAdd :: NamedFields1 "Add" ItemKey -> ClientM NoContent
 itemSubOp1 :: Int -> ClientM NoContent
 cartAdd :<|> itemSubOp1 = client (Proxy @ExpectedStoreCmdApi)
 
@@ -98,7 +98,7 @@ spec = do
         pure $ mkClientEnv man (BaseUrl Http "localhost" 9898 "")
     describe "Server endpoint renaming" $ do
         it "Can split constructor into multiple path segments" $ do
-            r <- runClientM (cartAdd $ NamedFields $ ItemKey "whatever") clientEnv
+            r <- runClientM (cartAdd $ NamedFields1 $ ItemKey "whatever") clientEnv
             r `shouldBe` Right NoContent
         it "Can remove constructor name" $ do
             r <- runClientM (itemSubOp1 1) clientEnv

@@ -21,13 +21,18 @@ import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
 import           DomainDriven.Persistance.FileWithSTM
 import           GHC.Generics                   ( Generic )
+import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.Aeson                     ( FromJSON
+                                                , encode
                                                 , ToJSON
                                                 )
 import qualified Data.Map                                     as M
 import           Control.Monad
 import           Control.Exception              ( throwIO )
-import           Data.OpenApi                   ( ToSchema )
+import           Data.OpenApi                   ( ToSchema
+                                                , ToParamSchema
+                                                )
+import           Servant.OpenApi
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
@@ -35,22 +40,22 @@ data Item = Item
     { description :: Description
     , price       :: Price
     }
-    deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, JsonFieldName)
+    deriving (Show, Eq, Generic, FromJSON, ToJSON, ToSchema, HasFieldName)
 
 newtype ItemKey = ItemKey UUID
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema)
+    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, FromHttpApiData, ToSchema, ToParamSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 newtype Description = Description String
     deriving newtype (Show, Eq, FromJSON, ToJSON, ToSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 newtype Price = EUR Int
     deriving newtype (Show, Eq, Ord, Num, FromJSON, ToJSON, ToSchema)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 data ItemCmd a where
     ChangeDescription ::Description -> ItemCmd ()
@@ -63,7 +68,7 @@ data ItemEvent
 newtype SearchTerm = SearchTerm String
     deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, ToSchema, FromHttpApiData)
     deriving stock (Generic)
-    deriving anyclass (JsonFieldName)
+    deriving anyclass (HasFieldName)
 
 applyItemEvent :: Item -> Stored ItemEvent -> Item
 applyItemEvent m (Stored e _ _) = case e of
@@ -177,6 +182,7 @@ main = do
     -- Then we need to create the model
     dm <- createFileWithSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
+    BL.writeFile "/tmp/test_api.json" . encode . toOpenApi $ Proxy @StoreCmdApi
     -- Print the API documentation before starting the server
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.

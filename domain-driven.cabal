@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ebb270fa706b57b7ab4f12966f19fc92bb08080d1c8bc0c6e816335405510dde
+-- hash: 82b9489ac87c86d7f97c92382eb4cf4006f1e9c0715c0bc786e25bfd537b6c5c
 
 name:           domain-driven
 version:        0.1.0.0
@@ -29,7 +29,7 @@ library
   exposed-modules:
       DomainDriven
       DomainDriven.Internal.Class
-      DomainDriven.Internal.JsonFieldName
+      DomainDriven.Internal.HasFieldName
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.FileWithSTM
@@ -101,6 +101,7 @@ executable hierarchical
     , safe
     , servant
     , servant-docs
+    , servant-openapi3
     , servant-server
     , stm
     , streaming
@@ -198,6 +199,7 @@ test-suite domain-driven-test
     , safe
     , servant
     , servant-client
+    , servant-openapi3
     , servant-server
     , stm
     , streaming
