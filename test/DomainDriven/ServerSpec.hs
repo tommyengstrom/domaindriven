@@ -54,6 +54,7 @@ $(mkCmdServer
                                              "AddToCart" -> ["cart", "add"]
                                              s -> [fmap toLower s]
                   , prefix = ""
+                  , unitIsNoContent = True
                   }
     ''StoreCmd)
 

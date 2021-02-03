@@ -1,4 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module DomainDriven.Server
     ( module DomainDriven.Server
     , liftIO
@@ -11,9 +14,9 @@ import           DomainDriven.Internal.HasFieldName
                                                 ( HasFieldName(..) )
 import           Prelude
 import           Language.Haskell.TH
+import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Control.Monad
 import qualified Data.List                                    as L
-import           Data.List                      ( unfoldr )
 import           Servant
 import           Data.Char
 import           Control.Monad.Trans
@@ -26,7 +29,7 @@ data ServerSpec = ServerSpec
     { gadtName   :: Name -- ^ Name of the GADT representing the command
     , apiName    :: Name
     , serverName :: Name
-    , endpoints  :: [Endpoint] -- ^ Endpoints created from the constructors of the GADT
+    , endpoints  :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
     , serverType :: ServerType
     }
     deriving (Show, Generic)
@@ -36,113 +39,69 @@ data ServerType
     | QueryServer -- ^ A server that runs queries.
     deriving (Show, Generic)
 
-data Endpoint
+data ApiPiece
     = Endpoint EndpointData
     | SubApi SubApiData
     deriving (Show, Generic)
 
 
 data EndpointData = EndpointData
-    { eFullConstructorName :: Name
-    , eShortConstructor    :: String
-    , eEpPathPrefix        :: [String]
-    , eEpName              :: Name
-    , eHandlerName         :: Name
-    , eConstructorArgs     :: [Type]
-    , eConstructorReturns  :: Type
-    , eHandlerReturn       :: Type -- ^ Same as for constructor but with NoContent instead of ()
+    { constructorName   :: Name
+    , pathPrefix        :: [String]
+    , apiTypeName       :: Name
+    , handlerName       :: Name
+    , constructorArgs   :: [Type]
+    , returnType        :: Type
+    , handlerReturnType :: Type -- ^ Same as for constructor but with NoContent instead of ()
     }
     deriving (Show, Generic)
 
 data SubApiData = SubApiData
-    { feFullConstructorName :: Name
-    , feShortConstructor    :: String
-    , feEpPathPrefix        :: [String]
-    , feEpName              :: Name
-    , feHandlerName         :: Name
-    , feConstructorArgs     :: [Type]
-    , feSubCmd              :: Name
-    , feSubApiName          :: Name
-    , feSubServerName       :: Name
+    { constructorName   :: Name
+    , pathPrefix        :: [String]
+    , apiTypeName       :: Name
+    , handlerName       :: Name
+    , constructorArgs   :: [Type]
+    , subCmd            :: Name
+    , subCmdApiTypeName :: Name
+    , subCmdHandlerName :: Name
     }
     deriving (Show, Generic)
 
 data ServerOptions = ServerOptions
     { renameConstructor :: String -> [String]
     , prefix            :: String
+    , unitIsNoContent   :: Bool -- ^ Translate () in commands to NoContent endpoints
+                                -- (Aeson encodes unit at "[]")
     }
     deriving Generic
 
 defaultServerOptions :: ServerOptions
-defaultServerOptions = ServerOptions { renameConstructor = pure, prefix = "" }
+defaultServerOptions =
+    ServerOptions { renameConstructor = pure, prefix = "", unitIsNoContent = True }
 
-fullConstructorName :: Lens' Endpoint Name
-fullConstructorName = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> eFullConstructorName a
-        SubApi   a -> feFullConstructorName a
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { eFullConstructorName = b }
-        SubApi   a -> SubApi a { feFullConstructorName = b }
-
-
-shortConstructor :: Lens' Endpoint String
-shortConstructor = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> eShortConstructor a
-        SubApi   a -> feShortConstructor a
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { eShortConstructor = b }
-        SubApi   a -> SubApi a { feShortConstructor = b }
-
-epName :: Lens' Endpoint Name
+epName :: Lens' ApiPiece Name
 epName = lens getter setter
   where
     getter = \case
-        Endpoint a -> eEpName a
-        SubApi   a -> feEpName a
+        Endpoint a -> a ^. field @"apiTypeName"
+        SubApi   a -> a ^. field @"apiTypeName"
 
     setter s b = case s of
-        Endpoint a -> Endpoint a { eEpName = b }
-        SubApi   a -> SubApi a { feEpName = b }
+        Endpoint a -> Endpoint a { apiTypeName = b }
+        SubApi   a -> SubApi a { apiTypeName = b }
 
-epPathPrefix :: Lens' Endpoint [String]
+epPathPrefix :: Lens' ApiPiece [String]
 epPathPrefix = lens getter setter
   where
     getter = \case
-        Endpoint a -> eEpPathPrefix a
-        SubApi   a -> feEpPathPrefix a
+        Endpoint a -> a ^. field @"pathPrefix"
+        SubApi   a -> a ^. field @"pathPrefix"
 
     setter s b = case s of
-        Endpoint a -> Endpoint a { eEpPathPrefix = b }
-        SubApi   a -> SubApi a { feEpPathPrefix = b }
+        Endpoint a -> Endpoint a { pathPrefix = b }
+        SubApi   a -> SubApi a { pathPrefix = b }
 
-handlerName :: Lens' Endpoint Name
-handlerName = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> eHandlerName a
-        SubApi   a -> feHandlerName a
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { eHandlerName = b }
-        SubApi   a -> SubApi a { feHandlerName = b }
-
-
-constructorArgs :: Lens' Endpoint [Type]
-constructorArgs = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> eConstructorArgs a
-        SubApi   a -> feConstructorArgs a
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { eConstructorArgs = b }
-        SubApi   a -> SubApi a { feConstructorArgs = b }
 
 getCmdDec :: Name -> Q Dec
 getCmdDec cmdName = do
@@ -166,63 +125,52 @@ getConstructors = \case
     DataD _ _ _ _ _ _ -> error "bad data type"
     _ -> error "Expected a GADT"
 
--- | Turn "ModuleA.ModuleB.Name" into "Name"
-unqualifiedName :: Name -> Name
-unqualifiedName name = case reverse $ unfoldr f (show name) of
-    a : _ -> mkName a
-    _     -> name
-  where
-    f :: String -> Maybe (String, String)
-    f s = case span (/= '.') s of
-        ("", _         ) -> Nothing
-        (x , '.' : rest) -> Just (x, rest)
-        (x , rest      ) -> Just (x, rest)
+unqualified :: Lens' Name String
+unqualified = typed @OccName . typed
 
 type Prefix = String
 
-toEndpoint :: ServerOptions -> Con -> Q Endpoint
+toEndpoint :: ServerOptions -> Con -> Q ApiPiece
 toEndpoint opts = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
         hRetType <- case retType of
-            TupleT 0 -> [t| NoContent |]
-            t        -> pure t
+                                      TupleT 0 | opts ^. field @"unitIsNoContent" ->
+                                          [t| NoContent|]
+                                      t -> pure t
 
-        let shortName = show $ unqualifiedName name
+        let shortName = name ^. unqualified
         pure . Endpoint $ EndpointData
-            { eFullConstructorName = name
-            , eShortConstructor    = shortName
-            , eEpPathPrefix        = renameConstructor opts shortName
-            , eEpName              = mkName $ prefix opts <> shortName
-            , eHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
-            , eConstructorArgs     = fmap snd bangArgs
-            , eConstructorReturns  = retType
-            , eHandlerReturn       = hRetType
+            { constructorName   = name
+            , pathPrefix        = renameConstructor opts shortName
+            , apiTypeName   = mkName $ prefix opts <> shortName
+            , handlerName       = mkName $ lowerFirst $ prefix opts <> shortName
+            , constructorArgs   = fmap snd bangArgs
+            , returnType        = retType
+            , handlerReturnType = hRetType
             }
     -- When the constructor contain references to other domain models
     ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ _retType)) -> do
-        let shortName = show $ unqualifiedName name
+        let shortName = name ^. unqualified
         -- [ ] Split the argument up into before and after the subcommand
 
-        (args, subCmd) <- case reverse $ fmap snd bangArgs of
-            AppT (ConT subCmd) (VarT var') : rest -> do
+        (args, subCmd') <- case reverse $ fmap snd bangArgs of
+            AppT (ConT subCmd') (VarT var') : rest -> do
                 unless (var == var')
                     $ error "Subcommand must be the last constructor argument"
-                pure (reverse rest, subCmd)
+                pure (reverse rest, subCmd')
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let apiName    = mkName $ prefix opts <> shortName <> "Api"
-            serverName = mkName $ lowerFirst $ prefix opts <> shortName <> "Server"
+        let serverName = mkName $ lowerFirst $ prefix opts <> shortName <> "Server"
         pure . SubApi $ SubApiData
-            { feFullConstructorName = name
-            , feShortConstructor    = shortName
-            , feEpPathPrefix        = renameConstructor opts shortName
-            , feEpName              = mkName $ prefix opts <> shortName
-            , feHandlerName         = mkName $ lowerFirst $ prefix opts <> shortName
-            , feConstructorArgs     = args
-            , feSubCmd              = subCmd
-            , feSubApiName          = apiName
-            , feSubServerName       = serverName
+            { constructorName = name
+            , pathPrefix      = renameConstructor opts shortName
+            , apiTypeName = mkName $ prefix opts <> shortName
+            , handlerName     = mkName $ lowerFirst $ prefix opts <> shortName
+            , constructorArgs = args
+            , subCmd        = subCmd'
+            , subCmdApiTypeName    = mkName $ prefix opts <> shortName <> "Api"
+            , subCmdHandlerName = serverName
             }
     c ->
         error
@@ -245,7 +193,7 @@ upperFirst = \case
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: ServerOptions -> ServerType -> Name -> Q ServerSpec
 mkServerSpec opts' serverType n = do
-    let opts = opts' & field @"prefix" %~ (upperFirst . (<> show (unqualifiedName n)))
+    let opts = opts' & field @"prefix" %~ (upperFirst . (<> n ^. unqualified))
     eps <- traverse (toEndpoint opts) =<< getConstructors =<< getCmdDec n
 
     ensureUniquePaths eps
@@ -256,7 +204,7 @@ mkServerSpec opts' serverType n = do
                     , serverType = serverType
                     }
   where
-    ensureUniquePaths :: [Endpoint] -> Q ()
+    ensureUniquePaths :: [ApiPiece] -> Q ()
     ensureUniquePaths eps = do
 
         let paths :: [[String]]
@@ -292,7 +240,7 @@ mkServerFromSpec opts serverSpec = do
     server   <- mkFullServer serverSpec
     pure $ subServers <> endpointDecs <> handlers <> server
 
-mkApiType :: [Endpoint] -> Q Type
+mkApiType :: [ApiPiece] -> Q Type
 mkApiType endpoints = case view epName <$> endpoints of
     []     -> error "Server has no endpoints"
     x : xs -> do
@@ -330,21 +278,24 @@ toReqBody e args = do
         [] -> pure Nothing
         ts -> do
             let n           = length ts
-                constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-                                   (LitT . StrTyLit $ (show $ eEpName e) <> "Body")
+                constructor = AppT
+                    (ConT (mkName $ "NamedFields" <> show n))
+                    (LitT . StrTyLit $ e ^. field @"apiTypeName" . to show . to
+                        (<> "Body")
+                    )
             pure . Just $ foldl AppT constructor ts
 
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-cmdEndpointType :: Endpoint -> Q Type
+cmdEndpointType :: ApiPiece -> Q Type
 cmdEndpointType = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e =
-        [t| $(mkServantEpName (eEpPathPrefix e) middle) |]
+        [t| $(mkServantEpName (e ^. field @"pathPrefix") middle) |]
       where
         middle :: Q Type
         middle = reqBody >>= \case
@@ -352,35 +303,35 @@ cmdEndpointType = \case
             Just b  -> [t| $(pure b) :>  $reqReturn |]
 
         reqBody :: Q (Maybe Type)
-        reqBody = toReqBody e $ eConstructorArgs e
+        reqBody = toReqBody e $ e ^. field @"constructorArgs"
 
         reqReturn :: Q Type
-        reqReturn = [t| Post '[JSON] $(pure $ eHandlerReturn e) |]
+        reqReturn = [t| Post '[JSON] $(pure $ e ^. field @"handlerReturnType") |]
 
 -- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
 -- `GetBook :: BookId -> Query Book` will result in:
 -- "GetBook" :> Capture "BookId" BookId" :> Get '[JSON] Book
-queryEndpointType :: Endpoint -> Q Type
+queryEndpointType :: ApiPiece -> Q Type
 queryEndpointType = \case
     Endpoint e -> epSimpleType e
     SubApi   e -> epSubApiType e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e =
-        [t| $(mkServantEpName (eEpPathPrefix e) (params $ eConstructorArgs e)) |]
+        [t| $(mkServantEpName (e ^. field @"pathPrefix") (params $ e ^. field @"constructorArgs")) |]
       where
 
         params :: [Type] -> Q Type
         params typeList = do
             maybeType <- [t| Maybe |]
             case typeList of
-                [] -> [t| Get '[JSON] $(pure $ eHandlerReturn e) |]
+                [] -> [t| Get '[JSON] $(pure $ e ^. field @"handlerReturnType") |]
                 AppT x t0 : ts | x == maybeType -> do
                     tName <- case t0 of
                         ConT n -> pure n
                         VarT n -> pure n
                         err -> fail $ "Expected constructor parameter, got: " <> show err
-                    let nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    let nameLit = LitT . StrTyLit $ tName ^. unqualified
                     appT
                         (appT [t| (:>) |] [t| QueryParam $(pure nameLit) $(pure t0) |])
                         (params ts)
@@ -389,7 +340,7 @@ queryEndpointType = \case
                         ConT n -> pure n
                         VarT n -> pure n
                         err -> fail $ "Expected constructor parameter, got: " <> show err
-                    let nameLit = LitT . StrTyLit . show $ unqualifiedName tName
+                    let nameLit = LitT . StrTyLit $ tName ^. unqualified
                     appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
                          (params ts)
 
@@ -405,7 +356,7 @@ epSubApiType :: SubApiData -> Q Type
 epSubApiType e = do
 
     let subApiType :: Type
-        subApiType = ConT $ feSubApiName e
+        subApiType = ConT $ subCmdApiTypeName e
 
     bird <- [t| (:>) |]
     let mkCapture :: Type -> Q Type
@@ -415,30 +366,34 @@ epSubApiType e = do
 
         getTypeName :: Type -> String
         getTypeName = \case
-            ConT n -> show $ unqualifiedName n
+            ConT n -> n ^. unqualified
             _      -> "typename"
-    captures <- traverse mkCapture $ feConstructorArgs e
+    captures <- traverse mkCapture $ e ^. field @"constructorArgs"
     mkServantEpName
-        (feEpPathPrefix e)
+        (e ^. field @"pathPrefix")
         (pure $ foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: ServerType -> Endpoint -> Q [Dec]
+mkEndpointDec :: ServerType -> ApiPiece -> Q [Dec]
 mkEndpointDec sType e = do
     ty <- case sType of
         CmdServer   -> cmdEndpointType e
         QueryServer -> queryEndpointType e
     pure $ [TySynD (view epName e) [] ty]
 
-mkSubServer :: ServerOptions -> ServerType -> Endpoint -> Q [Dec]
+mkSubServer :: ServerOptions -> ServerType -> ApiPiece -> Q [Dec]
 mkSubServer opts' sTy = \case
     Endpoint _ -> pure []
     SubApi   e -> do
-        let opts = opts' & field @"prefix" %~ (<> feShortConstructor e)
+        let
+            opts =
+                opts'
+                    &  field @"prefix"
+                    %~ (<> e ^. field @"constructorName" . unqualified)
         subServerSpec <-
-            set (field @"apiName") (feSubApiName e)
-            .   set (field @"serverName") (feSubServerName e)
-            <$> mkServerSpec opts sTy (feSubCmd e)
+            set (field @"apiName") (subCmdApiTypeName e)
+            .   set (field @"serverName") (subCmdHandlerName e)
+            <$> mkServerSpec opts sTy (subCmd e)
         subServerDecs <- mkServerFromSpec opts subServerSpec
         pure subServerDecs
 
@@ -454,27 +409,27 @@ mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
 
 mkQueryEPHandler :: Type -> EndpointData -> Q [Dec]
 mkQueryEPHandler runnerTy e = do
-    varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
-    handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
+    varNames       <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
+    handlerRetType <- [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
     let varPat = fmap VarP varNames
-        nrArgs = length @[] $ eConstructorArgs e
+        nrArgs = length @[] $ e ^. field @"constructorArgs"
         funSig =
-            SigD (eHandlerName e)
+            SigD (e ^. field @"handlerName")
                 . AppT (AppT ArrowT runnerTy)
-                $ case eConstructorArgs e of
+                $ case e ^. field @"constructorArgs" of
                       [] -> handlerRetType
                       ts -> foldr (AppT . AppT ArrowT) handlerRetType ts
         funBodyBase = AppE (VarE runner)
-            $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)
+            $ foldl AppE (ConE $ e ^. field @"constructorName") (fmap VarE varNames)
 
-        funBody = case eConstructorReturns e of
+        funBody = case e ^. field @"returnType" of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
             _        -> pure $ funBodyBase
     funClause <- clause
         (pure (VarP runner) : (if nrArgs > 0 then (fmap pure varPat) else []))
         (normalB [| liftIO $ $(funBody)  |])
         []
-    let funDef = FunD (eHandlerName e) [funClause]
+    let funDef = FunD (e ^. field @"handlerName") [funClause]
     pure [funSig, funDef]
   where
     runner :: Name
@@ -482,36 +437,42 @@ mkQueryEPHandler runnerTy e = do
 
 mkCmdEPHandler :: Type -> EndpointData -> Q [Dec]
 mkCmdEPHandler runnerTy e = do
-    varNames       <- traverse (const $ newName "arg") $ eConstructorArgs e
-    handlerRetType <- [t| Handler $(pure $ eHandlerReturn e) |]
+    varNames       <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
+    handlerRetType <- [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
     let varPat          = ConP constructorName (fmap VarP varNames)
         constructorName = mkName $ "NamedFields" <> show (length varNames)
-        nrArgs          = length @[] $ eConstructorArgs e
+        nrArgs          = length @[] $ e ^. field @"constructorArgs"
         funSig =
-            SigD (eHandlerName e)
+            SigD (e ^. field @"handlerName")
                 . AppT (AppT ArrowT runnerTy)
-                $ case eConstructorArgs e of
+                $ case e ^. field @"constructorArgs" of
                       [] -> handlerRetType
                       as ->
                           let
                               nfType :: Type
                               nfType = AppT
                                   (ConT constructorName)
-                                  (LitT . StrTyLit $ (show $ eEpName e) <> "Body")
+                                  (  LitT
+                                  .  StrTyLit
+                                  $  e
+                                  ^. field @"apiTypeName"
+                                  .  to show
+                                  .  to (<> "Body")
+                                  )
                           in
                               AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
         funBodyBase = AppE (VarE runner)
-            $ foldl AppE (ConE $ eFullConstructorName e) (fmap VarE varNames)
+            $ foldl AppE (ConE $ e ^. field @"constructorName") (fmap VarE varNames)
 
-        funBody = case eConstructorReturns e of
+        funBody = case e ^. field @"returnType" of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
             _        -> pure $ funBodyBase
     funClause <- clause
         (pure (VarP runner) : (if nrArgs > 0 then [pure $ varPat] else []))
         (normalB [| liftIO $ $(funBody)  |])
         []
-    let funDef = FunD (eHandlerName e) [funClause]
+    let funDef = FunD (e ^. field @"handlerName") [funClause]
     pure [funSig, funDef]
   where
     runner :: Name
@@ -521,37 +482,37 @@ mkSubAPiHandler :: Type -> SubApiData -> Q [Dec]
 mkSubAPiHandler runnerTy e = do
     runner <- newName "runner"
 
-    paramNames  <- traverse (const $ newName "arg") $ feConstructorArgs e
-    let finalSig = [t| Server $(pure . ConT $ feSubApiName e) |]
+    paramNames  <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
+    let finalSig = [t| Server $(pure . ConT $ subCmdApiTypeName e) |]
     finalSig' <- finalSig
-    params <- case feConstructorArgs e of
+    params <- case e ^. field @"constructorArgs" of
         [] -> [t| $(pure runnerTy) -> $finalSig |]
         [a] -> [t| $(pure runnerTy) -> $(pure a) -> $finalSig |]
         ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
                     (runnerTy : ts <> [finalSig'])
-    funSig <- SigD (feHandlerName e) <$> pure params
+    funSig <- SigD (e ^. field @"handlerName") <$> pure params
 
     funClause <- case fmap VarE paramNames of
         [] -> clause
                 [varP runner]
                 (fmap NormalB
-                      [e| $(varE $ feSubServerName e)
+                      [e| $(varE $ subCmdHandlerName e)
                              $ $(pure $ VarE runner)
-                             . $(pure . ConE . mkName $ feShortConstructor e) |]
+                             . $(pure . ConE $ e ^. field @"constructorName") |]
                 )
                 []
         ts ->
-            let cmd = foldl (\b a -> AppE b a) (ConE . mkName $ feShortConstructor e) ts
+            let cmd = foldl (\b a -> AppE b a) (ConE $ e ^. field @"constructorName") ts
              in clause
                   (varP <$>  runner : paramNames)
                   (fmap NormalB
-                        [e| $(varE $ feSubServerName e)
+                        [e| $(varE $ subCmdHandlerName e)
                                 $ $(varE runner)
                                 . $(pure cmd)
                         |]
                   )
                   []
-    let funDef = FunD (feHandlerName e) [funClause]
+    let funDef = FunD (e ^. field @"handlerName") [funClause]
     pure [funSig, funDef]
 
 -- | The type of the CmdRunner used to execute commands
@@ -567,8 +528,10 @@ mkFullServer spec = do
     runnerT <- runnerType spec
     let runner = mkName "runner"
 
-        handlerExp :: Endpoint -> Exp
-        handlerExp e = VarE (e ^. handlerName) `AppE` VarE runner
+        handlerExp :: ApiPiece -> Exp
+        handlerExp = \case
+            Endpoint a -> VarE (a ^. field @"handlerName") `AppE` VarE runner
+            SubApi   a -> VarE (a ^. field @"handlerName") `AppE` VarE runner
 
     body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
