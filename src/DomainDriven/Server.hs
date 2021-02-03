@@ -163,13 +163,13 @@ toEndpoint opts = \case
 
         let serverName = mkName $ lowerFirst $ prefix opts <> shortName <> "Server"
         pure . SubApi $ SubApiData
-            { constructorName = name
-            , pathPrefix      = renameConstructor opts shortName
-            , apiTypeName = mkName $ prefix opts <> shortName
-            , handlerName     = mkName $ lowerFirst $ prefix opts <> shortName
-            , constructorArgs = args
-            , subCmd        = subCmd'
-            , subCmdApiTypeName    = mkName $ prefix opts <> shortName <> "Api"
+            { constructorName   = name
+            , pathPrefix        = renameConstructor opts shortName
+            , apiTypeName       = mkName $ prefix opts <> shortName
+            , handlerName       = mkName $ lowerFirst $ prefix opts <> shortName
+            , constructorArgs   = args
+            , subCmd            = subCmd'
+            , subCmdApiTypeName = mkName $ prefix opts <> shortName <> "Api"
             , subCmdHandlerName = serverName
             }
     c ->
@@ -262,8 +262,8 @@ mkApiDec spec = TySynD (apiName spec) [] <$> case view epName <$> endpoints spec
 -- `BuyThing ItemKey Quantity`
 -- yields:
 -- `ReqBody '[JSON] (NamedFields2 "BuyThing" ItemKey Quantity)`
-toReqBody :: EndpointData -> [Type] -> Q (Maybe Type)
-toReqBody e args = do
+mkReqBody :: EndpointData -> Q (Maybe Type)
+mkReqBody e = do
     unless
         (args == L.nub args)
         (fail
@@ -273,17 +273,24 @@ toReqBody e args = do
         )
     mkBody >>= maybe (pure Nothing) (\b -> fmap Just [t| ReqBody '[JSON] $(pure b) |])
   where
+    args :: [Type]
+    args = e ^. field @"constructorArgs"
+
+
     mkBody :: Q (Maybe Type)
     mkBody = case args of
         [] -> pure Nothing
         ts -> do
             let n           = length ts
-                constructor = AppT
-                    (ConT (mkName $ "NamedFields" <> show n))
-                    (LitT . StrTyLit $ e ^. field @"apiTypeName" . to show . to
-                        (<> "Body")
-                    )
+                constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+                                   (LitT . StrTyLit $ mkBodyTag e)
             pure . Just $ foldl AppT constructor ts
+
+-- | Tag used as the symbol in in `NamedFieldsN`.
+-- This field is used to name the type in the OpenAPI definition.
+mkBodyTag :: EndpointData -> String
+mkBodyTag e =
+    mconcat . (<> ["Body"]) $ e ^. field @"pathPrefix" & traversed . _head %~ toUpper
 
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
@@ -303,7 +310,7 @@ cmdEndpointType = \case
             Just b  -> [t| $(pure b) :>  $reqReturn |]
 
         reqBody :: Q (Maybe Type)
-        reqBody = toReqBody e $ e ^. field @"constructorArgs"
+        reqBody = mkReqBody e
 
         reqReturn :: Q Type
         reqReturn = [t| Post '[JSON] $(pure $ e ^. field @"handlerReturnType") |]
@@ -450,15 +457,8 @@ mkCmdEPHandler runnerTy e = do
                       as ->
                           let
                               nfType :: Type
-                              nfType = AppT
-                                  (ConT constructorName)
-                                  (  LitT
-                                  .  StrTyLit
-                                  $  e
-                                  ^. field @"apiTypeName"
-                                  .  to show
-                                  .  to (<> "Body")
-                                  )
+                              nfType = AppT (ConT constructorName)
+                                            (LitT . StrTyLit $ mkBodyTag e)
                           in
                               AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
