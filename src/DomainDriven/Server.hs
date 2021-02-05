@@ -22,17 +22,53 @@ import           Data.Char
 import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
+import           Data.Generics.Sum
 import           GHC.Generics                   ( Generic )
 import           DomainDriven.Internal.NamedFields
 
-data ServerSpec = ServerSpec
-    { gadtName   :: Name -- ^ Name of the GADT representing the command
-    , apiName    :: Name
-    , serverName :: Name
+data ApiSpec = ApiSpec
+    { name       :: Name -- ^ Name of the GADT representing the command
+    , urlPieces  :: [UrlSegment] -- ^ The Url path segments this API adds
     , endpoints  :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
     , serverType :: ServerType
     }
     deriving (Show, Generic)
+
+fullName :: [UrlSegment] -> Name
+fullName s = mkName $ mconcat (s ^.. folded . typed)
+
+apiTypeName :: [UrlSegment] -> Name
+apiTypeName s =
+    fullName s & unqualifiedString %~ upperFirst & unqualifiedString <>~ "Api"
+
+serverName :: [UrlSegment] -> Name
+serverName s =
+    fullName s & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Server"
+
+endpointTypeName :: [UrlSegment] -> Name
+endpointTypeName s =
+    fullName s & unqualifiedString %~ upperFirst & unqualifiedString <>~ "Endpoint"
+
+handlerName :: [UrlSegment] -> Name
+handlerName s =
+    fullName s & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler"
+
+
+bodyTag :: [UrlSegment] -> TyLit
+bodyTag s = StrTyLit . show $ fullName s & unqualifiedString <>~ "Body"
+
+
+apiPieceTypeName :: ApiPiece -> Name
+apiPieceTypeName = \case
+    Endpoint e -> e ^. typed . to endpointTypeName
+    SubApi   e -> e ^. typed . to apiTypeName
+
+newtype UrlSegment = UrlSegment String
+    deriving (Show, Generic, Eq)
+
+mkUrlSegments :: ServerOptions -> Name -> [UrlSegment]
+mkUrlSegments opts n =
+    n ^.. unqualifiedString . to (renameConstructor opts) . folded . to UrlSegment
 
 data ServerType
     = CmdServer -- ^ A server that runs commands, i.e. requires a command runner to run
@@ -46,10 +82,8 @@ data ApiPiece
 
 
 data EndpointData = EndpointData
-    { constructorName   :: Name
-    , pathPrefix        :: [String]
-    , apiTypeName       :: Name
-    , handlerName       :: Name
+    { name              :: Name
+    , urlPieces         :: [UrlSegment]
     , constructorArgs   :: [Type]
     , returnType        :: Type
     , handlerReturnType :: Type -- ^ Same as for constructor but with NoContent instead of ()
@@ -57,51 +91,22 @@ data EndpointData = EndpointData
     deriving (Show, Generic)
 
 data SubApiData = SubApiData
-    { constructorName   :: Name
-    , pathPrefix        :: [String]
-    , apiTypeName       :: Name
-    , handlerName       :: Name
-    , constructorArgs   :: [Type]
-    , subCmd            :: Name
-    , subCmdApiTypeName :: Name
-    , subCmdHandlerName :: Name
+    { name            :: Name
+    , urlPieces       :: [UrlSegment]
+    , constructorArgs :: [Type]
+    , subApi          :: ApiSpec
     }
     deriving (Show, Generic)
 
 data ServerOptions = ServerOptions
     { renameConstructor :: String -> [String]
-    , prefix            :: String
     , unitIsNoContent   :: Bool -- ^ Translate () in commands to NoContent endpoints
                                 -- (Aeson encodes unit at "[]")
     }
     deriving Generic
 
 defaultServerOptions :: ServerOptions
-defaultServerOptions =
-    ServerOptions { renameConstructor = pure, prefix = "", unitIsNoContent = True }
-
-epName :: Lens' ApiPiece Name
-epName = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> a ^. field @"apiTypeName"
-        SubApi   a -> a ^. field @"apiTypeName"
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { apiTypeName = b }
-        SubApi   a -> SubApi a { apiTypeName = b }
-
-epPathPrefix :: Lens' ApiPiece [String]
-epPathPrefix = lens getter setter
-  where
-    getter = \case
-        Endpoint a -> a ^. field @"pathPrefix"
-        SubApi   a -> a ^. field @"pathPrefix"
-
-    setter s b = case s of
-        Endpoint a -> Endpoint a { pathPrefix = b }
-        SubApi   a -> SubApi a { pathPrefix = b }
-
+defaultServerOptions = ServerOptions { renameConstructor = pure, unitIsNoContent = True }
 
 getCmdDec :: Name -> Q Dec
 getCmdDec cmdName = do
@@ -125,13 +130,11 @@ getConstructors = \case
     DataD _ _ _ _ _ _ -> error "bad data type"
     _ -> error "Expected a GADT"
 
-unqualified :: Lens' Name String
-unqualified = typed @OccName . typed
+unqualifiedString :: Lens' Name String
+unqualifiedString = typed @OccName . typed
 
-type Prefix = String
-
-toEndpoint :: ServerOptions -> Con -> Q ApiPiece
-toEndpoint opts = \case
+toEndpoint :: ServerOptions -> ServerType -> Con -> Q ApiPiece
+toEndpoint opts serverType = \case
     -- The normal case
     GadtC [name] bangArgs (AppT _ retType) -> do
         hRetType <- case retType of
@@ -139,21 +142,15 @@ toEndpoint opts = \case
                                           [t| NoContent|]
                                       t -> pure t
 
-        let shortName = name ^. unqualified
         pure . Endpoint $ EndpointData
-            { constructorName   = name
-            , pathPrefix        = renameConstructor opts shortName
-            , apiTypeName   = mkName $ prefix opts <> shortName
-            , handlerName       = mkName $ lowerFirst $ prefix opts <> shortName
+            { name   = name
+            , urlPieces    = mkUrlSegments opts name
             , constructorArgs   = fmap snd bangArgs
             , returnType        = retType
             , handlerReturnType = hRetType
             }
     -- When the constructor contain references to other domain models
     ForallC [KindedTV var StarT] [] (GadtC [name] bangArgs (AppT _ _retType)) -> do
-        let shortName = name ^. unqualified
-        -- [ ] Split the argument up into before and after the subcommand
-
         (args, subCmd') <- case reverse $ fmap snd bangArgs of
             AppT (ConT subCmd') (VarT var') : rest -> do
                 unless (var == var')
@@ -161,16 +158,12 @@ toEndpoint opts = \case
                 pure (reverse rest, subCmd')
             _ -> error $ "Last constructor argument must have form `SubCmd a`"
 
-        let serverName = mkName $ lowerFirst $ prefix opts <> shortName <> "Server"
+        subServerSpec <- mkServerSpec opts serverType subCmd'
         pure . SubApi $ SubApiData
-            { constructorName   = name
-            , pathPrefix        = renameConstructor opts shortName
-            , apiTypeName       = mkName $ prefix opts <> shortName
-            , handlerName       = mkName $ lowerFirst $ prefix opts <> shortName
+            { name   = name
+            , urlPieces    = mkUrlSegments opts name
             , constructorArgs   = args
-            , subCmd            = subCmd'
-            , subCmdApiTypeName = mkName $ prefix opts <> shortName <> "Api"
-            , subCmdHandlerName = serverName
+            , subApi = subServerSpec
             }
     c ->
         error
@@ -189,74 +182,91 @@ upperFirst = \case
     []     -> []
 
 
--- | Create a ServerSpec from a GADT
+-- | Create a ApiSpec from a GADT
 -- The GADT must have one parameter representing the return type
-mkServerSpec :: ServerOptions -> ServerType -> Name -> Q ServerSpec
-mkServerSpec opts' serverType n = do
-    let opts = opts' & field @"prefix" %~ (upperFirst . (<> n ^. unqualified))
-    eps <- traverse (toEndpoint opts) =<< getConstructors =<< getCmdDec n
+mkServerSpec :: ServerOptions -> ServerType -> Name -> Q ApiSpec
+mkServerSpec opts serverType n = do
+    eps <- traverse (toEndpoint opts serverType) =<< getConstructors =<< getCmdDec n
 
     ensureUniquePaths eps
-    pure ServerSpec { gadtName   = n
-                    , apiName    = mkName $ prefix opts <> "Api"
-                    , serverName = mkName $ lowerFirst (prefix opts <> "Server")
-                    , endpoints  = eps
-                    , serverType = serverType
-                    }
+    pure ApiSpec { name       = n
+                 , urlPieces  = mkUrlSegments opts n
+                 , endpoints  = eps
+                 , serverType = serverType
+                 }
   where
+    -- FIXME: Improve error message to show the full name of offending types and
+    -- constructors
     ensureUniquePaths :: [ApiPiece] -> Q ()
     ensureUniquePaths eps = do
 
-        let paths :: [[String]]
-            paths       = eps ^.. folded . epPathPrefix
 
-            uniquePaths = L.nub paths
-            duplicates  = L.foldl' (flip L.delete) paths uniquePaths
+
+        let paths :: [(Name, String)]
+            paths      = L.sortOn snd $ foldMap (fullConstructorPaths opts) eps
+
+            duplicates = L.nub $ mconcat $ zipWith
+                (\a b -> if snd a == snd b then [a, b] else [])
+                paths
+                (drop 1 paths)
 
         unless
             (null duplicates)
             (fail $ "Api contains duplicated paths:\n * " <> L.intercalate
                 "\n * "
-                (show . L.intercalate "/" <$> duplicates)
+                (show <$> duplicates)
             )
+
+fullConstructorPaths :: ServerOptions -> ApiPiece -> [(Name, String)]
+fullConstructorPaths opts = \case
+    Endpoint a ->
+        [ ( a ^. typed
+          , L.intercalate "/" $ a ^. typed @[UrlSegment] & traversed %~ view typed
+          )
+        ]
+    SubApi a -> mconcat $ a ^.. typed @ApiSpec . typed @[ApiPiece] . folded . to
+        (fullConstructorPaths opts)
 
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
 mkCmdServer :: ServerOptions -> Name -> Q [Dec]
-mkCmdServer opts = mkServerFromSpec opts <=< mkServerSpec opts CmdServer
+mkCmdServer opts =
+    mkServerFromSpec opts [UrlSegment "Hej"] <=< mkServerSpec opts CmdServer
 
 mkQueryServer :: ServerOptions -> Name -> Q [Dec]
-mkQueryServer opts = mkServerFromSpec opts <=< mkServerSpec opts QueryServer
+mkQueryServer opts =
+    mkServerFromSpec opts [UrlSegment "Hej"] <=< mkServerSpec opts QueryServer
 
-mkServerFromSpec :: ServerOptions -> ServerSpec -> Q [Dec]
-mkServerFromSpec opts serverSpec = do
+mkServerFromSpec :: ServerOptions -> [UrlSegment] -> ApiSpec -> Q [Dec]
+mkServerFromSpec opts prefix s = do
+    let mkSubServer :: ApiSpec -> Q [Dec]
+        mkSubServer = mkServerFromSpec opts (prefix <> s ^. typed)
     subServers <-
-        fmap mconcat . traverse (mkSubServer opts $ serverType serverSpec) $ endpoints
-            serverSpec
+        fmap mconcat
+        .   traverse mkSubServer
+        $   s
+        ^.. typed @[ApiPiece]
+        .   folded
+        .   _Typed @SubApiData
+        .   typed :: Q [Dec]
     endpointDecs <-
-        fmap mconcat . traverse (mkEndpointDec (serverType serverSpec)) $ endpoints
-            serverSpec
-    handlers <- mkHandlers serverSpec
-    server   <- mkFullServer serverSpec
+        fmap mconcat . traverse (mkEndpointDec (s ^. typed) prefix) $ s ^. typed :: Q
+            [Dec]
+    handlers <- mkHandlers prefix s :: Q [Dec]
+    server   <- mkFullServer prefix s :: Q [Dec]
     pure $ subServers <> endpointDecs <> handlers <> server
-
-mkApiType :: [ApiPiece] -> Q Type
-mkApiType endpoints = case view epName <$> endpoints of
-    []     -> error "Server has no endpoints"
-    x : xs -> do
-        let f :: Type -> Name -> Q Type
-            f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
-        foldM f (ConT x) xs
 
 -- | Create a typealias for the API
 -- type Api = EpA :<|> EpB :<|> EpC ...
-mkApiDec :: ServerSpec -> Q Dec
-mkApiDec spec = TySynD (apiName spec) [] <$> case view epName <$> endpoints spec of
-    []     -> error "Server has no endpoints"
-    x : xs -> do
-        let f :: Type -> Name -> Q Type
-            f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
-        foldM f (ConT x) xs
+mkApiDec :: ApiSpec -> Q Dec
+mkApiDec spec =
+    TySynD (spec ^. typed . to apiTypeName) []
+        <$> case spec ^.. typed @[ApiPiece] . folded . to apiPieceTypeName of
+                []     -> error "Server has no endpoints"
+                x : xs -> do
+                    let f :: Type -> Name -> Q Type
+                        f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
+                    foldM f (ConT x) xs
 
 -- | Create a request body by turning multiple arguments into a NamedFieldsN
 -- `BuyThing ItemKey Quantity`
@@ -283,26 +293,28 @@ mkReqBody e = do
         ts -> do
             let n           = length ts
                 constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-                                   (LitT . StrTyLit $ mkBodyTag e)
+                                   (LitT $ e ^. typed . to bodyTag)
             pure . Just $ foldl AppT constructor ts
 
 -- | Tag used as the symbol in in `NamedFieldsN`.
 -- This field is used to name the type in the OpenAPI definition.
-mkBodyTag :: EndpointData -> String
-mkBodyTag e =
-    mconcat . (<> ["Body"]) $ e ^. field @"pathPrefix" & traversed . _head %~ toUpper
+--mkBodyTag :: EndpointData -> String
+--mkBodyTag e = mconcat . (<> ["Body"]) $ prefixes & traversed . _head %~ toUpper
+--  where
+--    prefixes :: [String]
+--    prefixes = e ^.. field @"urlPieces" . folded . to show
 
 -- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
 -- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
 -- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
-cmdEndpointType :: ApiPiece -> Q Type
-cmdEndpointType = \case
+cmdEndpointType :: [UrlSegment] -> ApiPiece -> Q Type
+cmdEndpointType prefix = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType e
+    SubApi   e -> epSubApiType prefix e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e =
-        [t| $(mkServantEpName (e ^. field @"pathPrefix") middle) |]
+        [t| $(mkServantEpName (e ^. field @"urlPieces") middle) |]
       where
         middle :: Q Type
         middle = reqBody >>= \case
@@ -318,14 +330,14 @@ cmdEndpointType = \case
 -- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
 -- `GetBook :: BookId -> Query Book` will result in:
 -- "GetBook" :> Capture "BookId" BookId" :> Get '[JSON] Book
-queryEndpointType :: ApiPiece -> Q Type
-queryEndpointType = \case
+queryEndpointType :: [UrlSegment] -> ApiPiece -> Q Type
+queryEndpointType prefix = \case
     Endpoint e -> epSimpleType e
-    SubApi   e -> epSubApiType e
+    SubApi   e -> epSubApiType prefix e
   where
     epSimpleType :: EndpointData -> Q Type
     epSimpleType e =
-        [t| $(mkServantEpName (e ^. field @"pathPrefix") (params $ e ^. field @"constructorArgs")) |]
+        [t| $(mkServantEpName (e ^. field @"urlPieces") (params $ e ^. field @"constructorArgs")) |]
       where
 
         params :: [Type] -> Q Type
@@ -338,7 +350,7 @@ queryEndpointType = \case
                         ConT n -> pure n
                         VarT n -> pure n
                         err -> fail $ "Expected constructor parameter, got: " <> show err
-                    let nameLit = LitT . StrTyLit $ tName ^. unqualified
+                    let nameLit = LitT . StrTyLit $ tName ^. unqualifiedString
                     appT
                         (appT [t| (:>) |] [t| QueryParam $(pure nameLit) $(pure t0) |])
                         (params ts)
@@ -347,23 +359,24 @@ queryEndpointType = \case
                         ConT n -> pure n
                         VarT n -> pure n
                         err -> fail $ "Expected constructor parameter, got: " <> show err
-                    let nameLit = LitT . StrTyLit $ tName ^. unqualified
+                    let nameLit = LitT . StrTyLit $ tName ^. unqualifiedString
                     appT (appT [t| (:>) |] [t| Capture $(pure nameLit) $(pure t0) |])
                          (params ts)
 
 
-mkServantEpName :: [String] -> Q Type -> Q Type
-mkServantEpName tyLits rest =
-    foldr (\a b -> [t| $(pure a) :> $b |]) rest (fmap (LitT . StrTyLit) tyLits)
+mkServantEpName :: [UrlSegment] -> Q Type -> Q Type
+mkServantEpName prefix rest = foldr (\a b -> [t| $(pure a) :> $b |])
+                                    rest
+                                    (fmap (LitT . StrTyLit . view typed) prefix)
 
 -- | Define a servant endpoint ending in a reference to the sub API.
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
-epSubApiType :: SubApiData -> Q Type
-epSubApiType e = do
+epSubApiType :: [UrlSegment] -> SubApiData -> Q Type
+epSubApiType prefix e = do
 
     let subApiType :: Type
-        subApiType = ConT $ subCmdApiTypeName e
+        subApiType = ConT $ e ^. typed @ApiSpec . typed @Name
 
     bird <- [t| (:>) |]
     let mkCapture :: Type -> Q Type
@@ -373,61 +386,45 @@ epSubApiType e = do
 
         getTypeName :: Type -> String
         getTypeName = \case
-            ConT n -> n ^. unqualified
+            ConT n -> n ^. unqualifiedString
             _      -> "typename"
     captures <- traverse mkCapture $ e ^. field @"constructorArgs"
     mkServantEpName
-        (e ^. field @"pathPrefix")
+        (prefix <> e ^. field @"urlPieces")
         (pure $ foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
 
 -- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: ServerType -> ApiPiece -> Q [Dec]
-mkEndpointDec sType e = do
+mkEndpointDec :: ServerType -> [UrlSegment] -> ApiPiece -> Q [Dec]
+mkEndpointDec sType prefix e = do
     ty <- case sType of
-        CmdServer   -> cmdEndpointType e
-        QueryServer -> queryEndpointType e
-    pure $ [TySynD (view epName e) [] ty]
-
-mkSubServer :: ServerOptions -> ServerType -> ApiPiece -> Q [Dec]
-mkSubServer opts' sTy = \case
-    Endpoint _ -> pure []
-    SubApi   e -> do
-        let
-            opts =
-                opts'
-                    &  field @"prefix"
-                    %~ (<> e ^. field @"constructorName" . unqualified)
-        subServerSpec <-
-            set (field @"apiName") (subCmdApiTypeName e)
-            .   set (field @"serverName") (subCmdHandlerName e)
-            <$> mkServerSpec opts sTy (subCmd e)
-        subServerDecs <- mkServerFromSpec opts subServerSpec
-        pure subServerDecs
+        CmdServer   -> cmdEndpointType prefix e
+        QueryServer -> queryEndpointType prefix e
+    pure $ [TySynD (apiPieceTypeName e) [] ty]
 
 
 -- | Make command handlers for each endpoint
-mkHandlers :: ServerSpec -> Q [Dec]
-mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
+mkHandlers :: [UrlSegment] -> ApiSpec -> Q [Dec]
+mkHandlers prefix spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
     runnerTy <- runnerType spec
     case (ep, serverType spec) of
-        (Endpoint e, CmdServer  ) -> mkCmdEPHandler runnerTy e
-        (Endpoint e, QueryServer) -> mkQueryEPHandler runnerTy e
-        (SubApi   e, _          ) -> mkSubAPiHandler runnerTy e
+        (Endpoint e, CmdServer  ) -> mkCmdEPHandler runnerTy prefix e
+        (Endpoint e, QueryServer) -> mkQueryEPHandler runnerTy prefix e
+        (SubApi   e, _          ) -> mkSubAPiHandler runnerTy prefix e
 
-mkQueryEPHandler :: Type -> EndpointData -> Q [Dec]
-mkQueryEPHandler runnerTy e = do
+mkQueryEPHandler :: Type -> [UrlSegment] -> EndpointData -> Q [Dec]
+mkQueryEPHandler runnerTy prefix e = do
     varNames       <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
     handlerRetType <- [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
     let varPat = fmap VarP varNames
         nrArgs = length @[] $ e ^. field @"constructorArgs"
         funSig =
-            SigD (e ^. field @"handlerName")
+            SigD (handlerName $ prefix <> e ^. typed)
                 . AppT (AppT ArrowT runnerTy)
                 $ case e ^. field @"constructorArgs" of
                       [] -> handlerRetType
                       ts -> foldr (AppT . AppT ArrowT) handlerRetType ts
         funBodyBase = AppE (VarE runner)
-            $ foldl AppE (ConE $ e ^. field @"constructorName") (fmap VarE varNames)
+            $ foldl AppE (ConE $ e ^. field @"name") (fmap VarE varNames)
 
         funBody = case e ^. field @"returnType" of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
@@ -436,34 +433,31 @@ mkQueryEPHandler runnerTy e = do
         (pure (VarP runner) : (if nrArgs > 0 then (fmap pure varPat) else []))
         (normalB [| liftIO $ $(funBody)  |])
         []
-    let funDef = FunD (e ^. field @"handlerName") [funClause]
+    let funDef = FunD (handlerName $ prefix <> e ^. typed) [funClause]
     pure [funSig, funDef]
   where
     runner :: Name
     runner = mkName "runner"
 
-mkCmdEPHandler :: Type -> EndpointData -> Q [Dec]
-mkCmdEPHandler runnerTy e = do
+mkCmdEPHandler :: Type -> [UrlSegment] -> EndpointData -> Q [Dec]
+mkCmdEPHandler runnerTy prefix e = do
     varNames       <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
     handlerRetType <- [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
-    let varPat          = ConP constructorName (fmap VarP varNames)
-        constructorName = mkName $ "NamedFields" <> show (length varNames)
-        nrArgs          = length @[] $ e ^. field @"constructorArgs"
+    let varPat = ConP name (fmap VarP varNames)
+        name   = mkName $ "NamedFields" <> show (length varNames)
+        nrArgs = length @[] $ e ^. field @"constructorArgs"
         funSig =
-            SigD (e ^. field @"handlerName")
+            SigD (handlerName $ prefix <> e ^. typed)
                 . AppT (AppT ArrowT runnerTy)
                 $ case e ^. field @"constructorArgs" of
                       [] -> handlerRetType
                       as ->
-                          let
-                              nfType :: Type
-                              nfType = AppT (ConT constructorName)
-                                            (LitT . StrTyLit $ mkBodyTag e)
-                          in
-                              AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
+                          let nfType :: Type
+                              nfType = AppT (ConT name) (LitT $ e ^. typed . to bodyTag)
+                          in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
         funBodyBase = AppE (VarE runner)
-            $ foldl AppE (ConE $ e ^. field @"constructorName") (fmap VarE varNames)
+            $ foldl AppE (ConE $ e ^. field @"name") (fmap VarE varNames)
 
         funBody = case e ^. field @"returnType" of
             TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
@@ -472,74 +466,75 @@ mkCmdEPHandler runnerTy e = do
         (pure (VarP runner) : (if nrArgs > 0 then [pure $ varPat] else []))
         (normalB [| liftIO $ $(funBody)  |])
         []
-    let funDef = FunD (e ^. field @"handlerName") [funClause]
+    let funDef = FunD (handlerName $ prefix <> e ^. typed) [funClause]
     pure [funSig, funDef]
   where
     runner :: Name
     runner = mkName "runner"
 
-mkSubAPiHandler :: Type -> SubApiData -> Q [Dec]
-mkSubAPiHandler runnerTy e = do
+mkSubAPiHandler :: Type -> [UrlSegment] -> SubApiData -> Q [Dec]
+mkSubAPiHandler runnerTy prefix e = do
     runner <- newName "runner"
 
     paramNames  <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
-    let finalSig = [t| Server $(pure . ConT $ subCmdApiTypeName e) |]
+    let finalSig = [t| Server $(pure . ConT $ e ^. field @"subApi" . typed . to apiTypeName) |]
     finalSig' <- finalSig
     params <- case e ^. field @"constructorArgs" of
         [] -> [t| $(pure runnerTy) -> $finalSig |]
         [a] -> [t| $(pure runnerTy) -> $(pure a) -> $finalSig |]
         ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
                     (runnerTy : ts <> [finalSig'])
-    funSig <- SigD (e ^. field @"handlerName") <$> pure params
+    funSig <- SigD (serverName $ prefix <> e ^. typed) <$> pure params
 
     funClause <- case fmap VarE paramNames of
         [] -> clause
                 [varP runner]
                 (fmap NormalB
-                      [e| $(varE $ subCmdHandlerName e)
+                      [e| $(varE $ e ^. field @"subApi" . typed)
                              $ $(pure $ VarE runner)
-                             . $(pure . ConE $ e ^. field @"constructorName") |]
+                             . $(pure . ConE $ e ^. field @"name") |]
                 )
                 []
         ts ->
-            let cmd = foldl (\b a -> AppE b a) (ConE $ e ^. field @"constructorName") ts
+            let cmd = foldl (\b a -> AppE b a) (ConE $ e ^. field @"name") ts
              in clause
                   (varP <$>  runner : paramNames)
                   (fmap NormalB
-                        [e| $(varE $ subCmdHandlerName e)
+                        [e| $(varE $ e ^. field @"subApi" . typed)
                                 $ $(varE runner)
                                 . $(pure cmd)
                         |]
                   )
                   []
-    let funDef = FunD (e ^. field @"handlerName") [funClause]
+    let funDef = FunD (serverName $ prefix <> e ^. typed) [funClause]
     pure [funSig, funDef]
 
 -- | The type of the CmdRunner used to execute commands
-runnerType :: ServerSpec -> Q Type
+runnerType :: ApiSpec -> Q Type
 runnerType spec = case serverType spec of
-    QueryServer -> [t| QueryRunner $(pure . ConT $ gadtName spec) |]
-    CmdServer   -> [t| CmdRunner $(pure . ConT $ gadtName spec) |]
+    QueryServer -> [t| QueryRunner $(pure . ConT $ spec ^. field @"name") |]
+    CmdServer   -> [t| CmdRunner $(pure . ConT $ spec ^. field @"name") |]
 
 -- | Create the full server and api dec
 -- Assumes the handlers have already been created (using `mkHandlers`)
-mkFullServer :: ServerSpec -> Q [Dec]
-mkFullServer spec = do
+mkFullServer :: [UrlSegment] -> ApiSpec -> Q [Dec]
+mkFullServer prefix spec = do
     runnerT <- runnerType spec
     let runner = mkName "runner"
 
         handlerExp :: ApiPiece -> Exp
         handlerExp = \case
-            Endpoint a -> VarE (a ^. field @"handlerName") `AppE` VarE runner
-            SubApi   a -> VarE (a ^. field @"handlerName") `AppE` VarE runner
+            Endpoint e -> VarE (handlerName $ prefix <> e ^. typed) `AppE` VarE runner
+            SubApi   e -> VarE (serverName $ prefix <> e ^. typed) `AppE` VarE runner
 
     body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
     apiDec        <- mkApiDec spec
     serverTypeDec <-
-        SigD (serverName spec)
+        SigD (serverName $ prefix <> spec ^. typed)
         .   AppT (AppT ArrowT runnerT)
-        <$> [t| Server $(pure $ ConT $ apiName spec) |]
-    let funDec = FunD (serverName spec) [Clause [VarP runner] (NormalB body) []]
+        <$> [t| Server $(pure $ ConT $ apiTypeName $ prefix <> spec ^. typed ) |]
+    let funDec = FunD (serverName $ prefix <> spec ^. typed)
+                      [Clause [VarP runner] (NormalB body) []]
     pure [apiDec, serverTypeDec, funDec]

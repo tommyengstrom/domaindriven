@@ -19,6 +19,7 @@ import           Network.HTTP.Client            ( newManager
 import           Network.Wai.Handler.Warp       ( run )
 import           Data.OpenApi                   ( ToSchema )
 import           Servant.Client
+import           DomainDriven.ServerOptions
 
 newtype ItemKey = ItemKey String
     deriving newtype (Show, Eq)
@@ -49,15 +50,7 @@ data StoreLookup a where
     MultipleParameters ::ItemKey -> String -> Int -> StoreLookup Item
 
 
-$(mkCmdServer
-    ServerOptions {renameConstructor = \case "ItemAction" -> []
-                                             "AddToCart" -> ["cart", "add"]
-                                             s -> [fmap toLower s]
-                  , prefix = ""
-                  , unitIsNoContent = True
-                  }
-    ''StoreCmd)
-
+$(mkCmdServer testServerOptions ''StoreCmd)
 $(mkQueryServer defaultServerOptions ''StoreLookup)
 
 type StoreModel = ()

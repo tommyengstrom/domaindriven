@@ -182,7 +182,7 @@ main = do
     -- Then we need to create the model
     dm <- createFileWithSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
 
-    BL.writeFile "/tmp/test_api.json" . encode . toOpenApi $ Proxy @StoreCmdApi
+    BL.writeFile "/tmp/0000test_api.json" . encode . toOpenApi $ Proxy @StoreCmdApi
     -- Print the API documentation before starting the server
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
