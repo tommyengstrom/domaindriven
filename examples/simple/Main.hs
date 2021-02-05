@@ -61,7 +61,7 @@ handleCounterCmd = \case
 -- | mkCmdServer will generate a servant API and server for the command GADT provided
 -- The API type will be named `CounterCmdApi` and the server will be named
 -- `counterCmdServer`.
-$(mkCmdServer defaultServerOptions [] ''CounterCmd)
+$(mkCmdServer defaultServerOptions ''CounterCmd)
 
 -- | Start a server running on port 8765
 -- Try it out with:

@@ -35,33 +35,33 @@ data ApiSpec = ApiSpec
     deriving (Show, Generic)
 
 fullName :: [UrlSegment] -> Name
-fullName s = mkName $ mconcat (s ^.. folded . typed)
+fullName s = mkName $ mconcat (s ^.. folded . typed . to upperFirst)
 
 apiTypeName :: [UrlSegment] -> Name
 apiTypeName s =
-    fullName s & unqualifiedString %~ upperFirst & unqualifiedString <>~ "Api"
+    fullName s & unqualifiedString <>~ "Api" & unqualifiedString %~ upperFirst
 
 serverName :: [UrlSegment] -> Name
 serverName s =
-    fullName s & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Server"
+    fullName s & unqualifiedString <>~ "Server" & unqualifiedString %~ lowerFirst
 
 endpointTypeName :: [UrlSegment] -> Name
 endpointTypeName s =
-    fullName s & unqualifiedString %~ upperFirst & unqualifiedString <>~ "Endpoint"
+    fullName s & unqualifiedString <>~ "Endpoint" & unqualifiedString %~ upperFirst
 
 handlerName :: [UrlSegment] -> Name
 handlerName s =
-    fullName s & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler"
+    fullName s & unqualifiedString <>~ "Handler" & unqualifiedString %~ lowerFirst
 
 
 bodyTag :: [UrlSegment] -> TyLit
 bodyTag s = StrTyLit . show $ fullName s & unqualifiedString <>~ "Body"
 
 
-apiPieceTypeName :: ApiPiece -> Name
-apiPieceTypeName = \case
-    Endpoint e -> e ^. typed . to endpointTypeName
-    SubApi   e -> e ^. typed . to apiTypeName
+apiPieceTypeName :: [UrlSegment] -> ApiPiece -> Name
+apiPieceTypeName prefix = \case
+    Endpoint e -> endpointTypeName $ prefix <> e ^. typed
+    SubApi   e -> apiTypeName $ prefix <> e ^. typed
 
 newtype UrlSegment = UrlSegment String
     deriving (Show, Generic, Eq)
@@ -230,12 +230,10 @@ fullConstructorPaths opts = \case
 -- | Create type aliases for each endpoint, using constructor name prefixed with "Ep",
 -- and a type `Api` that represents the full API.
 mkCmdServer :: ServerOptions -> Name -> Q [Dec]
-mkCmdServer opts =
-    mkServerFromSpec opts [UrlSegment "Hej"] <=< mkServerSpec opts CmdServer
+mkCmdServer opts = mkServerFromSpec opts [] <=< mkServerSpec opts CmdServer
 
 mkQueryServer :: ServerOptions -> Name -> Q [Dec]
-mkQueryServer opts =
-    mkServerFromSpec opts [UrlSegment "Hej"] <=< mkServerSpec opts QueryServer
+mkQueryServer opts = mkServerFromSpec opts [] <=< mkServerSpec opts QueryServer
 
 mkServerFromSpec :: ServerOptions -> [UrlSegment] -> ApiSpec -> Q [Dec]
 mkServerFromSpec opts prefix s = do
@@ -258,10 +256,10 @@ mkServerFromSpec opts prefix s = do
 
 -- | Create a typealias for the API
 -- type Api = EpA :<|> EpB :<|> EpC ...
-mkApiDec :: ApiSpec -> Q Dec
-mkApiDec spec =
-    TySynD (spec ^. typed . to apiTypeName) []
-        <$> case spec ^.. typed @[ApiPiece] . folded . to apiPieceTypeName of
+mkApiDec :: [UrlSegment] -> ApiSpec -> Q Dec
+mkApiDec prefix spec =
+    TySynD (apiTypeName $ prefix <> spec ^. typed) []
+        <$> case apiPieceTypeName prefix <$> spec ^.. typed @[ApiPiece] . folded of
                 []     -> error "Server has no endpoints"
                 x : xs -> do
                     let f :: Type -> Name -> Q Type
@@ -399,7 +397,7 @@ mkEndpointDec sType prefix e = do
     ty <- case sType of
         CmdServer   -> cmdEndpointType prefix e
         QueryServer -> queryEndpointType prefix e
-    pure $ [TySynD (apiPieceTypeName e) [] ty]
+    pure $ [TySynD (apiPieceTypeName prefix e) [] ty]
 
 
 -- | Make command handlers for each endpoint
@@ -477,7 +475,7 @@ mkSubAPiHandler runnerTy prefix e = do
     runner <- newName "runner"
 
     paramNames  <- traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
-    let finalSig = [t| Server $(pure . ConT $ e ^. field @"subApi" . typed . to apiTypeName) |]
+    let finalSig = [t| Server $(pure . ConT $ apiTypeName $ prefix <> e ^. field @"subApi" . typed) |]
     finalSig' <- finalSig
     params <- case e ^. field @"constructorArgs" of
         [] -> [t| $(pure runnerTy) -> $finalSig |]
@@ -500,8 +498,7 @@ mkSubAPiHandler runnerTy prefix e = do
              in clause
                   (varP <$>  runner : paramNames)
                   (fmap NormalB
-                        [e| $(varE $ e ^. field @"subApi" . typed)
-                                $ $(varE runner)
+                        [e| $(varE runner)
                                 . $(pure cmd)
                         |]
                   )
@@ -530,7 +527,7 @@ mkFullServer prefix spec = do
     body <- case handlerExp <$> endpoints spec of
         []     -> error "Server contains no endpoints"
         e : es -> foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-    apiDec        <- mkApiDec spec
+    apiDec        <- mkApiDec prefix spec
     serverTypeDec <-
         SigD (serverName $ prefix <> spec ^. typed)
         .   AppT (AppT ArrowT runnerT)
