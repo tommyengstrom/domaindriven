@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE DefaultSignatures #-}
 
 module DomainDriven.Server
     ( module DomainDriven.Server
@@ -69,8 +70,19 @@ askBodyTag = do
 
 askApiPieceTypeName :: Monad m => ApiPiece -> ReaderT [UrlSegment] m Name
 askApiPieceTypeName = \case
-    Endpoint e -> local (<> e ^. typed) askEndpointTypeName
-    SubApi   e -> local (<> e ^. typed) askApiTypeName
+    Endpoint e -> localPath e $ askEndpointTypeName
+    SubApi   e -> localPath e $ askApiTypeName
+
+
+instance {-# Overlapping #-} HasType [UrlSegment] ApiPiece where
+    typed = lens getter setter
+      where
+        getter = \case
+            Endpoint e -> e ^. typed
+            SubApi   e -> e ^. typed
+        setter s a = case s of
+            Endpoint e -> Endpoint $ e & typed .~ a
+            SubApi   e -> SubApi $ e & typed .~ a
 
 newtype UrlSegment = UrlSegment String
     deriving (Show, Generic, Eq)
@@ -249,9 +261,9 @@ mkQueryServer opts name = do
     runReaderT (mkServerFromSpec opts spec) []
 
 mkServerFromSpec :: ServerOptions -> ApiSpec -> ReaderT [UrlSegment] Q [Dec]
-mkServerFromSpec opts s = do
+mkServerFromSpec opts s = localPath s $ do
     let mkSubServer :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
-        mkSubServer = local (<> s ^. typed) . mkServerFromSpec opts
+        mkSubServer = localPath s . mkServerFromSpec opts
     subServers <-
         fmap mconcat
         .   traverse mkSubServer
@@ -268,7 +280,7 @@ mkServerFromSpec opts s = do
 -- | Create a typealias for the API
 -- type Api = EpA :<|> EpB :<|> EpC ...
 mkApiDec :: ApiSpec -> ReaderT [UrlSegment] Q Dec
-mkApiDec spec = local (<> spec ^. typed) $ do
+mkApiDec spec = do
     apiName       <- askApiTypeName
     apiPieceNames <- traverse askApiPieceTypeName $ spec ^. typed @[ApiPiece]
     TySynD apiName [] <$> case apiPieceNames of
@@ -379,7 +391,7 @@ mkServantEpName rest = do
 -- `EditBook :: BookId -> BookCmd a -> Cmd a` will result in
 -- "EditBook" :> Capture "BookId" BookId :> BookApi
 epSubApiType :: SubApiData -> ReaderT [UrlSegment] Q Type
-epSubApiType e = do
+epSubApiType e = localPath e $ do
 
     let subApiType :: Type
         subApiType = ConT $ e ^. typed @ApiSpec . typed @Name
@@ -395,12 +407,11 @@ epSubApiType e = do
             ConT n -> n ^. unqualifiedString
             _      -> "typename"
     captures <- lift $ traverse mkCapture $ e ^. field @"constructorArgs"
-    local (<> e ^. field @"urlPieces") $ mkServantEpName
-        (foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
+    mkServantEpName (foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
 
 -- | Define a type alias representing the type of the endpoint
 mkEndpointDec :: ServerType -> ApiPiece -> ReaderT [UrlSegment] Q [Dec]
-mkEndpointDec sType e = do
+mkEndpointDec sType e = localPath e $ do
     ty <- case sType of
         CmdServer   -> cmdEndpointType e
         QueryServer -> queryEndpointType e
@@ -408,14 +419,21 @@ mkEndpointDec sType e = do
     pure $ [TySynD apiPieceTypeName [] ty]
 
 
+localPath
+    :: (Monad m, HasType [UrlSegment] a)
+    => a
+    -> ReaderT [UrlSegment] m b
+    -> ReaderT [UrlSegment] m b
+localPath a = local (<> a ^. typed)
+
 -- | Make command handlers for each endpoint
 mkHandlers :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
 mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
     runnerTy <- lift $ runnerType spec
     case (ep, serverType spec) of
-        (Endpoint e, CmdServer  ) -> mkCmdEPHandler runnerTy e
-        (Endpoint e, QueryServer) -> mkQueryEPHandler runnerTy e
-        (SubApi   e, _          ) -> mkSubAPiHandler runnerTy e
+        (Endpoint e, CmdServer  ) -> localPath e $ mkCmdEPHandler runnerTy e
+        (Endpoint e, QueryServer) -> localPath e $ mkQueryEPHandler runnerTy e
+        (SubApi   e, _          ) -> localPath e $ mkSubAPiHandler runnerTy e
 
 mkQueryEPHandler :: Type -> EndpointData -> ReaderT [UrlSegment] Q [Dec]
 mkQueryEPHandler runnerTy e = do
@@ -447,7 +465,7 @@ mkQueryEPHandler runnerTy e = do
     runner = mkName "runner"
 
 mkCmdEPHandler :: Type -> EndpointData -> ReaderT [UrlSegment] Q [Dec]
-mkCmdEPHandler runnerTy e = do
+mkCmdEPHandler runnerTy e = localPath e $ do
     varNames <- lift $ traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
     handlerRetType <- lift [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
     handlerName    <- askHandlerName
@@ -534,10 +552,10 @@ mkFullServer spec = do
 
         handlerExp :: Monad m => ApiPiece -> ReaderT [UrlSegment] m Exp
         handlerExp = \case
-            Endpoint e -> do
+            Endpoint e -> localPath e $ do
                 hName <- askHandlerName
                 pure $ VarE hName `AppE` VarE runner
-            SubApi e -> do
+            SubApi e -> localPath e $ do
                 serverName <- askServerName
                 pure $ VarE serverName `AppE` VarE runner
 
