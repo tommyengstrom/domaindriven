@@ -9,8 +9,7 @@ import           DomainDriven.Server            ( ServerOptions(..) )
 testServerOptions :: ServerOptions
 testServerOptions = ServerOptions
     { renameConstructor = \case
-                              "ItemAction" -> []
-                              "AddToCart"  -> ["cart", "add"]
-                              s            -> [fmap toLower s]
+                              "AddToCart" -> ["cart", "add"]
+                              s           -> [fmap toLower s]
     , unitIsNoContent   = True
     }
