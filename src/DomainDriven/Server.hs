@@ -23,6 +23,7 @@ import           Data.Char
 import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
+import           Data.Traversable
 import           Data.Generics.Sum
 import           GHC.Generics                   ( Generic )
 import           DomainDriven.Internal.NamedFields
@@ -32,7 +33,7 @@ data ApiSpec = ApiSpec
     { name       :: Name -- ^ Name of the GADT representing the command
     , urlPieces  :: [UrlSegment] -- ^ The Url path segments this API adds
     , endpoints  :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
-    , serverType :: ServerType
+    , serverType :: ServerType -- ^ Type type of server represented
     }
     deriving (Show, Generic)
 
@@ -260,8 +261,65 @@ mkQueryServer opts name = do
     spec <- mkServerSpec opts QueryServer name
     runReaderT (mkServerFromSpec opts spec) []
 
+
+data EndpointDec = EndpointDec
+    { epTypeAlias :: Type
+    , epTypeDec   :: Dec
+    , epHandlerName :: Name
+    , epHandlerDec :: Dec
+    }
+    deriving (Show, Generic)
+
 mkServerFromSpec :: ServerOptions -> ApiSpec -> ReaderT [UrlSegment] Q [Dec]
-mkServerFromSpec opts s = localPath s $ do
+mkServerFromSpec opts spec = localPath spec $ do
+    let serverType :: ServerType
+        serverType = spec ^. typed
+
+    fullApiName <- askApiTypeName
+    fullServerName <- askServerName
+
+    epDecs <- undefined :: ReaderT [UrlSegment] Q [EndpointDec]
+
+    case epDecs of
+        e : es -> do
+            apiTypeAlias <- fmap (TySynD fullApiName [])
+                . lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |])
+                         (e ^. field @"epTypeAlias")
+                         (fmap (^. field @"epTypeAlias") es)
+
+        [] -> pure []
+    let fullApiDec = TySynD fullApiName [] $
+                e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+        foldr (\a b -> [t| $(pure a) :<|> $(pure b)AppT  (VarT (e ^. field @"epTypeName")
+    stuffs <- for (spec ^. typed @[ApiPiece]) $ \p -> localPath p $ do
+        apiTypeName <- askApiTypeName p
+        serverName  <- askServerName
+        runnerType  <- lift $ mkRunnerType spec
+        apiDec      <- mkApiDec spec
+
+        let endpointDec :: [Dec]
+            endpointDec = [TySynD tyName [] serverType]
+
+        handlerDecs <- case (ep, serverType spec) of
+            (Endpoint e, CmdServer  ) -> mkCmdEPHandler runnerType e
+            (Endpoint e, QueryServer) -> mkQueryEPHandler runnerType e
+            (SubApi   e, _          ) -> mkSubAPiHandler runnerType e
+        serverTypeDec <- do
+            ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
+            pure . SigD serverName $ AppT (AppT ArrowT runnerT) ret
+        funDec <- do
+            body <- case handlers of
+                []     -> error "Server contains no endpoints"
+                e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+            pure $ FunD n [Clause [VarP runner] (NormalB body) []]
+        pure ApiDecs { fullApiDeclaration        = apiDec
+                        , endpointDeclaration   = endpointDec
+                        , handlerDeclarations    = handlerDecs
+                        , serverTypeDeclaration = serverTypeDec
+                        , apiTypeDeclaration    = apiTypeDec
+                        , serverDeclaration   = funDec
+                        }
+
     let mkSubServer :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
         mkSubServer = localPath s . mkServerFromSpec opts
     subServers <-
@@ -277,6 +335,20 @@ mkServerFromSpec opts s = localPath s $ do
     server       <- mkFullServer s
     pure $ subServers <> endpointDecs <> handlers <> server
 
+mkRunnerType :: ApiSpec -> Q Type
+mkRunnerType spec = case serverType spec of
+    QueryServer -> [t| QueryRunner $(pure . ConT $ spec ^. field @"name") |]
+    CmdServer   -> [t| CmdRunner $(pure . ConT $ spec ^. field @"name") |]
+
+mkHandlers :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
+mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
+    runnerTy <- lift $ mkRunnerType spec
+    case (ep, serverType spec) of
+        (Endpoint e, CmdServer  ) -> localPath e $ mkCmdEPHandler runnerTy e
+        (Endpoint e, QueryServer) -> localPath e $ mkQueryEPHandler runnerTy e
+        (SubApi   e, _          ) -> localPath e $ mkSubAPiHandler runnerTy e
+
+
 -- | Create a typealias for the API
 -- type Api = EpA :<|> EpB :<|> EpC ...
 mkApiDec :: ApiSpec -> ReaderT [UrlSegment] Q Dec
@@ -290,6 +362,77 @@ mkApiDec spec = do
                 f b a = lift [t| $(pure b) :<|> $(pure $ ConT a) |]
             foldM f (ConT x) xs
 
+-- | Define a type alias representing the type of the endpoint
+mkEndpointDec :: ServerType -> ApiPiece -> ReaderT [UrlSegment] Q [Dec]
+mkEndpointDec sType e = localPath e $ do
+    ty <- case sType of
+        CmdServer   -> cmdEndpointType e
+        QueryServer -> queryEndpointType e
+    apiPieceTypeName <- askApiPieceTypeName e
+    pure $ [TySynD apiPieceTypeName [] ty]
+
+
+-- | Create the full server and api dec
+-- Assumes the handlers have already been created (using `mkHandlers`)
+mkFullServer' :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
+mkFullServer' spec = do
+    runnerT <- lift $ mkRunnerType spec
+    let runner = mkName "runner"
+
+        handlerExp :: Monad m => ApiPiece -> ReaderT [UrlSegment] m Exp
+        handlerExp = \case
+            Endpoint e -> localPath e $ do
+                hName <- askHandlerName
+                pure $ VarE hName `AppE` VarE runner
+            SubApi e -> localPath e $ do
+                serverName <- askServerName
+                pure $ VarE serverName `AppE` VarE runner
+
+    handlers <- traverse handlerExp $ endpoints spec
+    body     <- case handlers of
+        []     -> error "Server contains no endpoints"
+        e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+    -- apiDec        <- mkApiDec spec
+    --serverTypeDec <- do
+    --    serverName  <- askServerName
+    --    apiTypeName <- askApiTypeName
+    --    ret         <- lift [t| Server $(pure $ ConT apiTypeName) |]
+    --    pure . SigD serverName $ AppT (AppT ArrowT runnerT) ret
+    funDec <- do
+        n <- askServerName
+        pure $ FunD n [Clause [VarP runner] (NormalB body) []]
+    pure [apiDec, serverTypeDec, funDec]
+
+-- | Create the full server and api dec
+-- Assumes the handlers have already been created (using `mkHandlers`)
+mkFullServer :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
+mkFullServer spec = do
+    runnerT <- lift $ mkRunnerType spec
+    let runner = mkName "runner"
+
+        handlerExp :: Monad m => ApiPiece -> ReaderT [UrlSegment] m Exp
+        handlerExp = \case
+            Endpoint e -> localPath e $ do
+                hName <- askHandlerName
+                pure $ VarE hName `AppE` VarE runner
+            SubApi e -> localPath e $ do
+                serverName <- askServerName
+                pure $ VarE serverName `AppE` VarE runner
+
+    handlers <- traverse handlerExp $ endpoints spec
+    body     <- case handlers of
+        []     -> error "Server contains no endpoints"
+        e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+    apiDec        <- mkApiDec spec
+    serverTypeDec <- do
+        serverName  <- askServerName
+        apiTypeName <- askApiTypeName
+        ret         <- lift [t| Server $(pure $ ConT apiTypeName) |]
+        pure . SigD serverName $ AppT (AppT ArrowT runnerT) ret
+    funDec <- do
+        n <- askServerName
+        pure $ FunD n [Clause [VarP runner] (NormalB body) []]
+    pure [apiDec, serverTypeDec, funDec]
 -- | Create a request body by turning multiple arguments into a NamedFieldsN
 -- `BuyThing ItemKey Quantity`
 -- yields:
@@ -409,15 +552,6 @@ epSubApiType e = localPath e $ do
     captures <- lift $ traverse mkCapture $ e ^. field @"constructorArgs"
     mkServantEpName (foldr1 (\a b -> AppT (AppT bird a) b) (captures <> [subApiType]))
 
--- | Define a type alias representing the type of the endpoint
-mkEndpointDec :: ServerType -> ApiPiece -> ReaderT [UrlSegment] Q [Dec]
-mkEndpointDec sType e = localPath e $ do
-    ty <- case sType of
-        CmdServer   -> cmdEndpointType e
-        QueryServer -> queryEndpointType e
-    apiPieceTypeName <- askApiPieceTypeName e
-    pure $ [TySynD apiPieceTypeName [] ty]
-
 
 localPath
     :: (Monad m, HasType [UrlSegment] a)
@@ -427,14 +561,6 @@ localPath
 localPath a = local (<> a ^. typed)
 
 -- | Make command handlers for each endpoint
-mkHandlers :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
-mkHandlers spec = fmap mconcat . forM (endpoints spec) $ \ep -> do
-    runnerTy <- lift $ runnerType spec
-    case (ep, serverType spec) of
-        (Endpoint e, CmdServer  ) -> localPath e $ mkCmdEPHandler runnerTy e
-        (Endpoint e, QueryServer) -> localPath e $ mkQueryEPHandler runnerTy e
-        (SubApi   e, _          ) -> localPath e $ mkSubAPiHandler runnerTy e
-
 mkQueryEPHandler :: Type -> EndpointData -> ReaderT [UrlSegment] Q [Dec]
 mkQueryEPHandler runnerTy e = do
     varNames <- traverse (const (lift $ newName "arg")) $ e ^. field @"constructorArgs"
@@ -465,7 +591,7 @@ mkQueryEPHandler runnerTy e = do
     runner = mkName "runner"
 
 mkCmdEPHandler :: Type -> EndpointData -> ReaderT [UrlSegment] Q [Dec]
-mkCmdEPHandler runnerTy e = localPath e $ do
+mkCmdEPHandler runnerTy e = do
     varNames <- lift $ traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
     handlerRetType <- lift [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
     handlerName    <- askHandlerName
@@ -536,40 +662,3 @@ mkSubAPiHandler runnerTy e = do
                   []
     let funDef = FunD serverName [funClause]
     pure [funSig, funDef]
-
--- | The type of the CmdRunner used to execute commands
-runnerType :: ApiSpec -> Q Type
-runnerType spec = case serverType spec of
-    QueryServer -> [t| QueryRunner $(pure . ConT $ spec ^. field @"name") |]
-    CmdServer   -> [t| CmdRunner $(pure . ConT $ spec ^. field @"name") |]
-
--- | Create the full server and api dec
--- Assumes the handlers have already been created (using `mkHandlers`)
-mkFullServer :: ApiSpec -> ReaderT [UrlSegment] Q [Dec]
-mkFullServer spec = do
-    runnerT <- lift $ runnerType spec
-    let runner = mkName "runner"
-
-        handlerExp :: Monad m => ApiPiece -> ReaderT [UrlSegment] m Exp
-        handlerExp = \case
-            Endpoint e -> localPath e $ do
-                hName <- askHandlerName
-                pure $ VarE hName `AppE` VarE runner
-            SubApi e -> localPath e $ do
-                serverName <- askServerName
-                pure $ VarE serverName `AppE` VarE runner
-
-    handlers <- traverse handlerExp $ endpoints spec
-    body     <- case handlers of
-        []     -> error "Server contains no endpoints"
-        e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-    apiDec        <- mkApiDec spec
-    serverTypeDec <- do
-        serverName  <- askServerName
-        apiTypeName <- askApiTypeName
-        ret         <- lift [t| Server $(pure $ ConT apiTypeName) |]
-        pure . SigD serverName $ AppT (AppT ArrowT runnerT) ret
-    funDec <- do
-        n <- askServerName
-        pure $ FunD n [Clause [VarP runner] (NormalB body) []]
-    pure [apiDec, serverTypeDec, funDec]
