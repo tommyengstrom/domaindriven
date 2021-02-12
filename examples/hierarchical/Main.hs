@@ -141,7 +141,7 @@ handleStoreCmd = \case
                     $ itemContinuation i
             Nothing -> Left NoSuchItem
 
-$(mkCmdServer defaultServerOptions ''StoreCmd)
+$(mkCmdServer defaultApiOptions ''StoreCmd)
 
 -- $(mkCmdServer
 --    ServerOptions
@@ -166,7 +166,7 @@ runStoreQuery m = \case
     ListItems  _    -> pure . Right $ M.toList m
     LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
 
-$(mkQueryServer defaultServerOptions ''StoreQuery)
+-- $(mkQueryServer defaultApiOptions ''StoreQuery)
 
 -- We can assemble the individual APIs as we would with any other Servant APIs.
 type Api = StoreCmdApi :<|> StoreQueryApi

@@ -42,8 +42,6 @@ data ApiPiece
 
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> [String]
-    , unitIsNoContent   :: Bool -- ^ Translate () in commands to NoContent endpoints
-                                -- (Aeson encodes unit at "[]")
     }
     deriving (Show, Generic)
 
@@ -62,36 +60,6 @@ newtype UrlSegment = UrlSegment String
 newtype ConstructorArgs = ConstructorArgs [Type]
     deriving (Show, Generic, Eq)
 
--- qualifiedName :: Monad m => Name -> ReaderT [Name] m Name
--- qualifiedName n = do
---     s <- ask
---     pure . mkName . mconcat . fmap show $ s <> [n]
---
--- askApiTypeName :: Monad m => Name -> ReaderT [Name] m Name
--- askApiTypeName n = (unqualifiedString <>~ "Api") <$> qualifiedName n
---
--- askServerName :: Monad m => Name -> ReaderT [Name] m Name
--- askServerName n =
---     (unqualifiedString <>~ "Server")
---         .   (unqualifiedString %~ lowerFirst)
---         <$> qualifiedName n
---
--- askHandlerName :: Monad m => Name -> ReaderT [Name] m Name
--- askHandlerName n =
---     (unqualifiedString <>~ "Handler")
---         .   (unqualifiedString %~ lowerFirst)
---         <$> qualifiedName n
---
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
--- I need to create a structure that contians both Name and [UrlSegment] to use for the
--- reader. BodyTag should have the "exposed name" but the rest of the stuff should have
--- the normal names without any mapping.
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
---askBodyTag :: Monad m => ReaderT [Name] m TyLit
---askBodyTag = do
---    s <- qualifiedName
 --    pure . StrTyLit . show $ s & unqualifiedString <>~ "Body"
 --
 --
@@ -100,13 +68,25 @@ newtype ConstructorArgs = ConstructorArgs [Type]
 --    Endpoint e -> local (<> e ^. typed) askApiTypeName
 --    SubApi   e -> local (<> e ^. typed) askApiTypeName
 --
-mkUrlSegments :: ApiOptions -> ConstructorName -> [UrlSegment]
-mkUrlSegments opts n =
-    n ^.. typed . unqualifiedString . to (renameConstructor opts) . folded . to UrlSegment
+--mkUrlSegments :: ApiOptions -> ConstructorName -> [UrlSegment]
+--mkUrlSegments opts n =
+--    n ^.. typed . unqualifiedString . to (renameConstructor opts) . folded . to UrlSegment
+
+mkUrlSegments :: Monad m => ConstructorName -> ReaderT ServerInfo m [UrlSegment]
+mkUrlSegments n = do
+    opts <- asks (view typed)
+    pure
+        $   n
+        ^.. typed
+        .   unqualifiedString
+        .   to (renameConstructor opts)
+        .   folded
+        .   to UrlSegment
+
 
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { renameConstructor = pure, unitIsNoContent = True }
+defaultApiOptions = ApiOptions { renameConstructor = pure }
 
 getCmdDec :: GadtName -> Q Dec
 getCmdDec (GadtName n) = do
@@ -133,10 +113,6 @@ getConstructors = \case
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
 
--- hRetType <- case retType of
---     TupleT 0 | opts ^. field @"unitIsNoContent" -> [t| NoContent|]
---     t                                          -> pure t
---
 mkApiPiece :: ApiOptions -> Con -> Q ApiPiece
 mkApiPiece opts = \case
     -- The normal case
@@ -183,7 +159,7 @@ mkServerSpec opts n = do
 
 -- | Verifies that the server do not generate overlapping paths
 verifySpec :: ApiSpec -> Q ()
-verifySpec = undefined
+verifySpec _ = pure ()
     -- where
     --   -- FIXME: Improve error message to show the full gadtName of offending types and
     --   -- constructors
@@ -217,52 +193,153 @@ verifySpec = undefined
 -- | Create type aliases for each endpoint, using constructor gadtName prefixed with "Ep",
 -- and a type `Api` that represents the full API.
 
+
+------------------------------------------------------------------------------------------
+
+-- |  Generate the server from the spec
 mkCmdServer :: ApiOptions -> Name -> Q [Dec]
 mkCmdServer opts gadtName = do
     spec <- mkServerSpec opts (GadtName gadtName)
     verifySpec spec
-    undefined spec
-    -- runReaderT (mkServerFromSpec opts spec) []
+    runReaderT (mkServerFromSpec spec) si
+  where
+    si :: ServerInfo
+    si = ServerInfo { parentConstructors = [], prefixSegments = [], options = opts }
 
+-- | Carries information regarding how the API looks at the place we're currently at.
 data ServerInfo = ServerInfo
-    { parentGadts    :: [GadtName] -- ^ To create good names without conflict
-    , prefixSegments :: [UrlSegment] -- ^ Used to give a good name to the request body
-    , options        :: ApiOptions -- ^ The current options
+    { parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
+    , prefixSegments     :: [UrlSegment] -- ^ Used to give a good name to the request body
+    , options            :: ApiOptions -- ^ The current options
     }
     deriving (Show, Generic)
+
+-- qualifiedName :: Monad m => Name -> ReaderT [Name] m Name
+-- qualifiedName n = do
+--     s <- ask
+--     pure . mkName . mconcat . fmap show $ s <> [n]
+--
+askTypeName :: Monad m => ReaderT ServerInfo m Name
+askTypeName = do
+    cNames <- asks (view $ typed @[ConstructorName])
+    pure . mkName . mconcat $ cNames ^.. folded . typed @Name . unqualifiedString
+
+
+
+askApiTypeName :: Monad m => ReaderT ServerInfo m Name
+askApiTypeName = (unqualifiedString <>~ "Api") <$> askTypeName
+
+askServerName :: Monad m => ReaderT ServerInfo m Name
+askServerName =
+    (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Server")
+        <$> askTypeName
+
+-- askHandlerName :: Monad m => Name -> ReaderT [Name] m Name
+-- askHandlerName n =
+--     (unqualifiedString <>~ "Handler")
+--         .   (unqualifiedString %~ lowerFirst)
+--         <$> qualifiedName n
+--
+------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------
+-- I need to create a structure that contians both Name and [UrlSegment] to use for the
+-- reader. BodyTag should have the "exposed name" but the rest of the stuff should have
+-- the normal names without any mapping.
+------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------
+askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
+askBodyTag n = do
+    ServerInfo _ prefix opts <- ask
+    newSegments              <- mkUrlSegments n
+    let urlSegments = prefix <> newSegments
+    pure . StrTyLit . mconcat $ urlSegments ^.. folded . typed
 
 enterApi :: Monad m => ApiSpec -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
 enterApi s = local extendServerInfo
   where
     extendServerInfo :: ServerInfo -> ServerInfo
-    extendServerInfo i =
-        i & typed @[GadtName] <>~ s ^. typed . to pure & typed .~ s ^. typed @ApiOptions
+    extendServerInfo i = i & typed .~ s ^. typed @ApiOptions
 
 enterApiPiece :: Monad m => ApiPiece -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
-enterApiPiece p = local extendServerInfo
-  where
-    extendServerInfo :: ServerInfo -> ServerInfo
-    extendServerInfo i = i & typed @[UrlSegment] <>~ newSegments (i ^. typed)
+enterApiPiece p m = do
+    newSegments <- mkUrlSegments (p ^. typed)
+    let extendServerInfo :: ServerInfo -> ServerInfo
+        extendServerInfo i =
+            i
+                & (typed @[UrlSegment] <>~ newSegments)
+                & (typed @[ConstructorName] <>~ p ^. typed . to pure)
 
-    newSegments :: ApiOptions -> [UrlSegment]
-    newSegments opts = mkUrlSegments (opts ^. typed) (p ^. typed)
+    local extendServerInfo m
+
 
 ---- | This is the only layer of the ReaderT stack where we do not use `local` to update the
 ---- url segments.
 mkServerFromSpec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkServerFromSpec spec = enterApi spec $ do
     endpoints <- mconcat <$> traverse mkApiPiece (spec ^. typed @[ApiPiece])
-    apiDec    <- undefined
-    serverDec <- undefined
+    apiDec    <- pure [] -- undefined
+    serverDec <- pure [] -- undefined
     pure $ apiDec <> serverDec <> endpoints
   where
     mkApiPiece :: ApiPiece -> ReaderT ServerInfo Q [Dec]
     mkApiPiece p = enterApiPiece p $ do
         case p of
-            Endpoint{}               -> undefined
+            Endpoint name args ret -> do
+                epDec <- mkEndpointType name args ret
+                pure [epDec]
             SubApi _name _args spec' -> mkServerFromSpec spec'
 
---
+    mkEndpointType
+        :: ConstructorName -> ConstructorArgs -> Type -> ReaderT ServerInfo Q Dec
+    mkEndpointType name args retType = do
+        ty <- do
+            reqBody   <- mkReqBody name args
+            reqReturn <- lift [t| Post '[JSON] $(pure retType) |]
+            middle    <- case reqBody of
+                Nothing -> pure reqReturn
+                Just b  -> lift [t| $(pure b) :>  $(pure reqReturn) |]
+            urlSegments <- mkUrlSegments name
+            lift $ prependServerEndpointName urlSegments middle
+        epTypeName <- askApiTypeName
+        pure $ TySynD epTypeName [] ty
+
+prependServerEndpointName :: [UrlSegment] -> Type -> Q Type
+prependServerEndpointName prefix rest = do
+    foldr (\a b -> [t| $(pure a) :> $b |])
+          (pure rest)
+          (fmap (LitT . StrTyLit . view typed) prefix)
+
+mkReqBody :: ConstructorName -> ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
+mkReqBody name args = do
+    bodyTag <- askBodyTag name
+    let body = case args of
+            ConstructorArgs [] -> Nothing
+            ConstructorArgs ts ->
+                let n = length ts
+                    constructor =
+                        AppT (ConT (mkName $ "NamedFields" <> show n)) (LitT bodyTag)
+                in  Just $ foldl AppT constructor ts
+    case body of
+        Nothing -> pure Nothing
+        Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
+
+
+---- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
+---- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
+---- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
+--cmdEndpointType :: Endpoint -> ReaderT [Name] Q Type
+--cmdEndpointType p = case p of
+--    SubApi   e -> epSubApiType e
+--    Endpoint e -> local (<> p ^. typed) $ do
+--        bodyTag <- askBodyTag
+--        reqBody <- lift $ mkReqBody bodyTag (e ^. typed)
+--        middle  <- case reqBody of
+--            Nothing -> lift reqReturn
+--            Just b  -> lift [t| $(pure b) :>  $reqReturn |]
+--        lift $ prependServerEndpointName (e ^. typed) middle
+--      where
+--        reqReturn :: Q Type
+--        reqReturn = [t| Post '[JSON] $(pure $ e ^. field @"handlerReturnType") |]
 --bogusD :: String -> Dec
 --bogusD s = FunD (mkName s) [Clause [] (NormalB $ VarE $ mkName s) []]
 ----
@@ -310,22 +387,6 @@ mkServerFromSpec spec = enterApi spec $ do
 ----    prefixes :: [String]
 ----    prefixes = e ^.. field @"urlPieces" . folded . to show
 --
----- | Define the servant endpoint type for non-hierarchical command constructors. E.g.
----- `BuyBook :: BookId -> Integer -> Cmd ()` will result in:
----- "BuyBook" :> ReqBody '[JSON] (BookId, Integer) -> Post '[JSON] NoContent
---cmdEndpointType :: Endpoint -> ReaderT [Name] Q Type
---cmdEndpointType p = case p of
---    SubApi   e -> epSubApiType e
---    Endpoint e -> local (<> p ^. typed) $ do
---        bodyTag <- askBodyTag
---        reqBody <- lift $ mkReqBody bodyTag (e ^. typed)
---        middle  <- case reqBody of
---            Nothing -> lift reqReturn
---            Just b  -> lift [t| $(pure b) :>  $reqReturn |]
---        lift $ prependServerEndpointName (e ^. typed) middle
---      where
---        reqReturn :: Q Type
---        reqReturn = [t| Post '[JSON] $(pure $ e ^. field @"handlerReturnType") |]
 --
 ---- | Define the servant endpoint type for non-hierarchical query constructors. E.g.
 ---- `GetBook :: BookId -> Query Book` will result in:
