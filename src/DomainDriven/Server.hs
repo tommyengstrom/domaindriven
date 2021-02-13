@@ -42,6 +42,7 @@ data ApiPiece
 
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> [String]
+    , typenameSeparator :: String
     }
     deriving (Show, Generic)
 
@@ -86,7 +87,7 @@ mkUrlSegments n = do
 
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { renameConstructor = pure }
+defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "_" }
 
 getCmdDec :: GadtName -> Q Dec
 getCmdDec (GadtName n) = do
@@ -201,14 +202,18 @@ mkCmdServer :: ApiOptions -> Name -> Q [Dec]
 mkCmdServer opts gadtName = do
     spec <- mkServerSpec opts (GadtName gadtName)
     verifySpec spec
+    let si :: ServerInfo
+        si = ServerInfo { baseGadt           = spec ^. typed
+                        , parentConstructors = []
+                        , prefixSegments     = []
+                        , options            = opts
+                        }
     runReaderT (mkServerFromSpec spec) si
-  where
-    si :: ServerInfo
-    si = ServerInfo { parentConstructors = [], prefixSegments = [], options = opts }
 
 -- | Carries information regarding how the API looks at the place we're currently at.
 data ServerInfo = ServerInfo
-    { parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
+    { baseGadt           :: GadtName -- ^ Use as a prefix of all types
+    , parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
     , prefixSegments     :: [UrlSegment] -- ^ Used to give a good name to the request body
     , options            :: ApiOptions -- ^ The current options
     }
@@ -221,9 +226,17 @@ data ServerInfo = ServerInfo
 --
 askTypeName :: Monad m => ReaderT ServerInfo m Name
 askTypeName = do
-    cNames <- asks (view $ typed @[ConstructorName])
-    pure . mkName . mconcat $ cNames ^.. folded . typed @Name . unqualifiedString
+    si <- ask
+    let baseName :: String
+        baseName = si ^. typed @GadtName . typed @Name . unqualifiedString
 
+        cNames :: [String]
+        cNames =
+            si ^.. typed @[ConstructorName] . folded . typed @Name . unqualifiedString
+        separator :: String
+        separator = si ^. typed @ApiOptions . field @"typenameSeparator"
+
+    pure . mkName . L.intercalate separator $ baseName : cNames
 
 
 askApiTypeName :: Monad m => ReaderT ServerInfo m Name
@@ -249,8 +262,8 @@ askServerName =
 ------------------------------------------------------------------------------------------
 askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
 askBodyTag n = do
-    ServerInfo _ prefix opts <- ask
-    newSegments              <- mkUrlSegments n
+    ServerInfo _ _ prefix opts <- ask
+    newSegments                <- mkUrlSegments n
     let urlSegments = prefix <> newSegments
     pure . StrTyLit . mconcat $ urlSegments ^.. folded . typed
 
@@ -277,7 +290,16 @@ enterApiPiece p m = do
 mkServerFromSpec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkServerFromSpec spec = enterApi spec $ do
     endpoints <- mconcat <$> traverse mkApiPiece (spec ^. typed @[ApiPiece])
-    apiDec    <- pure [] -- undefined
+    apiDec    <- do
+        apiTypeName      <- askApiTypeName
+        epTypeAliasNames <- traverse (\p -> enterApiPiece p $ askApiTypeName)
+                                     (spec ^. typed @[ApiPiece])
+        case epTypeAliasNames of
+            []     -> pure []
+            x : xs -> do
+                let fish :: Type -> Name -> Q Type
+                    fish b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
+                pure . TySynD apiTypeName [] <$> lift (foldM fish (ConT x) xs)
     serverDec <- pure [] -- undefined
     pure $ apiDec <> serverDec <> endpoints
   where
@@ -303,6 +325,15 @@ mkServerFromSpec spec = enterApi spec $ do
         epTypeName <- askApiTypeName
         pure $ TySynD epTypeName [] ty
 
+--mkApiDec :: Name -> [Name] -> Q Dec
+--mkApiDec apiName apiPieceNames = do
+--    TySynD apiName [] <$> case apiPieceNames of
+--        []     -> error "Server has no endpoints"
+--        x : xs -> do
+--            foldM f (ConT x) xs
+--  where
+--    f :: Type -> Name -> Q Type
+--    f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
 prependServerEndpointName :: [UrlSegment] -> Type -> Q Type
 prependServerEndpointName prefix rest = do
     foldr (\a b -> [t| $(pure a) :> $b |])
