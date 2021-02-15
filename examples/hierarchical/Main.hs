@@ -157,23 +157,25 @@ $(mkCmdServer defaultApiOptions ''StoreCmd)
 -- Store queries -------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 
-data StoreQuery a where
-    ListItems ::Maybe SearchTerm -> StoreQuery [(ItemKey, Item)]
-    LookupItem ::ItemKey -> StoreQuery Item
-
-runStoreQuery :: QueryHandler StoreModel StoreQuery StoreError
-runStoreQuery m = \case
-    ListItems  _    -> pure . Right $ M.toList m
-    LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
-
+--data StoreQuery a where
+--    ListItems ::Maybe SearchTerm -> StoreQuery [(ItemKey, Item)]
+--    LookupItem ::ItemKey -> StoreQuery Item
+--
+--runStoreQuery :: QueryHandler StoreModel StoreQuery StoreError
+--runStoreQuery m = \case
+--    ListItems  _    -> pure . Right $ M.toList m
+--    LookupItem iKey -> pure $ maybe (Left NoSuchItem) Right $ M.lookup iKey m
+--
 -- $(mkQueryServer defaultApiOptions ''StoreQuery)
 
 -- We can assemble the individual APIs as we would with any other Servant APIs.
-type Api = StoreCmdApi :<|> StoreQueryApi
+type Api = StoreCmdApi -- :<|> StoreQueryApi
 
 -- The complete server require both the a CommandRunner and a QueryRunner
-server :: QueryRunner StoreQuery -> CmdRunner StoreCmd -> Server Api
-server queryRunner cmdRunner = storeCmdServer cmdRunner :<|> storeQueryServer queryRunner
+--server :: QueryRunner StoreQuery -> CmdRunner StoreCmd -> Server Api
+--server queryRunner cmdRunner = storeCmdServer cmdRunner :<|> storeQueryServer queryRunner
+server :: CmdRunner StoreCmd -> Server Api
+server = storeCmdServer
 
 
 -- | Start a server running on port 8765
@@ -186,5 +188,4 @@ main = do
     -- Print the API documentation before starting the server
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
-    run 8765 $ serve (Proxy @Api)
-                     (server (runQuery dm runStoreQuery) (runCmd dm handleStoreCmd))
+    run 8765 $ serve (Proxy @Api) (server (runCmd dm handleStoreCmd))

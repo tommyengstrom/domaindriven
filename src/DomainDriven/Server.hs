@@ -61,6 +61,9 @@ newtype UrlSegment = UrlSegment String
 newtype ConstructorArgs = ConstructorArgs [Type]
     deriving (Show, Generic, Eq)
 
+newtype Runner = Runner Type
+    deriving (Show, Generic, Eq)
+
 --    pure . StrTyLit . show $ s & unqualifiedString <>~ "Body"
 --
 --
@@ -284,24 +287,72 @@ enterApiPiece p m = do
 
     local extendServerInfo m
 
+--        case (ep, serverType spec) of
+--            (Endpoint e, CmdServer  ) -> mkCmdEPHandler runnerTy e
+--            (SubApi   e, _          ) -> mkSubAPiHandler runnerTy e
 
 ---- | This is the only layer of the ReaderT stack where we do not use `local` to update the
 ---- url segments.
 mkServerFromSpec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkServerFromSpec spec = enterApi spec $ do
-    endpoints <- mconcat <$> traverse mkApiPiece (spec ^. typed @[ApiPiece])
-    apiDec    <- do
-        apiTypeName      <- askApiTypeName
+    apiTypeName <- askApiTypeName
+    serverName  <- askServerName
+    apiTypeDec  <- do
         epTypeAliasNames <- traverse (\p -> enterApiPiece p $ askApiTypeName)
                                      (spec ^. typed @[ApiPiece])
         case epTypeAliasNames of
-            []     -> pure []
+            []     -> error "Server contains no endpoints"
             x : xs -> do
                 let fish :: Type -> Name -> Q Type
                     fish b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
-                pure . TySynD apiTypeName [] <$> lift (foldM fish (ConT x) xs)
-    serverDec <- pure [] -- undefined
-    pure $ apiDec <> serverDec <> endpoints
+                TySynD apiTypeName [] <$> lift (foldM fish (ConT x) xs)
+    epTypeDecs <- mconcat <$> traverse mkApiPiece (spec ^. typed @[ApiPiece])
+
+    runner     <- lift $ mkRunner spec
+    serverDec  <- do
+        runnerName <- lift $ newName "runner_"
+        ret        <- lift [t| Server $(pure $ ConT apiTypeName) |]
+        let serverSigDec :: Dec
+            serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
+
+            mkHandlerExp :: ApiPiece -> ReaderT ServerInfo Q Exp
+            mkHandlerExp p = enterApiPiece p $ do
+                n <- askServerName
+                pure $ VarE n `AppE` VarE runnerName
+
+        handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
+        body     <- case handlers of
+            []     -> error "Server contains no endpoints"
+            e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+        let serverFunDec :: Dec
+            serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
+        pure [serverSigDec, serverFunDec]
+
+    serverHandlerDecs <- mconcat <$> traverse
+        (mkApiPieceHandler runner (spec ^. typed @GadtName))
+        (spec ^. typed @[ApiPiece])
+    let bogus s = DataD
+            []
+            (  mkName
+            $  s
+            <> "________________________________________"
+            <> spec
+            ^. typed @GadtName
+            .  typed
+            .  unqualifiedString
+            <> "________________________________________"
+            )
+            []
+            Nothing
+            []
+            []
+    pure
+        $  bogus "Start"
+        :  apiTypeDec
+        :  epTypeDecs
+        <> serverDec
+        <> serverHandlerDecs
+        <> [bogus "End"]
   where
     mkApiPiece :: ApiPiece -> ReaderT ServerInfo Q [Dec]
     mkApiPiece p = enterApiPiece p $ do
@@ -325,15 +376,127 @@ mkServerFromSpec spec = enterApi spec $ do
         epTypeName <- askApiTypeName
         pure $ TySynD epTypeName [] ty
 
---mkApiDec :: Name -> [Name] -> Q Dec
---mkApiDec apiName apiPieceNames = do
---    TySynD apiName [] <$> case apiPieceNames of
---        []     -> error "Server has no endpoints"
---        x : xs -> do
---            foldM f (ConT x) xs
+
+mkRunner :: ApiSpec -> Q Runner
+mkRunner spec = fmap Runner [t| CmdRunner $(pure $ ConT cmdName) |]
+  where
+    cmdName :: Name
+    cmdName = spec ^. field @"gadtName" . typed @Name
+
+mkApiPieceHandler :: Runner -> GadtName -> ApiPiece -> ReaderT ServerInfo Q [Dec]
+mkApiPieceHandler (Runner runnerType) gadtName apiPiece = enterApiPiece apiPiece $ do
+    case apiPiece of
+        Endpoint cName cArgs ty -> do
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            varNames       <- lift $ replicateM nrArgs (newName "arg")
+            handlerRetType <- lift [t| Handler $(pure ty) |]
+            handlerName    <- askServerName
+            bodyTag        <- askBodyTag cName
+            runnerName     <- lift $ newName "runner"
+            let varPat :: Pat
+                varPat = ConP nfName (fmap VarP varNames)
+
+                nfName :: Name
+                nfName = mkName $ "NamedFields" <> show nrArgs
+
+                funSig :: Dec
+                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+                    ConstructorArgs [] -> handlerRetType
+                    ConstructorArgs as ->
+                        let nfType :: Type
+                            nfType = AppT (ConT nfName) (LitT bodyTag)
+                        in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
+
+                funBodyBase = AppE (VarE runnerName) $ foldl
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (fmap VarE varNames)
+
+                funBody = case ty of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                (normalB [| liftIO $ $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        SubApi cName cArgs spec -> do
+            pure []
+
+--mkCmdEPHandler :: Type -> EndpointData -> ReaderT [Name] Q [Dec]
+--mkCmdEPHandler runnerTy e = local (<> e ^. typed) $ do
+--    varNames <- lift $ traverse (const $ newName "arg") $ e ^. field @"constructorArgs"
+--    handlerRetType <- lift [t| Handler $(pure $ e ^. field @"handlerReturnType") |]
+--    handlerName    <- askHandlerName
+--    bodyTag        <- askBodyTag
+--    let varPat = ConP nfName (fmap VarP varNames)
+--        nfName = mkName $ "NamedFields" <> show (length varNames)
+--        nrArgs = length @[] $ e ^. field @"constructorArgs"
+--        funSig =
+--            SigD handlerName
+--                . AppT (AppT ArrowT runnerTy)
+--                $ case e ^. field @"constructorArgs" of
+--                      [] -> handlerRetType
+--                      as ->
+--                          let nfType :: Type
+--                              nfType = AppT (ConT nfName) (LitT bodyTag)
+--                          in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
+--
+--        funBodyBase = AppE (VarE runner)
+--            $ foldl AppE (ConE $ e ^. field @"gadtName") (fmap VarE varNames)
+--
+--        funBody = case e ^. field @"returnType" of
+--            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+--            _        -> pure $ funBodyBase
+--    funClause <- lift $ clause
+--        (pure (VarP runner) : (if nrArgs > 0 then [pure $ varPat] else []))
+--        (normalB [| liftIO $ $(funBody)  |])
+--        []
+--    let funDef = FunD handlerName [funClause]
+--    pure [funSig, funDef]
 --  where
---    f :: Type -> Name -> Q Type
---    f b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
+--    runner :: Name
+--    runner = mkName "runner"
+--
+--mkSubAPiHandler :: Type -> ApiData -> ReaderT [Name] Q [Dec]
+--mkSubAPiHandler runnerTy e = local (<> e ^. typed) $ do
+--    runner <- lift $ newName "runner"
+--
+--    serverName <- askServerName
+--    apiTypeName <- askApiTypeName
+--    paramNames  <- traverse (const (lift $ newName "arg")) $ e ^. field @"constructorArgs"
+--
+--    finalSig <- lift [t| Server $(pure $ ConT apiTypeName) |]
+--    params <- case e ^. field @"constructorArgs" of
+--        [] -> lift [t| $(pure runnerTy) -> $(pure finalSig) |]
+--        [a] -> lift [t| $(pure runnerTy) -> $(pure a) -> $(pure finalSig) |]
+--        ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
+--                    (runnerTy : ts <> [finalSig])
+--    funSig <- SigD serverName <$> pure params
+--
+--    funClause <- case fmap VarE paramNames of
+--        [] -> lift $ clause
+--                [varP runner]
+--                (fmap NormalB
+--                      [e| $(varE $ e ^. field @"subApi" . typed)
+--                             $ $(pure $ VarE runner)
+--                             . $(pure . ConE $ e ^. field @"gadtName") |]
+--                )
+--                []
+--        ts ->
+--            let cmd = foldl (\b a -> AppE b a) (ConE $ e ^. field @"gadtName") ts
+--             in lift $ clause
+--                  (varP <$>  runner : paramNames)
+--                  (fmap NormalB
+--                        [e| $(varE runner)
+--                                . $(pure cmd)
+--                        |]
+--                  )
+--                  []
+--    let funDef = FunD serverName [funClause]
+--    pure [funSig, funDef]
+
 prependServerEndpointName :: [UrlSegment] -> Type -> Q Type
 prependServerEndpointName prefix rest = do
     foldr (\a b -> [t| $(pure a) :> $b |])
