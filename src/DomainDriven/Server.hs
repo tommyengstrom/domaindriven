@@ -20,9 +20,12 @@ import qualified Data.List                                    as L
 import           Servant
 import           Data.Traversable
 import           Data.Char
+import           DomainDriven.Internal.HasFieldName
+                                                ( HasFieldName(..) )
 import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
+import           Data.Generics.Sum
 import           GHC.Generics                   ( Generic )
 import           DomainDriven.Internal.NamedFields
 import           Control.Monad.Reader
@@ -315,11 +318,40 @@ mkServerFromSpec spec = enterApi spec $ do
         -- epTypeAliasNames <- traverse askApiPieceTypeName (spec ^. typed @[ApiPiece])
         let mkApiPieceType :: ApiPiece -> ReaderT ServerInfo Q Type
             mkApiPieceType p = enterApiPiece p $ case p of
-                Endpoint{}       -> ConT <$> askEndpointTypeName
-                SubApi cName _ _ -> do
+                Endpoint{}           -> ConT <$> askEndpointTypeName
+                SubApi cName cArgs _ -> do
                     urlSegments <- mkUrlSegments cName
                     n           <- askApiTypeName
-                    lift $ prependServerEndpointName urlSegments (ConT n)
+                    -- FIXME: This should use `fieldName` but I don't know how.
+                    let mkCapture :: Type -> Q Type
+                        mkCapture ty =
+                            let tyLit = pure $ mkLitType ty
+                            in  [t| Capture $tyLit $(pure ty) |]
+
+
+                        mkLitType :: Type -> Type
+                        mkLitType = \case
+                            VarT n -> LitT . StrTyLit $ n ^. unqualifiedString
+                            ConT n -> LitT . StrTyLit $ n ^. unqualifiedString
+                            _      -> LitT $ StrTyLit "unknown"
+
+
+
+                    finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
+
+                    case cArgs of
+                        ConstructorArgs ts -> lift $ do
+                            captures <- traverse mkCapture ts
+                            bird     <- [t| (:>) |]
+                            pure $ foldr (\a b -> bird `AppT` a `AppT` b)
+                                         finalType
+                                         captures
+                            --firstCapture  <- mkCapture t
+                            --otherCaptures <- traverse mkCapture ts
+                            --foldM (\b a -> [t| $(pure b) :> $(pure a) |])
+                            --      firstCapture
+                            --      (otherCaptures <> [ConT n])
+
         epTypes <- traverse mkApiPieceType (spec ^. typed @[ApiPiece])
         case epTypes of
             []     -> error "Server contains no endpoints"
@@ -372,10 +404,7 @@ mkServerFromSpec spec = enterApi spec $ do
             (  mkName
             $  s
             <> "________________________________________"
-            <> spec
-            ^. typed @GadtName
-            .  typed
-            .  unqualifiedString
+            <> show apiTypeName
             <> "________________________________________"
             )
             []

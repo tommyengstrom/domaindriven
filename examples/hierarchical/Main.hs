@@ -33,9 +33,11 @@ import           Servant.OpenApi
 
 
 data StoreCmd a where
-  AddItem ::Item -> StoreCmd ()
-  RemoveItem ::ItemKey -> StoreCmd ()
-  UpdateItem ::ItemCmd a -> StoreCmd a
+--  AddItem ::Item -> StoreCmd ()
+--  RemoveItem ::ItemKey -> StoreCmd ()
+--  UpdateItem ::ItemCmd a -> StoreCmd a
+  ManipulateItem ::ItemKey -> ItemCmd a -> StoreCmd a
+
 
 data ItemCmd a where
   ChangeDescription ::Description -> ItemCmd ()
@@ -119,35 +121,19 @@ applyStoreEvent m se@(Stored event _timestamp _uuid) = case event of
 
 handleStoreCmd :: CmdHandler StoreModel StoreEvent StoreCmd StoreError
 handleStoreCmd = \case
-    AddItem i -> do
-        iKey <- ItemKey <$> mkId
-        pure $ \_ -> Right ((), [AddedItem iKey i])
-    RemoveItem iKey -> pure $ \m -> case M.lookup iKey m of
-        Just _  -> Right ((), [RemovedItem iKey])
-        Nothing -> Left NoSuchItem
-    UpdateItem iCmd -> do
-        -- First we have to run the
-        itemContinuation <- handleItemCmd iCmd
-        pure $ \m -> case M.toList m of
-            (iKey, i) : _ ->
-                bimap
-                        StoreItemError
-                        (\(returnValue, listOfEvents) ->
-                            (returnValue, fmap (UpdatedItem iKey) listOfEvents)
-                        )
-                    $ itemContinuation i
-            [] -> Left NoSuchItem
+    --AddItem i -> do
+    --    putStrLn "AddItem"
+    --    iKey <- ItemKey <$> mkId
+    --    pure $ \_ -> Right ((), [AddedItem iKey i])
+    --RemoveItem iKey -> do
+    --    putStrLn "RemoveItem"
+    --    pure $ \m -> case M.lookup iKey m of
+    --        Just _  -> Right ((), [RemovedItem iKey])
+    --        Nothing -> Left NoSuchItem
+    --UpdateItem _       -> putStrLn "UpdateItem" *> undefined
+    ManipulateItem _ _ -> putStrLn "ManipulateItem" *> undefined
 
 $(mkCmdServer defaultApiOptions ''StoreCmd)
-
-
-
-
-
-
-
-
-
 
 
 
@@ -191,4 +177,4 @@ main = do
     -- Print the API documentation before starting the server
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
-    run 8765 $ serve (Proxy @Api) (server (runCmd dm handleStoreCmd))
+    run 8888 $ serve (Proxy @Api) (server (runCmd dm handleStoreCmd))
