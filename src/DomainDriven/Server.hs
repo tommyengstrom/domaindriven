@@ -23,7 +23,6 @@ import           Data.Char
 import           Control.Monad.Trans
 import           Control.Lens
 import           Data.Generics.Product
-import           Data.Generics.Sum
 import           GHC.Generics                   ( Generic )
 import           DomainDriven.Internal.NamedFields
 import           Control.Monad.Reader
@@ -44,10 +43,14 @@ data ApiOptions = ApiOptions
     { renameConstructor :: String -> [String]
     , typenameSeparator :: String
     }
-    deriving (Show, Generic)
+    deriving Generic
 
-instance Show (String -> [String]) where
-    show _ = "some function"
+instance Show ApiOptions  where
+    show o =
+        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
+            <> o
+            ^. field @"typenameSeparator"
+            <> "\"}"
 
 newtype ConstructorName = ConstructorName Name
     deriving (Show, Generic, Eq)
@@ -245,11 +248,18 @@ askTypeName = do
 askApiTypeName :: Monad m => ReaderT ServerInfo m Name
 askApiTypeName = (unqualifiedString <>~ "Api") <$> askTypeName
 
+askEndpointTypeName :: Monad m => ReaderT ServerInfo m Name
+askEndpointTypeName = (unqualifiedString <>~ "Endpoint") <$> askTypeName
+
 askServerName :: Monad m => ReaderT ServerInfo m Name
 askServerName =
     (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Server")
         <$> askTypeName
 
+askHandlerName :: Monad m => ReaderT ServerInfo m Name
+askHandlerName =
+    (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler")
+        <$> askTypeName
 -- askHandlerName :: Monad m => Name -> ReaderT [Name] m Name
 -- askHandlerName n =
 --     (unqualifiedString <>~ "Handler")
@@ -265,8 +275,8 @@ askServerName =
 ------------------------------------------------------------------------------------------
 askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
 askBodyTag n = do
-    ServerInfo _ _ prefix opts <- ask
-    newSegments                <- mkUrlSegments n
+    prefix      <- asks (view $ typed @[UrlSegment])
+    newSegments <- mkUrlSegments n
     let urlSegments = prefix <> newSegments
     pure . StrTyLit . mconcat $ urlSegments ^.. folded . typed
 
@@ -298,8 +308,12 @@ mkServerFromSpec spec = enterApi spec $ do
     apiTypeName <- askApiTypeName
     serverName  <- askServerName
     apiTypeDec  <- do
-        epTypeAliasNames <- traverse (\p -> enterApiPiece p $ askApiTypeName)
-                                     (spec ^. typed @[ApiPiece])
+        let kuken :: ApiPiece -> ReaderT ServerInfo Q Name
+            kuken p = enterApiPiece p $ case p of
+                Endpoint{} -> askEndpointTypeName
+                SubApi{}   -> askApiTypeName
+
+        epTypeAliasNames <- traverse kuken (spec ^. typed @[ApiPiece])
         case epTypeAliasNames of
             []     -> error "Server contains no endpoints"
             x : xs -> do
@@ -324,8 +338,13 @@ mkServerFromSpec spec = enterApi spec $ do
 
             mkHandlerExp :: ApiPiece -> ReaderT ServerInfo Q Exp
             mkHandlerExp p = enterApiPiece p $ do
-                n <- askServerName
-                pure $ VarE n `AppE` VarE runnerName
+                case p of
+                    Endpoint _ _ _ -> do
+                        n <- askHandlerName
+                        pure $ VarE n `AppE` VarE runnerName
+                    SubApi _ _ _ -> do
+                        n <- askServerName
+                        pure $ VarE n `AppE` VarE runnerName
 
         handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
         body     <- case handlers of
@@ -371,7 +390,7 @@ mkServerFromSpec spec = enterApi spec $ do
                 Just b  -> lift [t| $(pure b) :>  $(pure reqReturn) |]
             urlSegments <- mkUrlSegments name
             lift $ prependServerEndpointName urlSegments middle
-        epTypeName <- askApiTypeName
+        epTypeName <- askEndpointTypeName
         pure $ TySynD epTypeName [] ty
 
 
@@ -394,7 +413,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
-            handlerName    <- askServerName
+            handlerName    <- askHandlerName
             bodyTag        <- askBodyTag cName
             runnerName     <- lift $ newName "runner"
             let varPat :: Pat
@@ -424,42 +443,43 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        SubApi cName cArgs spec -> do
-            let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
-            varNames       <- lift $ replicateM nrArgs (newName "arg")
-            serverName    <- askServerName
-            apiTypeName <- askApiTypeName
-            targetApiTypeName <- enterApi spec askApiTypeName
-            runnerName     <- lift $ newName "runner"
+        SubApi{} -> pure [] -- Generated separately
+        --SubApi cName cArgs spec -> do
+        --    let nrArgs :: Int
+        --        nrArgs = length $ cArgs ^. typed @[Type]
+        --    varNames       <- lift $ replicateM nrArgs (newName "arg")
+        --    serverName    <- askServerName
+        --    apiTypeName <- askApiTypeName
+        --    targetApiTypeName <- enterApi spec askApiTypeName
+        --    runnerName     <- lift $ newName "runner"
 
-            funSig <- lift $ do
-                returnSig <- [t| Server $(pure $ ConT apiTypeName) |]
-                params <- case cArgs ^. typed of
-                    [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
-                    [a] -> [t| $(pure runnerType) -> $(pure a) -> $(pure returnSig) |]
-                    ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
-                                (runnerType : ts <> [returnSig])
-                SigD serverName <$> pure params
+        --    funSig <- lift $ do
+        --        returnSig <- [t| Server $(pure $ ConT apiTypeName) |]
+        --        params <- case cArgs ^. typed of
+        --            [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
+        --            [a] -> [t| $(pure runnerType) -> $(pure a) -> $(pure returnSig) |]
+        --            ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
+        --                        (runnerType : ts <> [returnSig])
+        --        SigD serverName <$> pure params
 
 
-            funClause <- lift $ case fmap VarE varNames of
-                [] -> clause
-                        [varP runnerName]
-                        (fmap NormalB
-                              [e| $(varE targetApiTypeName)
-                                     $ $(pure $ VarE runnerName)
-                                     . $(pure . ConE $ cName ^. typed) |]
-                        )
-                        []
-                ts ->
-                    let cmd = foldl (\b a -> AppE b a) (ConE $ cName ^. typed) ts
-                     in clause
-                          (varP <$>  runnerName : varNames)
-                          (fmap NormalB [e| $(varE runnerName) . $(pure cmd) |])
-                          []
-            let funDef = FunD serverName [funClause]
-            pure [funSig, funDef]
+        --    funClause <- lift $ case fmap VarE varNames of
+        --        [] -> clause
+        --                [varP runnerName]
+        --                (fmap NormalB
+        --                      [e| $(varE targetApiTypeName)
+        --                             $ $(pure $ VarE runnerName)
+        --                             . $(pure . ConE $ cName ^. typed) |]
+        --                )
+        --                []
+        --        ts ->
+        --            let cmd = foldl (\b a -> AppE b a) (ConE $ cName ^. typed) ts
+        --             in clause
+        --                  (varP <$>  runnerName : varNames)
+        --                  (fmap NormalB [e| $(varE runnerName) . $(pure cmd) |])
+        --                  []
+        --    let funDef = FunD serverName [funClause]
+        --    pure [funSig, funDef]
 --
 --mkSubAPiHandler :: Type -> ApiData -> ReaderT [Name] Q [Dec]
 --mkSubAPiHandler runnerTy e = local (<> e ^. typed) $ do

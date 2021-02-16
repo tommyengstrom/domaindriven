@@ -10,12 +10,7 @@ import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
 import           Data.Bifunctor                 ( bimap )
-import           Servant                        ( serve
-                                                , FromHttpApiData
-                                                , Proxy(..)
-                                                , Server
-                                                , (:<|>)(..)
-                                                )
+import           Servant                 hiding ( Description )
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
@@ -33,6 +28,19 @@ import           Data.OpenApi                   ( ToSchema
                                                 , ToParamSchema
                                                 )
 import           Servant.OpenApi
+
+
+
+
+data StoreCmd a where
+  AddItem ::Item -> StoreCmd ()
+  RemoveItem ::ItemKey -> StoreCmd ()
+  UpdateItem ::ItemKey -> ItemCmd a -> StoreCmd a
+
+data ItemCmd a where
+  ChangeDescription ::Description -> ItemCmd ()
+  ChangePrice ::Price -> ItemCmd ()
+
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
@@ -57,9 +65,6 @@ newtype Price = EUR Int
     deriving stock (Generic)
     deriving anyclass (HasFieldName)
 
-data ItemCmd a where
-    ChangeDescription ::Description -> ItemCmd ()
-    ChangePrice ::Price -> ItemCmd ()
 data ItemEvent
     = ChangedDescription Description
     | ChangedPrice Price
@@ -93,11 +98,6 @@ handleItemCmd = \case
 -- Store model ---------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
 type StoreModel = M.Map ItemKey Item
-
-data StoreCmd a where
-   AddItem ::Item -> StoreCmd ()
-   RemoveItem ::ItemKey -> StoreCmd ()
-   UpdateItem ::ItemKey -> ItemCmd a -> StoreCmd a
 
 data StoreEvent
     = AddedItem ItemKey Item
@@ -142,7 +142,6 @@ handleStoreCmd = \case
             Nothing -> Left NoSuchItem
 
 $(mkCmdServer defaultApiOptions ''StoreCmd)
-
 -- $(mkCmdServer
 --    ServerOptions
 --        { renameConstructor = \case
