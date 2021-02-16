@@ -341,11 +341,15 @@ mkServerFromSpec spec = enterApi spec $ do
 
                     case cArgs of
                         ConstructorArgs ts -> lift $ do
-                            captures <- traverse mkCapture ts
-                            bird     <- [t| (:>) |]
+                            capturesWithTitles <- do
+                                captures <- traverse mkCapture ts
+                                pure . mconcat $ zipWith (\a b -> [mkLitType a, b])
+                                                         ts
+                                                         captures
+                            bird <- [t| (:>) |]
                             pure $ foldr (\a b -> bird `AppT` a `AppT` b)
                                          finalType
-                                         captures
+                                         capturesWithTitles
                             --firstCapture  <- mkCapture t
                             --otherCaptures <- traverse mkCapture ts
                             --foldM (\b a -> [t| $(pure b) :> $(pure a) |])
