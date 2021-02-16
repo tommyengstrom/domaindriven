@@ -307,18 +307,26 @@ mkServerFromSpec spec = enterApi spec $ do
     apiTypeName <- askApiTypeName
     serverName  <- askServerName
     apiTypeDec  <- do
-        let askApiPieceTypeName :: ApiPiece -> ReaderT ServerInfo Q Name
-            askApiPieceTypeName p = enterApiPiece p $ case p of
-                Endpoint{} -> askEndpointTypeName
-                SubApi{}   -> askApiTypeName
+        -- let askApiPieceTypeName :: ApiPiece -> ReaderT ServerInfo Q Name
+        --     askApiPieceTypeName p = enterApiPiece p $ case p of
+        --         Endpoint{} -> askEndpointTypeName
+        --         SubApi{}   -> askApiTypeName
 
-        epTypeAliasNames <- traverse askApiPieceTypeName (spec ^. typed @[ApiPiece])
-        case epTypeAliasNames of
+        -- epTypeAliasNames <- traverse askApiPieceTypeName (spec ^. typed @[ApiPiece])
+        let mkApiPieceType :: ApiPiece -> ReaderT ServerInfo Q Type
+            mkApiPieceType p = enterApiPiece p $ case p of
+                Endpoint{}       -> ConT <$> askEndpointTypeName
+                SubApi cName _ _ -> do
+                    urlSegments <- mkUrlSegments cName
+                    n           <- askApiTypeName
+                    lift $ prependServerEndpointName urlSegments (ConT n)
+        epTypes <- traverse mkApiPieceType (spec ^. typed @[ApiPiece])
+        case epTypes of
             []     -> error "Server contains no endpoints"
-            x : xs -> do
-                let fish :: Type -> Name -> Q Type
-                    fish b a = [t| $(pure b) :<|> $(pure $ ConT a) |]
-                TySynD apiTypeName [] <$> lift (foldM fish (ConT x) xs)
+            t : ts -> do
+                let fish :: Type -> Type -> Q Type
+                    fish b a = [t| $(pure b) :<|> $(pure a) |]
+                TySynD apiTypeName [] <$> lift (foldM fish t ts)
     epTypeDecs <- fmap mconcat $ for (spec ^. typed @[ApiPiece]) $ \p ->
         enterApiPiece p $ do
             case p of
