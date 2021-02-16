@@ -35,7 +35,7 @@ import           Servant.OpenApi
 data StoreCmd a where
   AddItem ::Item -> StoreCmd ()
   RemoveItem ::ItemKey -> StoreCmd ()
-  UpdateItem ::ItemKey -> ItemCmd a -> StoreCmd a
+  UpdateItem ::ItemCmd a -> StoreCmd a
 
 data ItemCmd a where
   ChangeDescription ::Description -> ItemCmd ()
@@ -125,32 +125,36 @@ handleStoreCmd = \case
     RemoveItem iKey -> pure $ \m -> case M.lookup iKey m of
         Just _  -> Right ((), [RemovedItem iKey])
         Nothing -> Left NoSuchItem
-    UpdateItem iKey iCmd -> do
+    UpdateItem iCmd -> do
         -- First we have to run the
         itemContinuation <- handleItemCmd iCmd
-        pure $ \m -> case M.lookup iKey m of
-            Just i ->
-                -- We now need to extract the Item data and send it to `itemContinuation`.
-                -- After this is done we need to convert `ItemError` to `StoreError` and
-                -- `ItemEvent` to `StoreEvent`
+        pure $ \m -> case M.toList m of
+            (iKey, i) : _ ->
                 bimap
                         StoreItemError
                         (\(returnValue, listOfEvents) ->
                             (returnValue, fmap (UpdatedItem iKey) listOfEvents)
                         )
                     $ itemContinuation i
-            Nothing -> Left NoSuchItem
+            [] -> Left NoSuchItem
 
 $(mkCmdServer defaultApiOptions ''StoreCmd)
--- $(mkCmdServer
---    ServerOptions
---        { renameConstructor = \case
---                                  "AddItem"    -> []
---                                  "RemoveItem" -> ["Remove"]
---                                  "UpdateItem" -> ["Update", "Item"]
---                                  s            -> [s]
---        }
---      ''StoreCmd)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ------------------------------------------------------------------------------------------
 -- Store queries -------------------------------------------------------------------------
