@@ -2,14 +2,14 @@ module DomainDriven.ServerOptions where
 
 import           Prelude
 import           Data.Char                      ( toLower )
-import           DomainDriven.Server            ( ServerOptions(..) )
+import           DomainDriven.Server            ( ApiOptions(..) )
 
 
 
-testServerOptions :: ServerOptions
-testServerOptions = ServerOptions
+testServerOptions :: ApiOptions
+testServerOptions = ApiOptions
     { renameConstructor = \case
                               "AddToCart" -> ["cart", "add"]
                               s           -> [fmap toLower s]
-    , unitIsNoContent   = True
+    , typenameSeparator = "_"
     }

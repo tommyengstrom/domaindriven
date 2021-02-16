@@ -328,14 +328,11 @@ mkServerFromSpec spec = enterApi spec $ do
                             let tyLit = pure $ mkLitType ty
                             in  [t| Capture $tyLit $(pure ty) |]
 
-
                         mkLitType :: Type -> Type
                         mkLitType = \case
                             VarT n -> LitT . StrTyLit $ n ^. unqualifiedString
                             ConT n -> LitT . StrTyLit $ n ^. unqualifiedString
                             _      -> LitT $ StrTyLit "unknown"
-
-
 
                     finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
 
@@ -430,7 +427,7 @@ mkServerFromSpec spec = enterApi spec $ do
             reqBody   <- mkReqBody name args
             reqReturn <- lift $ mkReturnType retType
             middle    <- case reqBody of
-                Nothing -> pure reqReturn
+                Nothing -> lift [t| Post '[JSON] $(pure reqReturn) |]
                 Just b  -> lift [t| $(pure b) :> Post '[JSON] $(pure reqReturn) |]
             urlSegments <- mkUrlSegments name
             lift $ prependServerEndpointName urlSegments middle

@@ -51,7 +51,7 @@ data StoreLookup a where
 
 
 $(mkCmdServer testServerOptions ''StoreCmd)
-$(mkQueryServer defaultServerOptions ''StoreLookup)
+-- $(mkQueryServer defaultApiOptions ''StoreLookup)
 
 type StoreModel = ()
 type StoreEvent = ()
