@@ -33,8 +33,9 @@ data ApiSpec = ApiSpec
     }
     deriving (Show, Generic)
 
+
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs Type
+    = Endpoint ConstructorName ConstructorArgs HandlerSettings Type
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
@@ -50,6 +51,9 @@ instance Show ApiOptions  where
             <> o
             ^. field @"typenameSeparator"
             <> "\"}"
+
+newtype HandlerSettings = HandlerSettings Type
+    deriving (Show, Generic, Eq)
 
 newtype ConstructorName = ConstructorName Name
     deriving (Show, Generic, Eq)
@@ -97,7 +101,7 @@ defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "
 getCmdDec :: GadtName -> Q Dec
 getCmdDec (GadtName n) = do
     cmdType <- reify n
-    let errMsg = error "Must be GADT with one parameter, representing return type."
+    let errMsg = error "Must be GADT with two parameters, HandlerType and return type"
     case cmdType of
         TyConI dec       -> pure dec
         ClassI _ _       -> errMsg
@@ -112,9 +116,9 @@ getCmdDec (GadtName n) = do
 
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
-    DataD _ _ [KindedTV _ StarT] _ constructors _ -> pure constructors
-    DataD _ _ _ _ _ _ -> error "bad data type"
-    _ -> error "Expected a GADT"
+    DataD _ _ [KindedTV _ StarT, KindedTV _ StarT] _ constructors _ -> pure constructors
+    DataD _ _ _ _ _            _ -> error "bad data type"
+    _                            -> error "Expected a GADT with two parameters"
 
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
@@ -122,13 +126,14 @@ unqualifiedString = typed @OccName . typed
 mkApiPiece :: ApiOptions -> Con -> Q ApiPiece
 mkApiPiece opts = \case
     -- The normal case
-    GadtC [gadtName] bangArgs (AppT _ retType) -> do
+    GadtC [gadtName] bangArgs (AppT (AppT _ handlerType) retType) -> do
 
         pure $ Endpoint (ConstructorName gadtName)
                         (ConstructorArgs $ fmap snd bangArgs)
+                        (HandlerSettings handlerType)
                         retType
     -- When the constructor contain references to other domain models
-    ForallC [KindedTV var StarT] [] (GadtC [gadtName] bangArgs (AppT _ _retType)) -> do
+    ForallC [KindedTV var StarT] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _)) -> do
         (args, subCmd') <- case reverse $ fmap snd bangArgs of
             AppT (ConT subCmd') (VarT var') : rest -> do
                 unless (var == var')
@@ -315,7 +320,7 @@ mkEndpointApiType p = enterApiPiece p $ case p of
 mkHandlerTypeDecs :: ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkHandlerTypeDecs p = enterApiPiece p $ do
     case p of
-        Endpoint name args retType -> do
+        Endpoint name args _ retType -> do
             ty <- do
                 reqBody   <- mkReqBody args
                 reqReturn <- lift $ mkReturnType retType
@@ -362,7 +367,7 @@ mkServerDec spec = do
 mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
-        Endpoint _ cArgs ty -> do
+        Endpoint _ cArgs _ ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")

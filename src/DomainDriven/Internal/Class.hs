@@ -10,6 +10,34 @@ import           Data.Time
 import           System.Random
 import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
+import           Servant
+import           GHC.TypeLits
+
+type family Mutating (handler :: Type -> Type -> Type) :: Bool where
+    Mutating (h 'GET a) = 'False
+    Mutating (h 'POST a) = 'True
+
+data AfterUpdate a
+
+class Monad m => HasModel m model where
+    readModel :: m model
+
+-- | This is `Verb` from servant, but without the return type
+data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
+
+type Cmd = HandlerType 'POST 200 '[JSON]
+type Query = HandlerType 'GET 200 '[JSON]
+
+-- Instead of StdMethod I could use something that carries more information, namely
+-- content-type and return code. I could then define type aliases `Cmd` and `Query`
+type family HandlerReturn verb event model a where
+    HandlerReturn (HandlerType 'GET code cts) event model (AfterUpdate a) =
+        TypeError ('Text "GET methods cannot update the model")
+    HandlerReturn (HandlerType 'GET code cts) event model a = a
+    HandlerReturn (HandlerType 'POST code cts) event model (AfterUpdate a) =
+        (model -> a, [event])
+    HandlerReturn (HandlerType 'POST code cts) event model a = (a, [event])
+
 
 class ReadModel a where
     type Model a :: Type
