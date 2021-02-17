@@ -18,7 +18,6 @@ import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Control.Monad
 import qualified Data.List                                    as L
 import           Servant
-import           Data.Traversable
 import           Data.Char
 import           Control.Monad.Trans
 import           Control.Lens
@@ -261,47 +260,48 @@ enterApiPiece p m = do
 -- type SomeApi = Endpoint1
 --           :<|> Endpoint2
 --           :<|> "CustomerKey" :> CustomerKey :> CustomerApi
-mkApiTypeDec :: ApiSpec -> ReaderT ServerInfo Q Dec
-mkApiTypeDec spec = do
+mkApiTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
+mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
-    let mkApiPieceType :: ApiPiece -> ReaderT ServerInfo Q Type
-        mkApiPieceType p = enterApiPiece p $ case p of
-            Endpoint{}           -> ConT <$> askEndpointTypeName
-            SubApi cName cArgs _ -> do
-                urlSegments <- mkUrlSegments cName
-                n           <- askApiTypeName
-                -- FIXME: This should use `fieldName` but I don't know how.
-                let mkCapture :: Type -> Q Type
-                    mkCapture ty =
-                        let tyLit = pure $ mkLitType ty
-                        in  [t| Capture $tyLit $(pure ty) |]
-
-                    mkLitType :: Type -> Type
-                    mkLitType = \case
-                        VarT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
-                        ConT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
-                        _       -> LitT $ StrTyLit "unknown"
-
-                finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
-
-                case cArgs of
-                    ConstructorArgs ts -> lift $ do
-                        capturesWithTitles <- do
-                            captures <- traverse mkCapture ts
-                            pure . mconcat $ zipWith (\a b -> [mkLitType a, b])
-                                                     ts
-                                                     captures
-                        bird <- [t| (:>) |]
-                        pure $ foldr (\a b -> bird `AppT` a `AppT` b)
-                                     finalType
-                                     capturesWithTitles
-    epTypes <- traverse mkApiPieceType (spec ^. typed @[ApiPiece])
-    case epTypes of
+    epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
+    topLevelDec <- case epTypes of
         []     -> error "Server contains no endpoints"
         t : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t| $(pure b) :<|> $(pure a) |]
             TySynD apiTypeName [] <$> lift (foldM fish t ts)
+    handlerDecs <- mconcat <$> traverse mkHandlerTypeDecs (spec ^. typed @[ApiPiece])
+    pure $ topLevelDec : handlerDecs
+
+-- | Create endpoint types to be referenced in the API
+-- * For Endpoint this is just a reference to the handler type
+-- * For SubApi we apply the path parameters before referencing the SubApi
+mkEndpointApiType :: ApiPiece -> ReaderT ServerInfo Q Type
+mkEndpointApiType p = enterApiPiece p $ case p of
+    Endpoint{}           -> ConT <$> askEndpointTypeName
+    SubApi cName cArgs _ -> do
+        urlSegments <- mkUrlSegments cName
+        n           <- askApiTypeName
+        -- FIXME: This should use `fieldName` but I don't know how.
+        let mkCapture :: Type -> Q Type
+            mkCapture ty =
+                let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
+
+            mkLitType :: Type -> Type
+            mkLitType = \case
+                VarT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
+                ConT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
+                _       -> LitT $ StrTyLit "unknown"
+
+        finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
+
+        case cArgs of
+            ConstructorArgs ts -> lift $ do
+                capturesWithTitles <- do
+                    captures <- traverse mkCapture ts
+                    pure . mconcat $ zipWith (\a b -> [mkLitType a, b]) ts captures
+                bird <- [t| (:>) |]
+                pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType capturesWithTitles
 
 -- | Defines the servant types for the endpoints
 -- For SubApi it will trigger the full creating of the sub server with types and all
@@ -312,86 +312,50 @@ mkApiTypeDec spec = do
 --     = "Create"
 --     :> ReqBody '[JSON] (NamedField1 "Customer_Create" Name Email)
 --     :> Post '[JSON] CustomerKey
-mkHandlerTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
-mkHandlerTypeDecs spec = do
-    fmap mconcat $ for (spec ^. typed @[ApiPiece]) $ \p -> enterApiPiece p $ do
-        case p of
-            Endpoint name args retType -> do
-                ty <- do
-                    reqBody   <- mkReqBody args
-                    reqReturn <- lift $ mkReturnType retType
-                    middle    <- case reqBody of
-                        Nothing -> lift [t| Post '[JSON] $(pure reqReturn) |]
-                        Just b  -> lift [t| $(pure b) :> Post '[JSON] $(pure reqReturn) |]
-                    urlSegments <- mkUrlSegments name
-                    lift $ prependServerEndpointName urlSegments middle
-                epTypeName <- askEndpointTypeName
-                pure [TySynD epTypeName [] ty]
-            SubApi _name _args spec' -> mkServerFromSpec spec'
+mkHandlerTypeDecs :: ApiPiece -> ReaderT ServerInfo Q [Dec]
+mkHandlerTypeDecs p = enterApiPiece p $ do
+    case p of
+        Endpoint name args retType -> do
+            ty <- do
+                reqBody   <- mkReqBody args
+                reqReturn <- lift $ mkReturnType retType
+                middle    <- case reqBody of
+                    Nothing -> lift [t| Post '[JSON] $(pure reqReturn) |]
+                    Just b  -> lift [t| $(pure b) :> Post '[JSON] $(pure reqReturn) |]
+                urlSegments <- mkUrlSegments name
+                lift $ prependServerEndpointName urlSegments middle
+            epTypeName <- askEndpointTypeName
+            pure [TySynD epTypeName [] ty]
+        SubApi _name _args spec' -> mkServerFromSpec spec'
 
----- | This is the only layer of the ReaderT stack where we do not use `local` to update the
----- url segments.
-mkServerFromSpec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
-mkServerFromSpec spec = enterApi spec $ do
+-- | Declare then handlers for the API
+mkServerDec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
+mkServerDec spec = do
     apiTypeName <- askApiTypeName
     serverName  <- askServerName
-    apiTypeDec  <- mkApiTypeDec spec
-    epTypeDecs  <- mkHandlerTypeDecs spec
 
     runner      <- lift $ mkRunner spec
-    serverDec   <- do
-        runnerName <- lift $ newName "runner_"
-        ret        <- lift [t| Server $(pure $ ConT apiTypeName) |]
-        let serverSigDec :: Dec
-            serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
+    runnerName  <- lift $ newName "runner_"
+    ret         <- lift [t| Server $(pure $ ConT apiTypeName) |]
+    let serverSigDec :: Dec
+        serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
 
-            mkHandlerExp :: ApiPiece -> ReaderT ServerInfo Q Exp
-            mkHandlerExp p = enterApiPiece p $ do
-                n <- askHandlerName
-                pure $ VarE n `AppE` VarE runnerName
+        mkHandlerExp :: ApiPiece -> ReaderT ServerInfo Q Exp
+        mkHandlerExp p = enterApiPiece p $ do
+            n <- askHandlerName
+            pure $ VarE n `AppE` VarE runnerName
 
-        handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
-        body     <- case handlers of
-            []     -> error "Server contains no endpoints"
-            e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
-        let serverFunDec :: Dec
-            serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
-        pure [serverSigDec, serverFunDec]
-
+    handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
+    body     <- case handlers of
+        []     -> error "Server contains no endpoints"
+        e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+    let serverFunDec :: Dec
+        serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <- mconcat
         <$> traverse (mkApiPieceHandler runner) (spec ^. typed @[ApiPiece])
-    let bogus s = DataD
-            []
-            (  mkName
-            $  s
-            <> "________________________________________"
-            <> show apiTypeName
-            <> "________________________________________"
-            )
-            []
-            Nothing
-            []
-            []
-    pure
-        $  bogus "Start"
-        :  apiTypeDec
-        :  serverDec
-        <> epTypeDecs
-        <> serverHandlerDecs
-        <> [bogus "End"]
 
+    pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
-mkRunner :: ApiSpec -> Q Runner
-mkRunner spec = fmap Runner [t| CmdRunner $(pure $ ConT cmdName) |]
-  where
-    cmdName :: Name
-    cmdName = spec ^. field @"gadtName" . typed @Name
-
--- | Handles the special case of `()` being transformed into `NoContent`
-mkReturnType :: Type -> Q Type
-mkReturnType = \case
-    TupleT 0 -> [t| NoContent |]
-    ty       -> pure ty
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
@@ -462,6 +426,26 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                       []
             let funDef = FunD handlerName [funClause]
             pure [funSig, funDef]
+---- | This is the only layer of the ReaderT stack where we do not use `local` to update the
+---- url segments.
+mkServerFromSpec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
+mkServerFromSpec spec = enterApi spec $ do
+    apiTypeDecs <- mkApiTypeDecs spec
+    serverDecs  <- mkServerDec spec
+    pure $ apiTypeDecs <> serverDecs
+
+
+mkRunner :: ApiSpec -> Q Runner
+mkRunner spec = fmap Runner [t| CmdRunner $(pure $ ConT cmdName) |]
+  where
+    cmdName :: Name
+    cmdName = spec ^. field @"gadtName" . typed @Name
+
+-- | Handles the special case of `()` being transformed into `NoContent`
+mkReturnType :: Type -> Q Type
+mkReturnType = \case
+    TupleT 0 -> [t| NoContent |]
+    ty       -> pure ty
 
 prependServerEndpointName :: [UrlSegment] -> Type -> Q Type
 prependServerEndpointName prefix rest = do
