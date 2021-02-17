@@ -9,7 +9,6 @@ module Main where
 import           DomainDriven.Server
 import           DomainDriven
 import           Prelude
-import           Data.Bifunctor                 ( bimap )
 import           Servant                 hiding ( Description )
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )

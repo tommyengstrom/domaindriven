@@ -7,7 +7,6 @@ import           Prelude
 import           GHC.Generics                   ( Generic )
 import           Test.Hspec
 import           Data.Aeson
-import           Data.Char                      ( toLower )
 import           Control.Concurrent.Async
 import           DomainDriven.Persistance.ForgetfulSTM
 import           DomainDriven
@@ -74,7 +73,7 @@ applyStoreEvent _ _ = ()
 -- | Compare with StoreCmdApi if you run into issues
 type ExpectedStoreCmdApi
     = "cart" :> "add" :> ReqBody '[JSON] (NamedFields1 "Add" ItemKey) :> Post '[JSON] NoContent
-    :<|> Capture "Int" Int :> "subop1" :> Post '[JSON] NoContent
+    :<|> "Int" :> Capture "Int" Int :> "itemaction" :> "subop1" :> Post '[JSON] NoContent
 
 cartAdd :: NamedFields1 "Add" ItemKey -> ClientM NoContent
 itemSubOp1 :: Int -> ClientM NoContent
