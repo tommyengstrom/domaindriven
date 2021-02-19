@@ -48,3 +48,16 @@ instance WriteModel (ForgetfulSTM m e) where
         writeTVar tvar newModel
 
         pure r
+
+
+instance Exception err => PersistanceHandler (ForgetfulSTM m e) (m -> IO (Either err ret)) ret where
+    dealWithIt p f cmd = do
+        m <- getModel p :: IO m
+        either throwM pure =<< f cmd m
+
+
+instance Exception err =>
+        PersistanceHandler (ForgetfulSTM m e) (IO (m -> Either err (ret, [e]))) ret where
+    dealWithIt p f cmd = do
+        cont <- f cmd
+        transactionalUpdate p cont

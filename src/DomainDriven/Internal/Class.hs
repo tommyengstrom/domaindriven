@@ -30,7 +30,7 @@ type Query = HandlerType 'GET 200 '[JSON]
 
 -- Instead of StdMethod I could use something that carries more information, namely
 -- content-type and return code. I could then define type aliases `Cmd` and `Query`
-type family HandlerReturn model event err verb a where
+type family HandlerReturn model event err method a where
     HandlerReturn model event err (HandlerType 'GET code cts)  a  = model -> IO (Either err a)
     HandlerReturn model event err (HandlerType 'POST code cts) a = IO (model -> Either err (a, [event]))
 
@@ -66,29 +66,33 @@ type CmdHandler model event cmd err
 type QueryHandler model query err
     = forall a . Exception err => model -> query a -> IO (Either err a)
 
-type CmdRunner c = forall verb a . c verb a -> IO a
+type CmdRunner c = forall method a . c method a -> IO a
 
-runCmd
-    :: forall err m verb a cmd . (WriteModel m)
-    => m
-    -> (cmd verb a -> HandlerReturn (Model m) (Event m) err verb a)
-    -> cmd verb a
-    -> IO a
-runCmd m cmdRunner cmd = do
-    cmdRunner cmd >>= transactionalUpdate @_ @_ @err m
+class PersistanceHandler p f ret where
+    dealWithIt :: p -> (cmd x ret -> f) -> cmd x ret -> IO ret
+
+
+--runCmd
+--    :: forall err m verb a cmd . (WriteModel m)
+--    => m
+--    -> (cmd verb a -> HandlerReturn (Model m) (Event m) err verb a)
+--    -> cmd verb a
+--    -> IO a
+--runCmd m cmdRunner cmd = do
+--    cmdRunner cmd >>= transactionalUpdate @_ @_ @err m
 
 
 
 -- | Run a query
-runQuery :: (Exception err, ReadModel rm)
-    => rm
-    -> (Model rm -> query a -> IO (Either err a))
-    -> query a
-    -> IO a
-runQuery rm queryRunner query = do
-    m <- getModel rm
-    r <- queryRunner m query
-    either throwM pure r
+-- runQuery :: (Exception err, ReadModel rm)
+--     => rm
+--     -> (Model rm -> query a -> IO (Either err a))
+--     -> query a
+--     -> IO a
+-- runQuery rm queryRunner query = do
+--     m <- getModel rm
+--     r <- queryRunner m query
+--     either throwM pure r
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

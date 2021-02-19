@@ -60,4 +60,4 @@ main = do
     dm <- createForgetfulSTM applyCounterEvent 0
     -- Now we can supply the CmdRunner to the generated server and run it as any other
     -- Servant server.
-    run 8765 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runCmd dm handleCmd)
+    run 8765 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ dealWithIt dm handleCmd)

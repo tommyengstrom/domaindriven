@@ -4,8 +4,7 @@ module DomainDriven
     , mkId
     , module X
     , ReadModel(..)
-    , runCmd
-    , runQuery
+    , PersistanceHandler(..)
     , Stored(..)
     , UUID
     , NamedJsonFields(..)
