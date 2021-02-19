@@ -3,8 +3,6 @@ module DomainDriven
     , CmdRunner
     , mkId
     , module X
-    , QueryHandler
-    , QueryRunner
     , ReadModel(..)
     , runCmd
     , runQuery

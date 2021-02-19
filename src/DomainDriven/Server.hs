@@ -340,8 +340,8 @@ mkServerDec spec = do
     serverName  <- askServerName
 
     runner      <- lift $ mkRunner spec
-    runnerName  <- lift $ newName "runner_"
-    ret         <- lift [t| Server $(pure $ ConT apiTypeName) |]
+    let runnerName = mkName "runner"
+    ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
     let serverSigDec :: Dec
         serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
 
@@ -360,6 +360,13 @@ mkServerDec spec = do
         <$> traverse (mkApiPieceHandler runner) (spec ^. typed @[ApiPiece])
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
+
+mkRunner :: ApiSpec -> Q Runner
+mkRunner spec = do
+    Runner <$> [t| CmdRunner  $(pure cmdType) |]
+  where
+    cmdType :: Type
+    cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
 
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
@@ -439,12 +446,6 @@ mkServerFromSpec spec = enterApi spec $ do
     serverDecs  <- mkServerDec spec
     pure $ apiTypeDecs <> serverDecs
 
-
-mkRunner :: ApiSpec -> Q Runner
-mkRunner spec = fmap Runner [t| CmdRunner $(pure $ ConT cmdName) |]
-  where
-    cmdName :: Name
-    cmdName = spec ^. field @"gadtName" . typed @Name
 
 -- | Handles the special case of `()` being transformed into `NoContent`
 mkReturnType :: Type -> Q Type

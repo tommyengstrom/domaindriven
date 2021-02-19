@@ -13,14 +13,14 @@ import           GHC.Generics                   ( Generic )
 import           Servant
 import           GHC.TypeLits
 
-type family Mutating (handler :: Type -> Type -> Type) :: Bool where
-    Mutating (h 'GET a) = 'False
-    Mutating (h 'POST a) = 'True
-
-data AfterUpdate a
+--data AfterUpdate a
+--    HandlerReturn (HandlerType 'GET code cts) model event (AfterUpdate a) =
+--        TypeError ('Text "GET methods cannot update the model")
+--    HandlerReturn (HandlerType 'POST code cts) model event (AfterUpdate a) =
+--        (model -> a, [event])
 
 class Monad m => HasModel m model where
-    readModel :: m model
+    fetchModel :: m model
 
 -- | This is `Verb` from servant, but without the return type
 data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
@@ -30,14 +30,9 @@ type Query = HandlerType 'GET 200 '[JSON]
 
 -- Instead of StdMethod I could use something that carries more information, namely
 -- content-type and return code. I could then define type aliases `Cmd` and `Query`
-type family HandlerReturn verb event model a where
-    HandlerReturn (HandlerType 'GET code cts) event model (AfterUpdate a) =
-        TypeError ('Text "GET methods cannot update the model")
-    HandlerReturn (HandlerType 'GET code cts) event model a = a
-    HandlerReturn (HandlerType 'POST code cts) event model (AfterUpdate a) =
-        (model -> a, [event])
-    HandlerReturn (HandlerType 'POST code cts) event model a = (a, [event])
-
+type family HandlerReturn model event err verb a where
+    HandlerReturn model event err (HandlerType 'GET code cts)  a  = model -> IO (Either err a)
+    HandlerReturn model event err (HandlerType 'POST code cts) a = IO (model -> Either err (a, [event]))
 
 class ReadModel a where
     type Model a :: Type
@@ -71,24 +66,21 @@ type CmdHandler model event cmd err
 type QueryHandler model query err
     = forall a . Exception err => model -> query a -> IO (Either err a)
 
-type CmdRunner c = forall a . c a -> IO a
-type QueryRunner c = forall a . c a -> IO a
+type CmdRunner c = forall verb a . c verb a -> IO a
 
 runCmd
-    :: (Exception err, WriteModel m)
+    :: forall err m verb a cmd . (WriteModel m)
     => m
-    -> CmdHandler (Model m) (Event m) cmd err
-    -> cmd a
+    -> (cmd verb a -> HandlerReturn (Model m) (Event m) err verb a)
+    -> cmd verb a
     -> IO a
 runCmd m cmdRunner cmd = do
-
-    cmdRunner cmd >>= transactionalUpdate m
+    cmdRunner cmd >>= transactionalUpdate @_ @_ @err m
 
 
 
 -- | Run a query
-runQuery
-    :: (Exception err, ReadModel rm)
+runQuery :: (Exception err, ReadModel rm)
     => rm
     -> (Model rm -> query a -> IO (Either err a))
     -> query a

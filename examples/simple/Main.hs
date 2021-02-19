@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+    {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | This module contains simple example of how to setup a counter using domain-driven.
 module Main where
@@ -17,6 +18,7 @@ import           Network.Wai.Handler.Warp       ( run )
 import           Data.Aeson
 import           GHC.Generics                   ( Generic )
 
+
 -- | The model, representing the current state
 type CounterModel = Int
 
@@ -26,21 +28,19 @@ data CounterEvent
     deriving (Show, Generic, ToJSON, FromJSON)
 
 data CounterCmd method return where
-   IncreaseCounter ::CounterCmd Cmd (AfterUpdate Int)
-   AddToCounter ::Int -> CounterCmd Cmd Int
    GetCounter ::CounterCmd Query Int
+   IncreaseCounter ::CounterCmd Cmd Int
+   AddToCounter ::Int -> CounterCmd Cmd Int
 
 handleCmd
-    :: (HasModel m CounterModel, MonadThrow m)
-    => CounterCmd method a
-    -> m (HandlerReturn method CounterEvent CounterModel a)
+    :: CounterCmd method a
+    -> HandlerReturn CounterModel CounterEvent CounterError method a
 handleCmd = \case
-    GetCounter      -> readModel
-    IncreaseCounter -> pure (id, [CounterIncreased])
-    AddToCounter a  -> do
-        i <- readModel
-        pure (i + a, [])
-
+    GetCounter      -> pure . Right
+    IncreaseCounter -> pure $ \m -> Right (m + 1, [CounterIncreased])
+    AddToCounter a  -> pure $ \m -> do
+        unless (a > 0) (Left NegativeNotSupported)
+        Right (m + a, replicate a CounterIncreased)
 
 data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)
@@ -52,16 +52,12 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
 
 $(mkCmdServer defaultApiOptions ''CounterCmd)
 
--- | Start a server running on port 8765
--- Try it out with:
--- `curl localhost:8765/IncreaseCounter -X POST`
--- -- `curl localhost:8765/DecreaseCounter -X POST`
-main :: IO ()
-main = pure ()
--- main = do
---     -- Pick a persistance model to create the domain model
---     dm <- createForgetfulSTM applyCounterEvent 0
---     -- Now we can supply the CmdRunner to the generated server and run it as any other
---     -- Servant server.
---     run 8765
---         $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runCmd dm handleCounterCmd)
+--main :: IO ()
+--main = pure ()
+--
+main = do
+    -- Pick a persistance model to create the domain model
+    dm <- createForgetfulSTM applyCounterEvent 0
+    -- Now we can supply the CmdRunner to the generated server and run it as any other
+    -- Servant server.
+    run 8765 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runCmd dm handleCmd)
