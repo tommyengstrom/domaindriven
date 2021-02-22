@@ -256,6 +256,17 @@ migrate1to1 conn prevTName tName f = do
     currentEvents <- queryEvents' @Value conn prevTName
     writeEvents' conn tName $ fmap (fmap f) currentEvents
 
+migrate1toMany
+    :: Connection
+    -> PreviosEventTableName
+    -> EventTableName
+    -> (Stored Value -> IO [Stored Value]) -- IO because you probably need new UUIDs
+    -> IO Int64
+migrate1toMany conn prevTName tName f = do
+    _             <- createEventTable' conn tName
+    currentEvents <- queryEvents' @Value conn prevTName
+    newEvents     <- mconcat <$> traverse f currentEvents
+    writeEvents' conn tName newEvents
 
 migrateWithState
     :: Connection
