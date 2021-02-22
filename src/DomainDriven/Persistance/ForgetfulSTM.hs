@@ -50,14 +50,19 @@ instance WriteModel (ForgetfulSTM m e) where
         pure r
 
 
-instance Exception err => PersistanceHandler (ForgetfulSTM m e) (m -> IO (Either err ret)) ret where
-    dealWithIt p f cmd = do
-        m <- getModel p :: IO m
-        either throwM pure =<< f cmd m
-
-
-instance Exception err =>
-        PersistanceHandler (ForgetfulSTM m e) (IO (m -> Either err (ret, [e]))) ret where
-    dealWithIt p f cmd = do
-        cont <- f cmd
-        transactionalUpdate p cont
+--instance Exception err =>
+--        PersistanceHandler model event err (ForgetfulSTM model event) Query a where
+--    dealWithIt p f cmd = do
+--        m <- getModel p :: IO model
+--        either throwM pure =<< f cmd m
+--
+--
+--instance Exception err =>
+--        PersistanceHandler model event err (ForgetfulSTM model event) Cmd a where
+--    dealWithIt p f cmd = do
+--        cont <- f cmd
+--        transactionalUpdate p cont
+--
+--instance {-# INCOHERENT #-} Exception err =>
+--        PersistanceHandler model event err (ForgetfulSTM model event) method a where
+--    dealWithIt = undefined

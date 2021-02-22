@@ -4,7 +4,6 @@ module DomainDriven
     , mkId
     , module X
     , ReadModel(..)
-    , PersistanceHandler(..)
     , Stored(..)
     , UUID
     , NamedJsonFields(..)

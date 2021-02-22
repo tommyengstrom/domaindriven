@@ -1,17 +1,19 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
 import           Data.Aeson
-import           Data.UUID
-import           Data.Kind
 import           Prelude
 import           Data.Time
 import           System.Random
 import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
+import Data.Void
 import           Servant
 import           GHC.TypeLits
+import Data.Kind
+import Data.UUID (UUID)
 
 --data AfterUpdate a
 --    HandlerReturn (HandlerType 'GET code cts) model event (AfterUpdate a) =
@@ -19,35 +21,78 @@ import           GHC.TypeLits
 --    HandlerReturn (HandlerType 'POST code cts) model event (AfterUpdate a) =
 --        (model -> a, [event])
 
-class Monad m => HasModel m model where
-    fetchModel :: m model
+--class Monad m => HasModel m model where
+--    fetchModel :: m model
 
 -- | This is `Verb` from servant, but without the return type
 data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
 
-type Cmd = HandlerType 'POST 200 '[JSON]
-type Query = HandlerType 'GET 200 '[JSON]
+type CMD = HandlerType 'POST 200 '[JSON]
+type QUERY = HandlerType 'GET 200 '[JSON]
 
 -- Instead of StdMethod I could use something that carries more information, namely
 -- content-type and return code. I could then define type aliases `Cmd` and `Query`
-type family HandlerReturn model event err method a where
-    HandlerReturn model event err (HandlerType 'GET code cts)  a  = model -> IO (Either err a)
-    HandlerReturn model event err (HandlerType 'POST code cts) a = IO (model -> Either err (a, [event]))
+type family HandlerReturn model event method a where
+    HandlerReturn model event (HandlerType 'GET code cts)  a = ReturnValue model Void a
+    HandlerReturn model event (HandlerType 'POST code cts) a = ReturnValue model event a
 
-class ReadModel a where
-    type Model a :: Type
-    type Event a :: Type
-    applyEvent :: a -> Model a -> Stored (Event a) -> Model a
-    getModel :: a -> IO (Model a)
-    getEvents :: a -> IO [Stored (Event a)] -- TODO: Make it a stream!
+data ReturnValue model event a where
+    Query :: (Monad m, QueryHandler m model) => m a -> ReturnValue model Void a
+    Cmd :: (Monad m, QueryHandler m model) => m (a, [event]) -> ReturnValue model event a
+    -- Query :: (model -> IO a) -> ReturnValue model Void err a
+    -- Cmd   :: IO (model -> (a, [event])) -> ReturnValue model event err a
 
 
-class ReadModel a => WriteModel a where
+class ReadModel p where
+    type Model p :: Type
+    type Event p :: Type
+    applyEvent :: p -> Model p -> Stored (Event p) -> Model p
+    getModel :: p -> IO (Model p)
+    getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
+
+class ReadModel p => PriteModel p where
+    withTrans :: IO (a, [Event p]) -> IO a
+
+class ReadModel p => WriteModel p where
     transactionalUpdate :: forall ret err.
         Exception err =>
-           a
-          -> (Model a -> Either err (ret, [Event a]))
+           p
+          -> (Model p -> Either err (ret, [Event p]))
          -> IO ret
+
+class Monad m => QueryHandler m model where
+    queryModel :: m model
+
+newtype ModelFetcher p a = ModelFetcher (ReaderT p IO a)
+    deriving newtype (Functor, Applicative, Monad)
+
+fetchModel :: ReadModel p => ModelFetcher p (Model p)
+fetchModel = ModelFetcher $ do
+    p <- ask
+    lift $ getModel p
+--class ProcessReturnValue p event where
+--    doit :: p -> ReturnValue (Model p) event err a -> IO a
+--
+--instance ReadModel p => ProcessReturnValue p Void where
+--    doit p = \case
+--        Query f -> do
+--           m <- getModel p
+--           f m
+--           m <- getModel p
+--           let (a, evs) = cont m -- This can never happen as evs would be [Void]
+--           _ <- traverse absurd evs
+--           pure a
+
+-- instance WriteModel p => ProcessReturnValue p (Event p) where
+--     doit p = \case
+--         Query f -> do
+--            m <- getModel p
+--            f m
+--         Cmd f -> do
+--            cont <- f
+--            m <- getModel p
+--            let (_, v) = cont m
+--            absurd v
 
 -- | Command handler
 --
@@ -63,14 +108,10 @@ class ReadModel a => WriteModel a where
 -- run and generate events on the same state.
 type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
-type QueryHandler model query err
-    = forall a . Exception err => model -> query a -> IO (Either err a)
+--type QueryHandler model query err
+--    = forall a . Exception err => model -> query a -> IO (Either err a)
 
 type CmdRunner c = forall method a . c method a -> IO a
-
-class PersistanceHandler p f ret where
-    dealWithIt :: p -> (cmd x ret -> f) -> cmd x ret -> IO ret
-
 
 --runCmd
 --    :: forall err m verb a cmd . (WriteModel m)

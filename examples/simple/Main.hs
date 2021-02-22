@@ -28,19 +28,19 @@ data CounterEvent
     deriving (Show, Generic, ToJSON, FromJSON)
 
 data CounterCmd method return where
-   GetCounter ::CounterCmd Query Int
-   IncreaseCounter ::CounterCmd Cmd Int
-   AddToCounter ::Int -> CounterCmd Cmd Int
+   GetCounter ::CounterCmd QUERY Int
+   IncreaseCounter ::CounterCmd CMD Int
+   AddToCounter ::Int -> CounterCmd CMD Int
 
-handleCmd
-    :: CounterCmd method a
-    -> HandlerReturn CounterModel CounterEvent CounterError method a
+handleCmd :: CounterCmd method a -> HandlerReturn CounterModel CounterEvent method a
 handleCmd = \case
-    GetCounter      -> pure . Right
-    IncreaseCounter -> pure $ \m -> Right (m + 1, [CounterIncreased])
-    AddToCounter a  -> pure $ \m -> do
-        unless (a > 0) (Left NegativeNotSupported)
-        Right (m + a, replicate a CounterIncreased)
+    GetCounter      -> Query queryModel
+    IncreaseCounter -> Cmd $ do
+        m <- queryModel
+        pure (m + 1, [CounterIncreased])
+    AddToCounter a -> Cmd $ do
+        m <- queryModel
+        pure (m + a, replicate a CounterIncreased)
 
 data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)
@@ -52,12 +52,15 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
 
 $(mkCmdServer defaultApiOptions ''CounterCmd)
 
---main :: IO ()
---main = pure ()
---
-main = do
-    -- Pick a persistance model to create the domain model
-    dm <- createForgetfulSTM applyCounterEvent 0
-    -- Now we can supply the CmdRunner to the generated server and run it as any other
-    -- Servant server.
-    run 8765 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ dealWithIt dm handleCmd)
+main :: IO ()
+main = pure ()
+--main = do
+--    -- Pick a persistance model to create the domain model
+--    dm <- createForgetfulSTM applyCounterEvent 0
+--    -- Now we can supply the CmdRunner to the generated server and run it as any other
+--    -- Servant server.
+--    run 8888 $ serve
+--        (Proxy @CounterCmdApi)
+--        ( counterCmdServer
+--        $ dealWithIt @CounterModel @CounterEvent @CounterError dm handleCmd
+--        )
