@@ -34,13 +34,9 @@ data CounterCmd method return where
 
 handleCmd :: CounterCmd method a -> HandlerReturn CounterModel CounterEvent method a
 handleCmd = \case
-    GetCounter      -> Query queryModel
-    IncreaseCounter -> Cmd $ do
-        m <- queryModel
-        pure (m + 1, [CounterIncreased])
-    AddToCounter a -> Cmd $ do
-        m <- queryModel
-        pure (m + a, replicate a CounterIncreased)
+    GetCounter      -> Query $ pure
+    IncreaseCounter -> Cmd $ \m -> pure (m + 1, [CounterIncreased])
+    AddToCounter a  -> Cmd $ \m -> pure (m + a, replicate a CounterIncreased)
 
 data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)

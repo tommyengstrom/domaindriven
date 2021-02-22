@@ -1,4 +1,5 @@
 {-# LANGUAGE UndecidableInstances #-}
+    {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module DomainDriven.Internal.Class where
 
@@ -36,9 +37,13 @@ type family HandlerReturn model event method a where
     HandlerReturn model event (HandlerType 'GET code cts)  a = ReturnValue model Void a
     HandlerReturn model event (HandlerType 'POST code cts) a = ReturnValue model event a
 
+type family Events method event where
+    Events (HandlerType 'GET code cts) e = Void
+    Events (HandlerType 'POST code cts) e = [e]
+
 data ReturnValue model event a where
-    Query :: (Monad m, QueryHandler m model) => m a -> ReturnValue model Void a
-    Cmd :: (Monad m, QueryHandler m model) => m (a, [event]) -> ReturnValue model event a
+    Query :: (model -> IO a) -> ReturnValue model Void a
+    Cmd :: (model -> IO (a, [event])) -> ReturnValue model event a
     -- Query :: (model -> IO a) -> ReturnValue model Void err a
     -- Cmd   :: IO (model -> (a, [event])) -> ReturnValue model event err a
 
@@ -50,9 +55,6 @@ class ReadModel p where
     getModel :: p -> IO (Model p)
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
-class ReadModel p => PriteModel p where
-    withTrans :: IO (a, [Event p]) -> IO a
-
 class ReadModel p => WriteModel p where
     transactionalUpdate :: forall ret err.
         Exception err =>
@@ -60,16 +62,37 @@ class ReadModel p => WriteModel p where
           -> (Model p -> Either err (ret, [Event p]))
          -> IO ret
 
-class Monad m => QueryHandler m model where
-    queryModel :: m model
 
-newtype ModelFetcher p a = ModelFetcher (ReaderT p IO a)
-    deriving newtype (Functor, Applicative, Monad)
+runCmd :: (WriteModel p, Model p ~ model, Event p ~ event)
+    => p
+    ->(forall method a. cmd method a -> ReturnValue model (Events method event) a)
+    -> cmd method a
+    -> IO a
+runCmd p handleCmd cmd = case handleCmd cmd of
+    Query m -> do
+        model <- getModel p
+        m model
+    Cmd m ->  do
+        model <- getModel p
+        (a, events) <- m model
+        undefined events
+        pure a
+--------------------------------------------
+--class Monad m => DDView m model where
+--    fetchModel :: m model
+--
+--class DDView m model => DDWrite m model event where
+--    transUpdate :: m (a, [event]) -> m a
+--
+----newtype DD p a = DD (ReaderT p IO a)
+----    deriving newtype (Functor, Applicative, Monad, MonadIO)
+--
+--instance (ReadModel p, model ~ Model p)=> DDView (ReaderT p IO) model where
+--    fetchModel =  do
+--        p <- ask
+--        lift $ getModel p
 
-fetchModel :: ReadModel p => ModelFetcher p (Model p)
-fetchModel = ModelFetcher $ do
-    p <- ask
-    lift $ getModel p
+
 --class ProcessReturnValue p event where
 --    doit :: p -> ReturnValue (Model p) event err a -> IO a
 --
