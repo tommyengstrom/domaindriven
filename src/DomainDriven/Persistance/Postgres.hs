@@ -12,6 +12,7 @@ import           Data.List                      ( foldl' )
 import           Data.Typeable
 import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
+import           Control.Monad.State     hiding ( state )
 import           Data.Text                      ( Text )
 import           Data.Aeson
 import           Data.UUID                      ( UUID )
@@ -254,3 +255,17 @@ migrate1to1 conn prevTName tName f = do
     _             <- createEventTable' conn tName
     currentEvents <- queryEvents' @Value conn prevTName
     writeEvents' conn tName $ fmap (fmap f) currentEvents
+
+
+migrateWithState
+    :: Connection
+    -> PreviosEventTableName
+    -> EventTableName
+    -> state
+    -> (Stored Value -> StateT state IO [Stored Value])
+    -> IO Int64
+migrateWithState conn prevTName tName initialState f = do
+    _             <- createEventTable' conn tName
+    currentEvents <- queryEvents' @Value conn prevTName
+    newEvents     <- mconcat <$> evalStateT (traverse f currentEvents) initialState
+    writeEvents' conn tName newEvents

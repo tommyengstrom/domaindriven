@@ -100,6 +100,6 @@ spec = do
         it "Can split constructor into multiple path segments" $ do
             r <- runClientM (cartAdd $ NamedFields1 $ ItemKey "whatever") clientEnv
             r `shouldBe` Right NoContent
-        it "Can remove constructor name" $ do
-            r <- runClientM (itemSubOp1 1) clientEnv
-            r `shouldBe` Right NoContent
+--        it "Can remove constructor name" $ do
+--            r <- runClientM (itemSubOp1 1) clientEnv
+--            r `shouldBe` Right NoContent
