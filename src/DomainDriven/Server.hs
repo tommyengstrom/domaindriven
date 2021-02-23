@@ -116,9 +116,10 @@ getCmdDec (GadtName n) = do
 
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
-    DataD _ _ [KindedTV _ StarT, KindedTV _ StarT] _ constructors _ -> pure constructors
-    DataD _ _ _ _ _            _ -> error "bad data type"
-    _                            -> error "Expected a GADT with two parameters"
+    DataD _ _ [KindedTV _ (AppT (AppT ArrowT StarT) StarT), KindedTV _ StarT] _ constructors _
+        -> pure constructors
+    DataD _ _ _ _ _ _ -> error "bad data type"
+    _                 -> error "Expected a GADT with two parameters"
 
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
@@ -126,11 +127,11 @@ unqualifiedString = typed @OccName . typed
 mkApiPiece :: ApiOptions -> Con -> Q ApiPiece
 mkApiPiece opts = \case
     -- The normal case
-    GadtC [gadtName] bangArgs (AppT (AppT _ handlerType) retType) -> do
+    GadtC [gadtName] bangArgs (AppT (AppT _ verb) retType) -> do
 
         pure $ Endpoint (ConstructorName gadtName)
                         (ConstructorArgs $ fmap snd bangArgs)
-                        (HandlerSettings handlerType)
+                        (HandlerSettings verb)
                         retType
     -- When the constructor contain references to other domain models
     ForallC [KindedTV var StarT] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _)) -> do
@@ -320,20 +321,23 @@ mkEndpointApiType p = enterApiPiece p $ case p of
 mkHandlerTypeDecs :: ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkHandlerTypeDecs p = enterApiPiece p $ do
     case p of
-        Endpoint name args _ retType -> do
+        Endpoint name args hs retType -> do
             ty <- do
                 reqBody   <- mkReqBody args
                 reqReturn <- lift $ mkReturnType retType
                 middle    <- case reqBody of
-                    Nothing -> lift [t| Post '[JSON] $(pure reqReturn) |]
-                    Just b  -> lift [t| $(pure b) :> Post '[JSON] $(pure reqReturn) |]
+                    Nothing -> pure $ mkVerb hs reqReturn
+                    Just b  -> lift [t| $(pure b) :> $(pure $ mkVerb hs reqReturn) |]
                 urlSegments <- mkUrlSegments name
                 lift $ prependServerEndpointName urlSegments middle
             epTypeName <- askEndpointTypeName
             pure [TySynD epTypeName [] ty]
         SubApi _name _args spec' -> mkServerFromSpec spec'
 
+mkVerb :: HandlerSettings -> Type -> Type
+mkVerb (HandlerSettings hs) ret = hs `AppT` ret
 -- | Declare then handlers for the API
+--
 mkServerDec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkServerDec spec = do
     apiTypeName <- askApiTypeName

@@ -228,20 +228,16 @@ instance ReadModel (PostgresStateAndEvent m e) where
         (queryEvents pg) conn
 
 instance WriteModel (PostgresStateAndEvent m e) where
-    transactionalUpdate pg evalCmd = do
-        conn <- getConnection pg
-        withTransaction conn $ do
-            _ <- lockState pg conn
-            m <- getModel pg
-            case evalCmd m of
-                Left  err        -> throwM err
-                Right (ret, evs) -> do
-                    storedEvs <- traverse toStored evs
-                    let newM = foldl' (app pg) m storedEvs
-                        -- FIXME: Ensure the events are applied in the correct order!
-                    _ <- (writeEvents pg) conn storedEvs
-                    _ <- (writeState pg) conn newM
-                    pure ret
+    transactionalUpdate pg cmd = do
+        conn      <- getConnection pg
+        -- lock events able
+        (a, evs)  <- cmd
+        m         <- getModel pg
+        storedEvs <- traverse toStored evs
+        let newM = foldl' (app pg) m storedEvs
+        _ <- (writeEvents pg) conn storedEvs
+        _ <- (writeState pg) conn newM
+        pure a
 
 
 migrate1to1

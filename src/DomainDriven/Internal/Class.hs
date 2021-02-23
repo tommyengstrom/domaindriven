@@ -10,11 +10,11 @@ import           Data.Time
 import           System.Random
 import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
-import Data.Void
+import           Data.Void
 import           Servant
 import           GHC.TypeLits
-import Data.Kind
-import Data.UUID (UUID)
+import           Data.Kind
+import           Data.UUID                      ( UUID )
 
 --data AfterUpdate a
 --    HandlerReturn (HandlerType 'GET code cts) model event (AfterUpdate a) =
@@ -26,24 +26,31 @@ import Data.UUID (UUID)
 --    fetchModel :: m model
 
 -- | This is `Verb` from servant, but without the return type
-data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
+-- data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
 
-type CMD = HandlerType 'POST 200 '[JSON]
-type QUERY = HandlerType 'GET 200 '[JSON]
+type CMD = Verb 'POST 200 '[JSON]
+type QUERY = Verb 'GET 200 '[JSON]
 
 -- Instead of StdMethod I could use something that carries more information, namely
 -- content-type and return code. I could then define type aliases `Cmd` and `Query`
 type family HandlerReturn model event method a where
-    HandlerReturn model event (HandlerType 'GET code cts)  a = ReturnValue model Void a
-    HandlerReturn model event (HandlerType 'POST code cts) a = ReturnValue model event a
+    HandlerReturn model event (Verb 'GET code cts)  a = ReturnValue 'False model event a
+    HandlerReturn model event (Verb 'POST code cts) a = ReturnValue 'True model event a
+    HandlerReturn model event (Verb 'PUT code cts) a = ReturnValue 'True model event a
+    HandlerReturn model event (Verb 'PATCH code cts) a = ReturnValue 'True model event a
+    HandlerReturn model event (Verb 'DELETE code cts) a = ReturnValue 'True model event a
 
-type family Events method event where
-    Events (HandlerType 'GET code cts) e = Void
-    Events (HandlerType 'POST code cts) e = [e]
+-- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
+type family CanMutate method :: Bool where
+    CanMutate (Verb 'GET code cts) = 'False
+    CanMutate (Verb 'POST code cts) = 'True
+    CanMutate (Verb 'PUT code cts) = 'True
+    CanMutate (Verb 'PATCH code cts) = 'True
+    CanMutate (Verb 'DELETE code cts) = 'True
 
-data ReturnValue model event a where
-    Query :: (model -> IO a) -> ReturnValue model Void a
-    Cmd :: (model -> IO (a, [event])) -> ReturnValue model event a
+data ReturnValue mutates model event a where
+    Query ::(model -> IO a) -> ReturnValue 'False model event a
+    Cmd ::(model -> IO (a, [event])) -> ReturnValue 'True model event a
     -- Query :: (model -> IO a) -> ReturnValue model Void err a
     -- Cmd   :: IO (model -> (a, [event])) -> ReturnValue model event err a
 
@@ -56,27 +63,26 @@ class ReadModel p where
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
 class ReadModel p => WriteModel p where
-    transactionalUpdate :: forall ret err.
-        Exception err =>
-           p
-          -> (Model p -> Either err (ret, [Event p]))
-         -> IO ret
+    transactionalUpdate :: p -> IO (a, [Event p]) -> IO a
 
 
-runCmd :: (WriteModel p, Model p ~ model, Event p ~ event)
+runCmd
+    :: (WriteModel p)
     => p
-    ->(forall method a. cmd method a -> ReturnValue model (Events method event) a)
-    -> cmd method a
-    -> IO a
+    -> (  forall model event a
+        . (model ~ Model p, event ~ Event p)
+       => cmd method a
+       -> ReturnValue (CanMutate method) model event a
+       )
+    -> cmd method ret
+    -> IO ret
 runCmd p handleCmd cmd = case handleCmd cmd of
     Query m -> do
         model <- getModel p
         m model
-    Cmd m ->  do
+    Cmd m -> transactionalUpdate p $ do
         model <- getModel p
-        (a, events) <- m model
-        undefined events
-        pure a
+        m model
 --------------------------------------------
 --class Monad m => DDView m model where
 --    fetchModel :: m model

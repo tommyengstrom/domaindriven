@@ -5,15 +5,15 @@
 module Main where
 
 import           DomainDriven.Server
-import           DomainDriven.Persistance.ForgetfulSTM
+import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven
 import           Prelude
 import           Servant
 import           Data.Typeable                  ( Typeable )
 import           DomainDriven.Internal.Class
-import           Control.Exception              ( Exception )
+import qualified Data.ByteString.Lazy.Char8                   as BL
+import           Servant.OpenApi
 import           Control.Monad.Catch
-import           Control.Monad
 import           Network.Wai.Handler.Warp       ( run )
 import           Data.Aeson
 import           GHC.Generics                   ( Generic )
@@ -32,7 +32,8 @@ data CounterCmd method return where
    IncreaseCounter ::CounterCmd CMD Int
    AddToCounter ::Int -> CounterCmd CMD Int
 
-handleCmd :: CounterCmd method a -> HandlerReturn CounterModel CounterEvent method a
+handleCmd
+    :: CounterCmd method a -> ReturnValue (CanMutate method) CounterModel CounterEvent a
 handleCmd = \case
     GetCounter      -> Query $ pure
     IncreaseCounter -> Cmd $ \m -> pure (m + 1, [CounterIncreased])
@@ -49,14 +50,11 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
 $(mkCmdServer defaultApiOptions ''CounterCmd)
 
 main :: IO ()
-main = pure ()
---main = do
---    -- Pick a persistance model to create the domain model
---    dm <- createForgetfulSTM applyCounterEvent 0
---    -- Now we can supply the CmdRunner to the generated server and run it as any other
---    -- Servant server.
---    run 8888 $ serve
---        (Proxy @CounterCmdApi)
---        ( counterCmdServer
---        $ dealWithIt @CounterModel @CounterEvent @CounterError dm handleCmd
---        )
+--main = pure ()
+main = do
+    -- Pick a persistance model to create the domain model
+    dm <- createForgetful applyCounterEvent 0
+    BL.writeFile "/tmp/counter_schema.json" $ encode $ toOpenApi (Proxy @CounterCmdApi)
+    -- Now we can supply the CmdRunner to the generated server and run it as any other
+    -- Servant server.
+    run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runCmd dm handleCmd)
