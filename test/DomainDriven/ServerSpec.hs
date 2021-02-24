@@ -8,9 +8,8 @@ import           GHC.Generics                   ( Generic )
 import           Test.Hspec
 import           Data.Aeson
 import           Control.Concurrent.Async
-import           DomainDriven.Persistance.ForgetfulSTM
+import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven
-import           Control.Exception              ( SomeException )
 import           Servant
 import           Network.HTTP.Client            ( newManager
                                                 , defaultManagerSettings
@@ -28,13 +27,13 @@ newtype ItemKey = ItemKey String
 newtype Price = Euros Int
     deriving newtype (Show, Eq, FromJSON, ToJSON)
 
-data StoreCmd a where
-    AddToCart  ::ItemKey -> StoreCmd ()
-    ItemAction ::Int -> ItemCmd a -> StoreCmd a
+data StoreCmd method a where
+    AddToCart  ::ItemKey -> StoreCmd CMD ()
+    ItemAction ::Int -> ItemCmd method a -> StoreCmd method a
 
-data ItemCmd a where
-    SubOp1 ::ItemCmd ()
-    SubOp2 ::Int -> String -> ItemCmd Int
+data ItemCmd method a where
+    SubOp1 ::ItemCmd CMD ()
+    SubOp2 ::Int -> String -> ItemCmd CMD Int
 
 data Item = Item
     { key         :: ItemKey
@@ -56,15 +55,18 @@ type StoreModel = ()
 type StoreEvent = ()
 
 
-handleStoreCmd :: StoreCmd a -> IO (StoreModel -> Either SomeException (a, [StoreEvent]))
+handleStoreCmd
+    :: StoreCmd method a -> ReturnValue (CanMutate method) StoreModel StoreEvent a
 handleStoreCmd = \case
-    AddToCart _       -> pure (const $ Right ((), []))
+    AddToCart _       -> Cmd $ \_ -> pure ((), [])
     ItemAction _ icmd -> handleItemCmd icmd
 
-handleItemCmd :: ItemCmd a -> IO (StoreModel -> Either SomeException (a, [StoreEvent]))
+handleItemCmd
+    :: ItemCmd method a -> ReturnValue (CanMutate method) StoreModel StoreEvent a
 handleItemCmd = \case
-    SubOp1     -> pure . const $ Right ((), [])
-    SubOp2 i _ -> pure . const $ Right (i, [])
+    SubOp1     -> Cmd $ \_ -> pure ((), [])
+    SubOp2 i _ -> Cmd $ \_ -> pure (i, [])
+
 
 applyStoreEvent :: StoreModel -> Stored StoreEvent -> StoreModel
 applyStoreEvent _ _ = ()
@@ -82,7 +84,7 @@ cartAdd :<|> itemSubOp1 = client (Proxy @ExpectedStoreCmdApi)
 spec :: Spec
 spec = do
     runIO $ do
-        p <- createForgetfulSTM applyStoreEvent ()
+        p <- createForgetful applyStoreEvent ()
         _ <- async . run 9898 $ serve (Proxy @StoreCmdApi)
                                       (storeCmdServer $ runCmd p handleStoreCmd)
         pure ()

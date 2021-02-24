@@ -101,7 +101,7 @@ defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "
 getCmdDec :: GadtName -> Q Dec
 getCmdDec (GadtName n) = do
     cmdType <- reify n
-    let errMsg = error "Must be GADT with two parameters, HandlerType and return type"
+    let errMsg = fail "Must be GADT with two parameters, HandlerType and return type"
     case cmdType of
         TyConI dec       -> pure dec
         ClassI _ _       -> errMsg
@@ -114,12 +114,31 @@ getCmdDec (GadtName n) = do
         TyVarI _ _       -> errMsg
 
 
+guardMethodVar :: TyVarBndr -> Q ()
+guardMethodVar = \case
+    KindedTV _ k -> check k
+    PlainTV _    -> check StarT
+  where
+    check :: Type -> Q ()
+    check k =
+        unless (k == AppT (AppT ArrowT StarT) StarT)
+            .  fail
+            $  "Method must have be a `Verb` without the return type applied. Got: "
+            <> show k
+
+guardReturnVar :: TyVarBndr -> Q ()
+guardReturnVar = \case
+    KindedTV _ StarT -> pure ()
+    ty               -> fail $ "Return type must be a concrete type. Got: " <> show ty
+
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
-    DataD _ _ [KindedTV _ (AppT (AppT ArrowT StarT) StarT), KindedTV _ StarT] _ constructors _
-        -> pure constructors
-    DataD _ _ _ _ _ _ -> error "bad data type"
-    _                 -> error "Expected a GADT with two parameters"
+    DataD _ _ [method, ret] _ cs _ -> do
+        guardMethodVar method
+        guardReturnVar ret
+        pure cs
+    d@DataD{} -> fail $ "bad data type: " <> show d
+    d         -> fail $ "Expected a GADT with two parameters but got: " <> show d
 
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
@@ -134,20 +153,35 @@ mkApiPiece opts = \case
                         (HandlerSettings verb)
                         retType
     -- When the constructor contain references to other domain models
-    ForallC [KindedTV var StarT] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _)) -> do
-        (args, subCmd') <- case reverse $ fmap snd bangArgs of
-            AppT (ConT subCmd') (VarT var') : rest -> do
-                unless (var == var')
-                    $ error "Subcommand must be the last constructor argument"
-                pure (reverse rest, subCmd')
-            _ -> error $ "Last constructor argument must have form `SubCmd a`"
+    ForallC [method@(KindedTV methodName _), ret@(KindedTV retName _)] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _))
+        -> do
+            guardMethodVar method
+            guardReturnVar ret
+            (args, subCmd') <- case reverse $ fmap snd bangArgs of
+                AppT (AppT (ConT subCmd') (VarT methodName')) (VarT retName') : rest ->
+                    do
+                        unless (retName == retName')
+                            $  fail
+                            $  "\nSubCmd must use the return type variable of the parent."
+                            <> ("\n\tExpected: " <> show retName)
+                            <> ("\n\tGot: " <> show retName')
+                        unless (methodName == methodName')
+                            $  fail
+                            $  "\nSubCmd must use the method type variable of the parent."
+                            <> ("\n\tExpected: " <> show methodName)
+                            <> ("\n\tGot: " <> show methodName')
+                        pure (reverse rest, subCmd')
+                ty : _ ->
+                    fail
+                        $ "Last constructor argument must have form \
+                          \`SubCmd method return`. Got: \n"
+                        <> pprint ty
+                [] -> fail "I thought this coulnd't happen!"
 
-        subServerSpec <- mkServerSpec opts (GadtName subCmd')
-        pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
+            subServerSpec <- mkServerSpec opts (GadtName subCmd')
+            pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
     c ->
-        error
-            $  "Expected a GATD constructor representing an endpoint but got:\n"
-            <> show c
+        fail $ "Expected a GADT constructor representing an endpoint but got:\n" <> show c
 
 -- | Turn "OhYEAH" into "ohYEAH"...
 lowerFirst :: String -> String
@@ -271,7 +305,7 @@ mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
     epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case epTypes of
-        []     -> error "Server contains no endpoints"
+        []     -> fail "Server contains no endpoints"
         t : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t| $(pure b) :<|> $(pure a) |]
@@ -356,7 +390,7 @@ mkServerDec spec = do
 
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
     body     <- case handlers of
-        []     -> error "Server contains no endpoints"
+        []     -> fail "Server contains no endpoints"
         e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
     let serverFunDec :: Dec
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]

@@ -67,22 +67,14 @@ class ReadModel p => WriteModel p where
 
 
 runCmd
-    :: (WriteModel p)
+    :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -> (  forall model event a
-        . (model ~ Model p, event ~ Event p)
-       => cmd method a
-       -> ReturnValue (CanMutate method) model event a
-       )
+    -> (forall a . cmd method a -> ReturnValue (CanMutate method) model event a)
     -> cmd method ret
     -> IO ret
 runCmd p handleCmd cmd = case handleCmd cmd of
-    Query m -> do
-        model <- getModel p
-        m model
-    Cmd m -> transactionalUpdate p $ do
-        model <- getModel p
-        m model
+    Query m -> m =<< getModel p
+    Cmd   m -> transactionalUpdate p $ m =<< getModel p
 --------------------------------------------
 --class Monad m => DDView m model where
 --    fetchModel :: m model

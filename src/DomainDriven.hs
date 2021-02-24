@@ -5,6 +5,11 @@ module DomainDriven
     , module X
     , ReadModel(..)
     , Stored(..)
+    , CMD
+    , QUERY
+    , ReturnValue(..)
+    , runCmd
+    , CanMutate
     , UUID
     , NamedJsonFields(..)
     , WriteModel(..)
