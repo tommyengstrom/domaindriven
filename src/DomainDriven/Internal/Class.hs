@@ -75,45 +75,6 @@ runCmd
 runCmd p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< getModel p
     Cmd   m -> transactionalUpdate p $ m =<< getModel p
---------------------------------------------
---class Monad m => DDView m model where
---    fetchModel :: m model
---
---class DDView m model => DDWrite m model event where
---    transUpdate :: m (a, [event]) -> m a
---
-----newtype DD p a = DD (ReaderT p IO a)
-----    deriving newtype (Functor, Applicative, Monad, MonadIO)
---
---instance (ReadModel p, model ~ Model p)=> DDView (ReaderT p IO) model where
---    fetchModel =  do
---        p <- ask
---        lift $ getModel p
-
-
---class ProcessReturnValue p event where
---    doit :: p -> ReturnValue (Model p) event err a -> IO a
---
---instance ReadModel p => ProcessReturnValue p Void where
---    doit p = \case
---        Query f -> do
---           m <- getModel p
---           f m
---           m <- getModel p
---           let (a, evs) = cont m -- This can never happen as evs would be [Void]
---           _ <- traverse absurd evs
---           pure a
-
--- instance WriteModel p => ProcessReturnValue p (Event p) where
---     doit p = \case
---         Query f -> do
---            m <- getModel p
---            f m
---         Cmd f -> do
---            cont <- f
---            m <- getModel p
---            let (_, v) = cont m
---            absurd v
 
 -- | Command handler
 --
@@ -129,32 +90,8 @@ runCmd p handleCmd cmd = case handleCmd cmd of
 -- run and generate events on the same state.
 type CmdHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
---type QueryHandler model query err
---    = forall a . Exception err => model -> query a -> IO (Either err a)
 
 type CmdRunner c = forall method a . c method a -> IO a
-
---runCmd
---    :: forall err m verb a cmd . (WriteModel m)
---    => m
---    -> (cmd verb a -> HandlerReturn (Model m) (Event m) err verb a)
---    -> cmd verb a
---    -> IO a
---runCmd m cmdRunner cmd = do
---    cmdRunner cmd >>= transactionalUpdate @_ @_ @err m
-
-
-
--- | Run a query
--- runQuery :: (Exception err, ReadModel rm)
---     => rm
---     -> (Model rm -> query a -> IO (Either err a))
---     -> query a
---     -> IO a
--- runQuery rm queryRunner query = do
---     m <- getModel rm
---     r <- queryRunner m query
---     either throwM pure r
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

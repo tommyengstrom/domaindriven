@@ -1,7 +1,5 @@
 module DomainDriven
-    ( CmdHandler
-    , CmdRunner
-    , mkId
+    ( mkId
     , module X
     , ReadModel(..)
     , Stored(..)
