@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 287a21f0d2a93a3f8541d7050b9c36a0ee08b3ea2b66c86bbb665d26f28fa85e
+-- hash: 9a341bfad166f5a0f74fab2e5e31b264e5c0ed863dc7b8ac3bc7cd21713409c4
 
 name:           domain-driven
 version:        0.1.0.0
@@ -32,7 +32,6 @@ library
       DomainDriven.Internal.HasFieldName
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
-      DomainDriven.Persistance.FileWithSTM
       DomainDriven.Persistance.ForgetfulInMemory
       DomainDriven.Persistance.Postgres
       DomainDriven.Server
@@ -144,6 +143,7 @@ executable simple
     , random
     , safe
     , servant
+    , servant-openapi3
     , servant-server
     , stm
     , streaming

@@ -1,6 +1,7 @@
 {-# LANGUAGE UndecidableInstances #-}
-    {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
@@ -10,49 +11,24 @@ import           Data.Time
 import           System.Random
 import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
-import           Data.Void
 import           Servant
-import           GHC.TypeLits
 import           Data.Kind
 import           Data.UUID                      ( UUID )
-
---data AfterUpdate a
---    HandlerReturn (HandlerType 'GET code cts) model event (AfterUpdate a) =
---        TypeError ('Text "GET methods cannot update the model")
---    HandlerReturn (HandlerType 'POST code cts) model event (AfterUpdate a) =
---        (model -> a, [event])
-
---class Monad m => HasModel m model where
---    fetchModel :: m model
-
--- | This is `Verb` from servant, but without the return type
--- data HandlerType (method :: StdMethod) (statusCode :: Nat) (contentTypes :: [Type])
 
 type CMD = Verb 'POST 200 '[JSON]
 type QUERY = Verb 'GET 200 '[JSON]
 
--- Instead of StdMethod I could use something that carries more information, namely
--- content-type and return code. I could then define type aliases `Cmd` and `Query`
-type family HandlerReturn model event method a where
-    HandlerReturn model event (Verb 'GET code cts)  a = ReturnValue 'False model event a
-    HandlerReturn model event (Verb 'POST code cts) a = ReturnValue 'True model event a
-    HandlerReturn model event (Verb 'PUT code cts) a = ReturnValue 'True model event a
-    HandlerReturn model event (Verb 'PATCH code cts) a = ReturnValue 'True model event a
-    HandlerReturn model event (Verb 'DELETE code cts) a = ReturnValue 'True model event a
-
 -- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
-type family CanMutate method :: Bool where
+type family CanMutate (method :: Type -> Type) :: Bool where
     CanMutate (Verb 'GET code cts) = 'False
     CanMutate (Verb 'POST code cts) = 'True
     CanMutate (Verb 'PUT code cts) = 'True
     CanMutate (Verb 'PATCH code cts) = 'True
     CanMutate (Verb 'DELETE code cts) = 'True
 
-data ReturnValue mutates model event a where
-    Query ::(model -> IO a) -> ReturnValue 'False model event a
-    Cmd ::(model -> IO (a, [event])) -> ReturnValue 'True model event a
-    -- Query :: (model -> IO a) -> ReturnValue model Void err a
-    -- Cmd   :: IO (model -> (a, [event])) -> ReturnValue model event err a
+data HandlerType (method :: Type -> Type) model event a where
+    Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
+    Cmd ::CanMutate method ~ 'True => (model -> IO (a, [event])) -> HandlerType method model event a
 
 
 class ReadModel p where
@@ -69,7 +45,8 @@ class ReadModel p => WriteModel p where
 runCmd
     :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -> (forall a . cmd method a -> ReturnValue (CanMutate method) model event a)
+    -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
+    -> (forall a . cmd method a -> HandlerType method model event a)
     -> cmd method ret
     -> IO ret
 runCmd p handleCmd cmd = case handleCmd cmd of

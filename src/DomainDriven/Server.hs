@@ -181,7 +181,9 @@ mkApiPiece opts = \case
             subServerSpec <- mkServerSpec opts (GadtName subCmd')
             pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
     c ->
-        fail $ "Expected a GADT constructor representing an endpoint but got:\n" <> show c
+        fail
+            $  "Expected a GADT constructor representing an endpoint but got:\n"
+            <> pprint c
 
 -- | Turn "OhYEAH" into "ohYEAH"...
 lowerFirst :: String -> String

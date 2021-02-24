@@ -13,7 +13,7 @@ import           Servant                 hiding ( Description )
 import           Data.Typeable                  ( Typeable )
 import           Control.Exception              ( Exception )
 import           Network.Wai.Handler.Warp       ( run )
-import           DomainDriven.Persistance.FileWithSTM
+import           DomainDriven.Persistance.ForgetfulInMemory
 import           GHC.Generics                   ( Generic )
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.Aeson                     ( FromJSON
@@ -31,16 +31,15 @@ import           Servant.OpenApi
 
 
 
-data StoreCmd a where
---  AddItem ::Item -> StoreCmd ()
---  RemoveItem ::ItemKey -> StoreCmd ()
---  UpdateItem ::ItemCmd a -> StoreCmd a
-  ManipulateItem ::ItemKey -> ItemCmd a -> StoreCmd a
+data StoreCmd method a where
+  AddItem ::Item -> StoreCmd CMD ()
+  RemoveItem ::ItemKey -> StoreCmd CMD ()
+  UpdateItem ::ItemCmd method a -> StoreCmd method a
 
 
-data ItemCmd a where
-  ChangeDescription ::Description -> ItemCmd ()
-  ChangePrice ::Price -> ItemCmd ()
+data ItemCmd method a where
+  ChangeDescription ::Description -> ItemCmd CMD ()
+  ChangePrice ::Price -> ItemCmd CMD ()
 
 ------------------------------------------------------------------------------------------
 -- Item model ----------------------------------------------------------------------------
@@ -84,14 +83,14 @@ applyItemEvent m (Stored e _ _) = case e of
 data ItemError = PriceMustBePositive
     deriving (Show, Eq, Typeable, Exception)
 
-handleItemCmd :: CmdHandler Item ItemEvent ItemCmd ItemError
+handleItemCmd :: ItemCmd method a -> HandlerType method Item ItemEvent a
 handleItemCmd = \case
-    ChangeDescription s -> pure $ \_ -> Right ((), [ChangedDescription s])
-    ChangePrice       p -> do
+    ChangeDescription s -> Cmd $ \_ -> pure ((), [ChangedDescription s])
+    ChangePrice       p -> Cmd $ \_ -> do
         when (p < 0) $ throwIO PriceMustBePositive
         -- Throwing the exception while in IO yields the same result as returning
         -- `Left ItemError` in the continuation.
-        pure $ \_ -> Right ((), [ChangedPrice p])
+        pure ((), [ChangedPrice p])
 
 
 
@@ -118,19 +117,18 @@ applyStoreEvent m se@(Stored event _timestamp _uuid) = case event of
     UpdatedItem iKey iEvent ->
         M.adjust (`applyItemEvent` se { storedEvent = iEvent }) iKey m
 
-handleStoreCmd :: CmdHandler StoreModel StoreEvent StoreCmd StoreError
+handleStoreCmd :: StoreCmd method a -> HandlerType method StoreModel StoreEvent a
 handleStoreCmd = \case
-    --AddItem i -> do
-    --    putStrLn "AddItem"
-    --    iKey <- ItemKey <$> mkId
-    --    pure $ \_ -> Right ((), [AddedItem iKey i])
-    --RemoveItem iKey -> do
-    --    putStrLn "RemoveItem"
-    --    pure $ \m -> case M.lookup iKey m of
-    --        Just _  -> Right ((), [RemovedItem iKey])
-    --        Nothing -> Left NoSuchItem
-    --UpdateItem _       -> putStrLn "UpdateItem" *> undefined
-    ManipulateItem _ _ -> putStrLn "ManipulateItem" *> undefined
+    AddItem i -> Cmd $ \_ -> do
+        putStrLn "AddItem"
+        iKey <- ItemKey <$> mkId
+        pure ((), [AddedItem iKey i])
+    RemoveItem iKey -> Cmd $ \m -> do
+        putStrLn "RemoveItem"
+        case M.lookup iKey m of
+            Just _  -> pure ((), [RemovedItem iKey])
+            Nothing -> throwM NoSuchItem
+    UpdateItem _ -> Cmd $ \_ -> putStrLn "UpdateItem" *> undefined
 
 $(mkCmdServer defaultApiOptions ''StoreCmd)
 
@@ -170,7 +168,7 @@ server = storeCmdServer
 main :: IO ()
 main = do
     -- Then we need to create the model
-    dm <- createFileWithSTM "/tmp/hierarcicalevents.sjson" applyStoreEvent mempty
+    dm <- createForgetful applyStoreEvent mempty
 
     BL.writeFile "/tmp/0000test_api.json" . encode . toOpenApi $ Proxy @StoreCmdApi
     -- Print the API documentation before starting the server

@@ -1,11 +1,13 @@
 module DomainDriven
-    ( mkId
+    ( CmdHandler
+    , CmdRunner
+    , mkId
     , module X
     , ReadModel(..)
     , Stored(..)
     , CMD
     , QUERY
-    , ReturnValue(..)
+    , HandlerType(..)
     , runCmd
     , CanMutate
     , UUID

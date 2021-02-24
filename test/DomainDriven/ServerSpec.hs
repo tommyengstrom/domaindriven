@@ -55,14 +55,12 @@ type StoreModel = ()
 type StoreEvent = ()
 
 
-handleStoreCmd
-    :: StoreCmd method a -> ReturnValue (CanMutate method) StoreModel StoreEvent a
+handleStoreCmd :: StoreCmd method a -> HandlerType method StoreModel StoreEvent a
 handleStoreCmd = \case
     AddToCart _       -> Cmd $ \_ -> pure ((), [])
     ItemAction _ icmd -> handleItemCmd icmd
 
-handleItemCmd
-    :: ItemCmd method a -> ReturnValue (CanMutate method) StoreModel StoreEvent a
+handleItemCmd :: ItemCmd method a -> HandlerType method StoreModel StoreEvent a
 handleItemCmd = \case
     SubOp1     -> Cmd $ \_ -> pure ((), [])
     SubOp2 i _ -> Cmd $ \_ -> pure (i, [])

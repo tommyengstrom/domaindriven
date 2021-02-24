@@ -112,6 +112,7 @@ executables:
     dependencies:
     - domain-driven
     - wai
+    - servant-openapi3
     - warp
     ghc-options:
     - -threaded

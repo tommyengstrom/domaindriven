@@ -10,7 +10,6 @@ import           DomainDriven
 import           Prelude
 import           Servant
 import           Data.Typeable                  ( Typeable )
-import           DomainDriven.Internal.Class
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Servant.OpenApi
 import           Control.Monad.Catch
@@ -32,8 +31,7 @@ data CounterCmd method return where
    IncreaseCounter ::CounterCmd CMD Int
    AddToCounter ::Int -> CounterCmd CMD Int
 
-handleCmd
-    :: CounterCmd method a -> ReturnValue (CanMutate method) CounterModel CounterEvent a
+handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent a
 handleCmd = \case
     GetCounter      -> Query $ pure
     IncreaseCounter -> Cmd $ \m -> pure (m + 1, [CounterIncreased])

@@ -16,19 +16,31 @@ import           Control.Lens
 import           Control.Monad.Except
 import           Data.Maybe
 
-newtype Wrap (s :: Symbol) a = Wrap {unWrap :: a}
-    deriving newtype (Show, Eq, Ord, FromJSON, ToJSON, Num, ToJSONKey, FromJSONKey)
-    deriving stock (Generic, Functor)
 
-type ItemKey = Wrap "ItemKey" Int
-type Quantity = Wrap "Quantity" Int
+
+newtype ItemKey = ItemKey Int
+    deriving (Show)
+    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+newtype Quantity = Quantity Int
+    deriving (Show)
+    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+newtype ItemName = ItemName Text
+    deriving (Show)
+    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+newtype Price = Price Text
+    deriving (Show)
+    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
 
 -- Command
-data StoreCmd a where
-    BuyItem    ::ItemKey -> Quantity -> StoreCmd ()
-    Restock    ::ItemKey -> Quantity -> StoreCmd ()
-    AddItem    ::ItemInfo -> StoreCmd ItemKey
-    RemoveItem ::ItemKey -> StoreCmd ()
+data Store method a where
+    BuyItem    ::ItemKey -> Quantity -> Store CMD ()
+    ListItems :: Store QUERY (Map ItemKey ItemInfo)
+    Admin :: Admin method a -> Store method a
+
+data Admin method a where
+    Restock    ::ItemKey -> Quantity -> Admin CMD ()
+    AddItem    :: ItemName -> -> Admin CMD ItemInfo
+    RemoveItem ::ItemKey -> Admin CMD ()
 
 data StoreEvent
     = BoughtItem ItemKey Quantity
@@ -39,7 +51,9 @@ data StoreEvent
     deriving anyclass (FromJSON, ToJSON)
 
 data ItemInfo = ItemInfo
-    { quantity :: Quantity
+    { key :: ItemKey
+    , name :: ItemName
+    , quantity :: Quantity
     , price    :: Int
     }
     deriving (Show, Eq, Ord, Generic, ToJSON, FromJSON)
