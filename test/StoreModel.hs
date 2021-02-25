@@ -7,8 +7,9 @@ import           DomainDriven
 import           DomainDriven.Server
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           Prelude
-import           Data.Aeson                     ( encode )
-import           Data.Aeson                     ( ToJSON
+import qualified Data.Text                                    as T
+import           Data.Aeson                     ( encode
+                                                , ToJSON
                                                 , FromJSON
                                                 , FromJSONKey
                                                 , ToJSONKey
@@ -68,6 +69,7 @@ data ItemInfo = ItemInfo
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction CMD ()
     ListItems ::StoreAction QUERY [ItemInfo]
+    Search ::Text -> StoreAction QUERY [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
 
@@ -101,7 +103,11 @@ handleStoreAction = \case
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
         pure ((), [BoughtItem iKey quantity'])
-    ListItems           -> Query $ pure . M.elems
+    ListItems -> Query $ pure . M.elems
+    Search t  -> Query $ \m -> do
+        let matches :: ItemInfo -> Bool
+            matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
+        pure . filter matches $ M.elems m
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
