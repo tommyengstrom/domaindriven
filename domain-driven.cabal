@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 875c096b92a738d76443cfd96e1a090f01009af6b5046bec532f946e773954ab
+-- hash: 3704989d3388d40353fc9ea1ffb8a4e030e09524d2ff5484ec233453e1ee24c9
 
 name:           domain-driven
 version:        0.1.0.0
@@ -69,50 +69,6 @@ library
     , unordered-containers
     , uuid
     , vector
-  default-language: Haskell2010
-
-executable hierarchical
-  main-is: Main.hs
-  other-modules:
-      Paths_domain_driven
-  hs-source-dirs:
-      examples/hierarchical
-  default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
-  build-depends:
-      aeson
-    , aeson-pretty
-    , async
-    , base >=4.7 && <5
-    , bytestring
-    , containers
-    , deepseq
-    , directory
-    , domain-driven
-    , exceptions
-    , generic-lens
-    , lens
-    , monad-loops
-    , mtl
-    , openapi3
-    , postgresql-simple
-    , random
-    , safe
-    , servant
-    , servant-docs
-    , servant-openapi3
-    , servant-server
-    , stm
-    , streaming
-    , template-haskell
-    , text
-    , time
-    , transformers
-    , unordered-containers
-    , uuid
-    , vector
-    , wai
-    , warp
   default-language: Haskell2010
 
 executable simple
@@ -186,6 +142,7 @@ test-suite domain-driven-test
     , exceptions
     , generic-lens
     , hspec
+    , hspec-core
     , http-client
     , lens
     , monad-loops

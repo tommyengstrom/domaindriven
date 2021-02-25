@@ -96,6 +96,7 @@ tests:
     dependencies:
     - domain-driven
     - hspec
+    - hspec-core
     - QuickCheck
     - quickcheck-classes
     - quickcheck-arbitrary-adt
@@ -114,22 +115,6 @@ executables:
     - wai
     - servant-openapi3
     - warp
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -Werror
-    - -Wall
-
-  hierarchical:
-    main:                Main.hs
-    source-dirs:         examples/hierarchical
-    dependencies:
-    - domain-driven
-    - wai
-    - warp
-    - servant-docs
-    - servant-openapi3
     ghc-options:
     - -threaded
     - -rtsopts

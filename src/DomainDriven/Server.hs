@@ -306,11 +306,11 @@ mkApiTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
     epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
-    topLevelDec <- case epTypes of
+    topLevelDec <- case reverse epTypes of -- :<|> is right associative
         []     -> fail "Server contains no endpoints"
         t : ts -> do
             let fish :: Type -> Type -> Q Type
-                fish b a = [t| $(pure b) :<|> $(pure a) |]
+                fish b a = [t| $(pure a) :<|> $(pure b) |]
             TySynD apiTypeName [] <$> lift (foldM fish t ts)
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDecs (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
@@ -391,9 +391,9 @@ mkServerDec spec = do
             pure $ VarE n `AppE` VarE runnerName
 
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
-    body     <- case handlers of
+    body     <- case reverse handlers of -- :<|> is right associative
         []     -> fail "Server contains no endpoints"
-        e : es -> lift $ foldM (\b a -> [| $(pure b) :<|> $(pure a) |]) e es
+        e : es -> lift $ foldM (\b a -> [| $(pure a) :<|> $(pure b) |]) e es
     let serverFunDec :: Dec
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <- mconcat
