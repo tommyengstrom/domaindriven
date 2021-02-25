@@ -19,6 +19,7 @@ import           Control.Monad.Catch            ( throwM )
 import           Servant                        ( ServerError(..)
                                                 , Proxy(..)
                                                 , FromHttpApiData
+                                                , ToHttpApiData
                                                 , err404
                                                 , err422
                                                 )
@@ -42,7 +43,7 @@ import           Network.Wai.Handler.Warp       ( run
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
     deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName, ToParamSchema)
-    deriving newtype (FromHttpApiData)
+    deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
