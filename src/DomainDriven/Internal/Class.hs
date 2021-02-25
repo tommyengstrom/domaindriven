@@ -9,7 +9,6 @@ import           Data.Aeson
 import           Prelude
 import           Data.Time
 import           System.Random
-import           Control.Monad.Catch
 import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Kind
@@ -65,8 +64,8 @@ runCmd p handleCmd cmd = case handleCmd cmd of
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type CmdHandler model event cmd err
-    = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
+type CmdHandler model event cmd
+    = forall method a . cmd method a -> HandlerType method model event a
 
 type CmdRunner c = forall method a . c method a -> IO a
 

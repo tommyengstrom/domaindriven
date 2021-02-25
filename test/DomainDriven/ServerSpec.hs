@@ -48,8 +48,7 @@ data StoreLookup a where
     MultipleParameters ::ItemKey -> String -> Int -> StoreLookup Item
 
 
-$(mkCmdServer testServerOptions ''StoreCmd)
--- $(mkQueryServer defaultApiOptions ''StoreLookup)
+$(mkServer testServerOptions ''StoreCmd)
 
 type StoreModel = ()
 type StoreEvent = ()

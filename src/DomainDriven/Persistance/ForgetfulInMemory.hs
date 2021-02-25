@@ -46,21 +46,3 @@ instance WriteModel (ForgetfulInMemory m e) where
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
             pure r
-
-
---instance Exception err =>
---        PersistanceHandler model event err (ForgetfulInMemory model event) Query a where
---    dealWithIt p f cmd = do
---        m <- getModel p :: IO model
---        either throwM pure =<< f cmd m
---
---
---instance Exception err =>
---        PersistanceHandler model event err (ForgetfulInMemory model event) Cmd a where
---    dealWithIt p f cmd = do
---        cont <- f cmd
---        transactionalUpdate p cont
---
---instance {-# INCOHERENT #-} Exception err =>
---        PersistanceHandler model event err (ForgetfulInMemory model event) method a where
---    dealWithIt = undefined

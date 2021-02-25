@@ -229,15 +229,16 @@ instance ReadModel (PostgresStateAndEvent m e) where
 
 instance WriteModel (PostgresStateAndEvent m e) where
     transactionalUpdate pg cmd = do
-        conn      <- getConnection pg
-        -- lock events able
-        (a, evs)  <- cmd
-        m         <- getModel pg
-        storedEvs <- traverse toStored evs
-        let newM = foldl' (app pg) m storedEvs
-        _ <- (writeEvents pg) conn storedEvs
-        _ <- (writeState pg) conn newM
-        pure a
+        conn <- getConnection pg
+        withTransaction conn $ do
+            _         <- lockState pg conn
+            (a, evs)  <- cmd
+            m         <- getModel pg
+            storedEvs <- traverse toStored evs
+            let newM = foldl' (app pg) m storedEvs
+            _ <- (writeEvents pg) conn storedEvs
+            _ <- (writeState pg) conn newM
+            pure a
 
 
 migrate1to1

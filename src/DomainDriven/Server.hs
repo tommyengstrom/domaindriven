@@ -212,8 +212,8 @@ verifySpec _ = pure ()
 ------------------------------------------------------------------------------------------
 
 -- |  Generate the server from the spec
-mkCmdServer :: ApiOptions -> Name -> Q [Dec]
-mkCmdServer opts gadtName = do
+mkServer :: ApiOptions -> Name -> Q [Dec]
+mkServer opts gadtName = do
     spec <- mkServerSpec opts (GadtName gadtName)
     verifySpec spec
     let si :: ServerInfo

@@ -1,98 +1,135 @@
+{-# LANGUAGE TemplateHaskell #-}
 module StoreModel where
 
 
 import qualified Data.Map                                     as M
 import           DomainDriven
+import           DomainDriven.Server
 import           Prelude
-import           Data.Aeson
-import           GHC.TypeLits
-import           Data.Generics.Product
-import           Control.Monad.Catch
-import           Safe                           ( maximumMay )
-import           Data.Typeable
-import           Data.Map                       ( Map )
+import           Data.Aeson                     ( encode )
+import           Data.Aeson                     ( ToJSON
+                                                , FromJSON
+                                                , FromJSONKey
+                                                , ToJSONKey
+                                                )
+import           Data.Text                      ( Text )
+import           Control.Monad.Catch            ( throwM )
+import           Servant                        ( ServerError(..)
+                                                , Proxy(..)
+                                                , err404
+                                                , err422
+                                                )
 import           GHC.Generics                   ( Generic )
-import           Control.Lens
-import           Control.Monad.Except
-import           Data.Maybe
+import           Control.Monad                  ( when )
+import qualified Data.ByteString.Lazy.Char8                   as BL
+import           Servant.Server                 ( serve )
+import           Data.String                    ( IsString )
+import           Data.OpenApi                   ( ToSchema )
+import           Servant.OpenApi
+import           Network.Wai.Handler.Warp       ( run
+                                                , Port
+                                                )
 
-
-
-newtype ItemKey = ItemKey Int
-    deriving (Show)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+------------------------------------------------------------------------------------------
+-- Defining the types we need                                                           --
+-- `HasFieldName` defines the name the type will get in the request body.               --
+------------------------------------------------------------------------------------------
+newtype ItemKey = ItemKey UUID
+    deriving (Show, Eq, Ord, Generic)
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName)
 newtype Quantity = Quantity Int
-    deriving (Show)
+    deriving (Show, Eq, Ord, Generic)
+    deriving newtype (Num)
     deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
 newtype ItemName = ItemName Text
-    deriving (Show)
+    deriving (Show, Eq, Ord, Generic)
     deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
-newtype Price = Price Text
-    deriving (Show)
+    deriving newtype (IsString)
+newtype Price = Price Int
+    deriving (Show, Eq, Ord, Generic)
+    deriving newtype (Num)
     deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
 
--- Command
-data Store method a where
-    BuyItem    ::ItemKey -> Quantity -> Store CMD ()
-    ListItems :: Store QUERY (Map ItemKey ItemInfo)
-    Admin :: Admin method a -> Store method a
+data ItemInfo = ItemInfo
+    { key      :: ItemKey
+    , name     :: ItemName
+    , quantity :: Quantity
+    , price    :: Price
+    }
+    deriving (Show, Eq, Generic, ToJSON, FromJSON, ToSchema)
 
-data Admin method a where
-    Restock    ::ItemKey -> Quantity -> Admin CMD ()
-    AddItem    :: ItemName -> -> Admin CMD ItemInfo
-    RemoveItem ::ItemKey -> Admin CMD ()
+-- | The store actions
+-- `method` is `Verb` from servant without the returntype, `a`, applied
+data StoreAction method a where
+    BuyItem    ::ItemKey -> Quantity -> StoreAction CMD ()
+    ListItems ::StoreAction QUERY [ItemInfo]
+    StockQuantity ::ItemKey -> StoreAction QUERY Quantity
+    AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
 
+data AdminAction method a where
+    Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
+    AddItem    ::ItemName -> Quantity -> Price -> AdminAction CMD ItemKey
+    RemoveItem ::ItemKey -> AdminAction CMD ()
+
+-- | The event
+-- Store state of the store is fully defined by
+-- `foldl' applyStoreEvent mempty listOfEvents`
 data StoreEvent
     = BoughtItem ItemKey Quantity
     | Restocked ItemKey Quantity
-    | AddedItem ItemKey ItemInfo
+    | AddedItem ItemKey ItemName Price
     | RemovedItem ItemKey
-    deriving stock (Show, Eq, Ord, Generic)
+    deriving stock (Show, Eq, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
-data ItemInfo = ItemInfo
-    { key :: ItemKey
-    , name :: ItemName
-    , quantity :: Quantity
-    , price    :: Int
-    }
-    deriving (Show, Eq, Ord, Generic, ToJSON, FromJSON)
+type StoreModel = M.Map ItemKey ItemInfo
 
-data StoreError
-    = NotEnoughStock
-    | NoSuchItem
-    deriving (Show, Eq, Ord, Typeable, Exception)
+------------------------------------------------------------------------------------------
+-- Action handlers                                                                      --
+------------------------------------------------------------------------------------------
+handleStoreAction :: CmdHandler StoreModel StoreEvent StoreAction
+handleStoreAction = \case
+    BuyItem iKey quantity' -> Cmd $ \m -> do
+        let available = maybe 0 quantity $ M.lookup iKey m
+        when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
+        pure ((), [BoughtItem iKey quantity'])
+    ListItems          -> Query $ pure . M.elems
+    StockQuantity iKey -> Query $ pure . maybe 0 quantity . M.lookup iKey
+    AdminAction   cmd  -> handleAdminAction cmd
 
-type StoreModel = Map ItemKey ItemInfo
-
--- handleStoreCmd :: StoreCmd a -> IO (StoreModel -> Either StoreError (a, [StoreEvent]))
-handleStoreCmd :: CmdHandler StoreModel StoreEvent StoreCmd StoreError
-handleStoreCmd = \case
-    BuyItem iKey q -> pure $ \m -> runExcept $ do
-        let available = maybe 0 (^. field @"quantity") $ M.lookup iKey m
-        when (available < q) $ throwError NotEnoughStock
-        pure ((), [BoughtItem iKey q])
-    Restock iKey q -> pure $ \m -> runExcept $ do
-        when (M.notMember iKey m) $ throwError NoSuchItem
+handleAdminAction :: CmdHandler StoreModel StoreEvent AdminAction
+handleAdminAction = \case
+    Restock iKey q -> Cmd $ \m -> do
+        when (M.notMember iKey m) $ throwM err404
         pure ((), [Restocked iKey q])
-    AddItem iInfo -> pure $ \m -> runExcept $ do
-        let iKey = succ <$> fromMaybe (Wrap 0) (maximumMay $ M.keys m)
-        pure (iKey, [AddedItem iKey iInfo])
-    RemoveItem iKey -> pure $ \m -> runExcept $ do
-        when (M.notMember iKey m) $ throwError NoSuchItem
+    AddItem name' quantity' price -> Cmd $ \_ -> do
+        iKey <- ItemKey <$> mkId
+        pure (iKey, [AddedItem iKey name' price, Restocked iKey quantity'])
+    RemoveItem iKey -> Cmd $ \m -> do
+        when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
+------------------------------------------------------------------------------------------
+-- Event handler                                                                        --
+------------------------------------------------------------------------------------------
 applyStoreEvent :: StoreModel -> Stored StoreEvent -> StoreModel
 applyStoreEvent m (Stored e _ _) = case e of
-    BoughtItem iKey q -> M.update (Just . over (field @"quantity") (\x -> x - q)) iKey m
-    Restocked  iKey q    -> M.update (Just . over (field @"quantity") (+ q)) iKey m
-    AddedItem  iKey info -> M.insert iKey info m
-    RemovedItem iKey     -> M.delete iKey m
+    BoughtItem iKey q -> M.update (\ii -> Just ii { quantity = quantity ii - q }) iKey m
+    Restocked iKey q -> M.update (\ii -> Just ii { quantity = quantity ii + q }) iKey m
+    AddedItem iKey name' price -> M.insert iKey (ItemInfo iKey name' 0 price) m
+    RemovedItem iKey -> M.delete iKey m
 
-data StoreQuery a where
-    ProductCount ::StoreQuery Int
 
-queryHandler :: StoreModel -> StoreQuery a -> IO (Either StoreError a)
-queryHandler m = \case
-    ProductCount ->
-        pure . Right . length . M.keys $ M.filter ((> 0) . view (typed @Quantity)) m
+
+------------------------------------------------------------------------------------------
+-- Defining the server                                                                  --
+------------------------------------------------------------------------------------------
+$(mkServer defaultApiOptions ''StoreAction)
+
+--
+app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
+app port wm = do
+    putStrLn $ "Starting server on port: " <> show port
+    BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
+    run port $ serve (Proxy @StoreActionApi)
+                     (storeActionServer $ runCmd wm handleStoreAction)
