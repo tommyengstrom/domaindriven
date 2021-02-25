@@ -5,6 +5,7 @@ module StoreModel where
 import qualified Data.Map                                     as M
 import           DomainDriven
 import           DomainDriven.Server
+import           DomainDriven.Persistance.ForgetfulInMemory
 import           Prelude
 import           Data.Aeson                     ( encode )
 import           Data.Aeson                     ( ToJSON
@@ -16,6 +17,7 @@ import           Data.Text                      ( Text )
 import           Control.Monad.Catch            ( throwM )
 import           Servant                        ( ServerError(..)
                                                 , Proxy(..)
+                                                , FromHttpApiData
                                                 , err404
                                                 , err422
                                                 )
@@ -24,7 +26,9 @@ import           Control.Monad                  ( when )
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Servant.Server                 ( serve )
 import           Data.String                    ( IsString )
-import           Data.OpenApi                   ( ToSchema )
+import           Data.OpenApi                   ( ToSchema
+                                                , ToParamSchema
+                                                )
 import           Servant.OpenApi
 import           Network.Wai.Handler.Warp       ( run
                                                 , Port
@@ -36,7 +40,8 @@ import           Network.Wai.Handler.Warp       ( run
 ------------------------------------------------------------------------------------------
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName, ToParamSchema)
+    deriving newtype (FromHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
@@ -63,8 +68,11 @@ data ItemInfo = ItemInfo
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction CMD ()
     ListItems ::StoreAction QUERY [ItemInfo]
-    StockQuantity ::ItemKey -> StoreAction QUERY Quantity
+    ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
+
+data ItemAction method a where
+    StockQuantity ::ItemAction QUERY Quantity
 
 data AdminAction method a where
     Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
@@ -93,9 +101,9 @@ handleStoreAction = \case
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
         pure ((), [BoughtItem iKey quantity'])
-    ListItems          -> Query $ pure . M.elems
-    StockQuantity iKey -> Query $ pure . maybe 0 quantity . M.lookup iKey
-    AdminAction   cmd  -> handleAdminAction cmd
+    ListItems           -> Query $ pure . M.elems
+    AdminAction cmd     -> handleAdminAction cmd
+    ItemAction iKey cmd -> handleItemAction iKey cmd
 
 handleAdminAction :: CmdHandler StoreModel StoreEvent AdminAction
 handleAdminAction = \case
@@ -109,6 +117,14 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
+handleItemAction :: ItemKey -> CmdHandler StoreModel StoreEvent ItemAction
+handleItemAction iKey = \case
+    StockQuantity -> Query $ \m -> do
+        i <- getItem m
+        pure $ quantity i
+  where
+    getItem :: StoreModel -> IO ItemInfo
+    getItem = maybe (throwM err404) pure . M.lookup iKey
 ------------------------------------------------------------------------------------------
 -- Event handler                                                                        --
 ------------------------------------------------------------------------------------------
@@ -133,3 +149,6 @@ app port wm = do
     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
     run port $ serve (Proxy @StoreActionApi)
                      (storeActionServer $ runCmd wm handleStoreAction)
+
+forgetfulApp :: Port -> IO ()
+forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty

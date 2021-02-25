@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 9a341bfad166f5a0f74fab2e5e31b264e5c0ed863dc7b8ac3bc7cd21713409c4
+-- hash: 875c096b92a738d76443cfd96e1a090f01009af6b5046bec532f946e773954ab
 
 name:           domain-driven
 version:        0.1.0.0
@@ -163,8 +163,6 @@ test-suite domain-driven-test
   main-is: Spec.hs
   other-modules:
       DomainDriven.Internal.NamedJsonFieldsSpec
-      DomainDriven.Persistance.FileWithSTMSpec
-      DomainDriven.Persistance.ForgetfulSTMSpec
       DomainDriven.Persistance.PostgresSpec
       DomainDriven.ServerOptions
       DomainDriven.ServerSpec

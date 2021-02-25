@@ -22,7 +22,7 @@ createForgetful appEvent m0 = do
 -- | STM state without event persistance
 data ForgetfulInMemory model event = ForgetfulInMemory
     { stateRef :: IORef model
-    , app      :: model -> Stored event -> model
+    , apply    :: model -> Stored event -> model
     , seed     :: model
     , events   :: IORef [Stored event]
     , lock     :: QSem
@@ -32,7 +32,7 @@ data ForgetfulInMemory model event = ForgetfulInMemory
 instance ReadModel (ForgetfulInMemory m e) where
     type Model (ForgetfulInMemory m e) = m
     type Event (ForgetfulInMemory m e) = e
-    applyEvent ff = app ff
+    applyEvent ff = apply ff
     getModel ff = readIORef $ stateRef ff
     getEvents ff = readIORef $ events ff
 
@@ -42,7 +42,7 @@ instance WriteModel (ForgetfulInMemory m e) where
             model     <- readIORef $ stateRef ff
             (r, evs)  <- evalCmd
             storedEvs <- traverse toStored evs
-            let newModel = foldl' (app ff) model storedEvs
+            let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
             pure r
