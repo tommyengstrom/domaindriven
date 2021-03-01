@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3704989d3388d40353fc9ea1ffb8a4e030e09524d2ff5484ec233453e1ee24c9
+-- hash: eab56d41aaf3c013b00f5210715724edae89c525035f001c130a34320a42c42f
 
 name:           domain-driven
 version:        0.1.0.0
@@ -51,6 +51,7 @@ library
     , directory
     , exceptions
     , generic-lens
+    , http-types
     , lens
     , monad-loops
     , mtl

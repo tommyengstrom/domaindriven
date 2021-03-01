@@ -33,9 +33,10 @@ data ApiSpec = ApiSpec
     }
     deriving (Show, Generic)
 
+data ActionType = Mutable | Immutable deriving (Show, Eq)
 
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs HandlerSettings Type
+    = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType Type
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
@@ -126,6 +127,23 @@ guardMethodVar = \case
             $  "Method must have be a `Verb` without the return type applied. Got: "
             <> show k
 
+getActionType :: Type -> Q ActionType
+getActionType = \case
+    AppT (AppT (AppT _ (PromotedT verbName)) _) _ -> checkVerb verbName
+    ConT n -> reify n >>= \case
+        TyConI (TySynD _ [] (AppT (AppT (AppT _ (PromotedT verbName)) _) _)) ->
+            checkVerb verbName
+        info ->
+            fail
+                $  "Expected method to be a Verb of a type synonym for a Verb. Got:\n"
+                <> show info
+    ty -> fail $ "Expected a Verb without return type applied, got: " <> show ty
+  where
+    checkVerb :: Name -> Q ActionType
+    checkVerb n = case show n of
+        "Network.HTTP.Types.Method.GET" -> pure Immutable
+        _                               -> pure Mutable
+
 guardReturnVar :: TyVarBndr -> Q ()
 guardReturnVar = \case
     KindedTV _ StarT -> pure ()
@@ -148,9 +166,11 @@ mkApiPiece opts = \case
     -- The normal case
     GadtC [gadtName] bangArgs (AppT (AppT _ verb) retType) -> do
 
+        actionType <- getActionType verb
         pure $ Endpoint (ConstructorName gadtName)
                         (ConstructorArgs $ fmap snd bangArgs)
                         (HandlerSettings verb)
+                        actionType
                         retType
     -- When the constructor contain references to other domain models
     ForallC [method@(KindedTV methodName _), ret@(KindedTV retName _)] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _))
@@ -357,7 +377,7 @@ mkEndpointApiType p = enterApiPiece p $ case p of
 mkHandlerTypeDecs :: ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkHandlerTypeDecs p = enterApiPiece p $ do
     case p of
-        Endpoint name args hs retType -> do
+        Endpoint name args hs _ retType -> do
             ty <- do
                 reqBody   <- mkReqBody args
                 reqReturn <- lift $ mkReturnType retType
@@ -414,7 +434,7 @@ mkRunner spec = do
 mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
-        Endpoint _ cArgs _ ty -> do
+        Endpoint _ cArgs _ _ ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")

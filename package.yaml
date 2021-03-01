@@ -84,6 +84,8 @@ default-extensions:
 
 library:
   source-dirs: src
+  dependencies:
+    - http-types
 
 tests:
   domain-driven-test:
