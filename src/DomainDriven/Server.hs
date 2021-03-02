@@ -332,7 +332,7 @@ mkApiTypeDecs spec = do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t| $(pure a) :<|> $(pure b) |]
             TySynD apiTypeName [] <$> lift (foldM fish t ts)
-    handlerDecs <- mconcat <$> traverse mkHandlerTypeDecs (spec ^. typed @[ApiPiece])
+    handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
 
 -- | Create endpoint types to be referenced in the API
@@ -374,10 +374,24 @@ mkEndpointApiType p = enterApiPiece p $ case p of
 --     = "Create"
 --     :> ReqBody '[JSON] (NamedField1 "Customer_Create" Name Email)
 --     :> Post '[JSON] CustomerKey
-mkHandlerTypeDecs :: ApiPiece -> ReaderT ServerInfo Q [Dec]
-mkHandlerTypeDecs p = enterApiPiece p $ do
+mkHandlerTypeDec :: ApiPiece -> ReaderT ServerInfo Q [Dec]
+mkHandlerTypeDec p = enterApiPiece p $ do
     case p of
-        Endpoint name args hs _ retType -> do
+        Endpoint name args hs Immutable retType -> do
+            -- Get endpoint will use query parameters
+            ty <- do
+                queryParams <- mkQueryParams args
+                reqReturn   <- lift $ mkVerb hs <$> mkReturnType retType
+                bird        <- lift [t| (:>) |]
+                let stuff = foldr1 joinUrlParts $ queryParams <> [reqReturn]
+                    joinUrlParts :: Type -> Type -> Type
+                    joinUrlParts a b = AppT (AppT bird a) b
+                urlSegments <- mkUrlSegments name
+                lift $ prependServerEndpointName urlSegments stuff
+            epTypeName <- askEndpointTypeName
+            pure [TySynD epTypeName [] ty]
+        Endpoint name args hs Mutable retType -> do
+            -- Non-get endpoints use a request body
             ty <- do
                 reqBody   <- mkReqBody args
                 reqReturn <- lift $ mkReturnType retType
@@ -389,6 +403,21 @@ mkHandlerTypeDecs p = enterApiPiece p $ do
             epTypeName <- askEndpointTypeName
             pure [TySynD epTypeName [] ty]
         SubApi _name _args spec' -> mkServerFromSpec spec'
+
+
+mkQueryParams :: ConstructorArgs -> ReaderT ServerInfo Q [Type]
+mkQueryParams (ConstructorArgs args) = do
+    may <- lift [t| Maybe |] -- Maybe parameters are optional, others required
+    let mkTyName :: Name -> Q Type
+        mkTyName n = pure . LitT . StrTyLit $ show n
+    flip traverse args $ \case
+        ty@(AppT may'  (ConT n)) | may' == may ->
+            lift
+                [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]
+        ty@(ConT n) ->
+            lift
+                [t| QueryParam' '[Required, Servant.Strict] $(mkTyName n) $(pure ty) |]
+        ty -> fail $ "Expected type ConT, got: " <> show ty
 
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings hs) ret = hs `AppT` ret
