@@ -409,7 +409,7 @@ mkQueryParams :: ConstructorArgs -> ReaderT ServerInfo Q [Type]
 mkQueryParams (ConstructorArgs args) = do
     may <- lift [t| Maybe |] -- Maybe parameters are optional, others required
     let mkTyName :: Name -> Q Type
-        mkTyName n = pure . LitT . StrTyLit $ show n
+        mkTyName n = pure . LitT . StrTyLit $ n ^. unqualifiedString
     flip traverse args $ \case
         ty@(AppT may'  (ConT n)) | may' == may ->
             lift
@@ -463,7 +463,32 @@ mkRunner spec = do
 mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
-        Endpoint _ cArgs _ _ ty -> do
+        Endpoint _ cArgs _ Immutable ty -> do
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            varNames       <- lift $ replicateM nrArgs (newName "arg")
+            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerName    <- askHandlerName
+            bodyTag        <- askBodyTag
+            runnerName     <- lift $ newName "runner"
+            let funSig :: Dec
+                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+                    ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
+
+                funBodyBase = AppE (VarE runnerName) $ foldl
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (fmap VarE varNames)
+
+                funBody = case ty of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (fmap (pure . VarP) (runnerName:varNames ))
+                (normalB [| liftIO $ $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        Endpoint _ cArgs _ Mutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
