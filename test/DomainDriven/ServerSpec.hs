@@ -21,7 +21,7 @@ import           Data.Text                      ( Text )
 
 buyItem :: NamedFields2 "BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
-search :: NamedFields1 "Search" Text -> ClientM [ItemInfo]
+search :: Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
 restock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
 addItem :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
