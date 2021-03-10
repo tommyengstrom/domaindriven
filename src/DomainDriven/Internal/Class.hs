@@ -29,6 +29,17 @@ data HandlerType (method :: Type -> Type) model event a where
     Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
     Cmd ::CanMutate method ~ 'True => (model -> IO (a, [event])) -> HandlerType method model event a
 
+mapModel :: (m0 -> m1) -> HandlerType method m1 event a -> HandlerType method m0 event a
+mapModel f = \case
+    Query h -> Query (h . f)
+    Cmd   h -> Cmd (h . f)
+
+mapEvent :: (e0 -> e1) -> HandlerType method m e0 a -> HandlerType method m e1 a
+mapEvent f = \case
+    Query h -> Query h
+    Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        pure (ret, fmap f evs)
 
 class ReadModel p where
     type Model p :: Type
