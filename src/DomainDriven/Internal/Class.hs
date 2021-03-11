@@ -41,6 +41,13 @@ mapEvent f = \case
         (ret, evs) <- h m
         pure (ret, fmap f evs)
 
+mapResult :: (r0 -> r1) -> HandlerType method m e r0 -> HandlerType method m e r1
+mapResult f = \case
+    Query h -> Query $ fmap f . h
+    Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        pure (f ret, evs)
+
 class ReadModel p where
     type Model p :: Type
     type Event p :: Type
