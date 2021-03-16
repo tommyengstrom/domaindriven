@@ -29,19 +29,31 @@ data PersistanceError
 type PreviosEventTableName = String
 type EventTableName = String
 
+newtype EventNumber = EventNumber {unEventNumber :: Int64}
+    deriving (Show, Generic)
+    deriving newtype (Eq, Ord, Num)
+
 decodeEventRow :: (UUID, UTCTime, e) -> Stored e
 decodeEventRow (k, ts, e) = Stored e ts k
 
-data EventRow = EventRow
+data EventRowOut = EventRowOut
+    { key         :: UUID
+    , timestamp   :: UTCTime
+    , event       :: Value
+    , eventNumber :: EventNumber
+    }
+    deriving (Show, Eq, Generic)
+
+data EventRowIn = EventRowIn
     { key       :: UUID
     , timestamp :: UTCTime
     , event     :: Value
     }
     deriving (Show, Eq, Generic)
 
-fromEventRow :: (MonadThrow m, FromJSON e) => EventRow -> m (Stored e)
-fromEventRow (EventRow k ts ev) = case fromJSON ev of
-    Success a -> pure $ Stored a ts k
+fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
+fromEventRow (EventRowOut k ts ev no) = case fromJSON ev of
+    Success a -> pure $ (Stored a ts k, no)
     Error err ->
         throwM
             .  EncodingError
@@ -52,11 +64,16 @@ fromEventRow (EventRow k ts ev) = case fromJSON ev of
             <> "\nWhen trying to parse:\n"
             <> show ev
 
-toEventRow :: ToJSON e => Stored e -> EventRow
-toEventRow (Stored e ts k) = EventRow k ts (toJSON e)
+--toEventRow :: ToJSON e => Stored e -> EventRowIn
+--toEventRow (Stored e ts k) = EventRow k ts (toJSON e)
 
-instance FromRow EventRow where
-    fromRow = EventRow <$> field <*> field <*> fieldWith fromJSONField
+instance FromRow EventRowOut where
+    fromRow =
+        EventRowOut
+            <$> field
+            <*> field
+            <*> fieldWith fromJSONField
+            <*> fmap EventNumber field
 
 data StateRow m = StateRow
     { modelName :: Text
@@ -103,7 +120,7 @@ createPostgresPersistance
     -> model
     -> IO (PostgresEvent model event)
 createPostgresPersistance getConn eventTable app' seed' = do
-    ref <- newIORef seed'
+    ref <- newIORef (seed', 0)
     pure $ PostgresEvent { getConnection  = getConn
                          , eventTableName = eventTable
                          , modelIORef     = ref
@@ -119,14 +136,37 @@ createEventTable conn eventTable =
         <> fromString eventTable
         <> "\" \
                         \( id uuid primary key\
+                        \, event_number bigserial\
                         \, timestamp timestamptz not null default now()\
                         \, event jsonb not null\
                         \);"
 
-queryEvents :: (Typeable a, FromJSON a) => Connection -> EventTableName -> IO [Stored a]
+queryEvents
+    :: (Typeable a, FromJSON a)
+    => Connection
+    -> EventTableName
+    -> IO [(Stored a, EventNumber)]
 queryEvents conn eventTable = traverse fromEventRow =<< query_
     conn
-    ("select * from \"" <> fromString eventTable <> "\" order by timestamp")
+    ("select * from \"" <> fromString eventTable <> "\" order by event_number")
+
+
+queryEventsAfter
+    :: (Typeable a, FromJSON a)
+    => Connection
+    -> EventTableName
+    -> EventNumber
+    -> IO [(Stored a, EventNumber)]
+queryEventsAfter conn eventTable (EventNumber lastEvent) =
+    traverse fromEventRow =<< query_
+        conn
+        (  "select * from \""
+        <> fromString eventTable
+        <> "\" where event_number > "
+        <> fromString (show lastEvent)
+        <> " order by event_number"
+        )
+
 
 -- queryState' :: (FromJSON a, Typeable a) => Connection -> StateTableName -> IO [a]
 -- queryState' conn stateTable = fmap fromStateRow
@@ -136,21 +176,35 @@ queryEvents conn eventTable = traverse fromEventRow =<< query_
 -- lockState' conn stateTable =
 --     execute_ conn ("lock \"" <> fromString stateTable <> "\" in exclusive mode")
 
-writeEvents :: ToJSON a => Connection -> EventTableName -> [Stored a] -> IO Int64
-writeEvents conn eventTable storedEvents = executeMany
-    conn
-    (  "insert into \""
-    <> fromString eventTable
-    <> "\" (id, timestamp, event) \
-        \values (?, ?, ?)"
-    )
-    (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) storedEvents)
+
+writeEvents
+    :: forall a
+     . (FromJSON a, ToJSON a)
+    => Connection
+    -> EventTableName
+    -> [Stored a]
+    -> IO EventNumber
+writeEvents conn eventTable storedEvents = do
+    _ <- executeMany
+        conn
+        (  "insert into \""
+        <> fromString eventTable
+        <> "\" (id, timestamp, event) \
+            \values (?, ?, ?)"
+        )
+        (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
+              storedEvents
+        )
+    rows <- traverse (fromEventRow @a) =<< query_
+        conn
+        ("select max(event_number) from \"" <> fromString eventTable <> "\"")
+    pure $ foldl' max 0 (fmap snd rows)
 
 -- | Keep the events and state in postgres!
 data PostgresEvent model event = PostgresEvent
     { getConnection  :: IO Connection
     , eventTableName :: EventTableName
-    , modelIORef     :: IORef model
+    , modelIORef     :: IORef (model, EventNumber)
     , app            :: model -> Stored event -> model
     , seed           :: model
     }
@@ -161,14 +215,41 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     type Model (PostgresEvent m e) = m
     type Event (PostgresEvent m e) = e
     applyEvent pg = app pg
-    getModel pg = readIORef (modelIORef pg)
+    getModel pg = do
+        (model, lastEventNo) <- readIORef (modelIORef pg)
+        conn                 <- getConnection pg
+        newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
+        case newEvents of
+            [] -> pure model
+            _  -> fst <$> refreshModel pg -- The model must be updated within a transaction
+
     getEvents pg = do
         conn <- getConnection pg
-        queryEvents conn (eventTableName pg)
+        fmap fst <$> queryEvents conn (eventTableName pg)
 
-lockTable :: Connection -> EventTableName -> IO ()
-lockTable conn eventTable =
-    void $ execute_ conn ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
+refreshModel :: (Typeable e, FromJSON e) => (PostgresEvent m e) -> IO (m, EventNumber)
+refreshModel pg = do
+    -- refresh doesn't write any events but changes the state and thus needs a lock
+    withExclusiveLock pg $ \conn -> do
+        (model    , lastEventNo   ) <- readIORef (modelIORef pg)
+        (newEvents, lastNewEventNo) <- do
+            (evs, nos) <- unzip <$> queryEventsAfter conn (eventTableName pg) lastEventNo
+            pure (evs, foldl' max 0 nos)
+        case newEvents of
+            [] -> pure (model, lastEventNo)
+            _  -> do
+                let newModel = foldl' (app pg) model newEvents
+                _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
+                pure (newModel, lastNewEventNo)
+
+withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
+withExclusiveLock pg f = do
+    conn <- getConnection pg
+    withTransaction conn $ do
+        _ <- execute_
+            conn
+            ("lock \"" <> fromString (eventTableName pg) <> "\" in exclusive mode")
+        f conn
 
 instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
     transactionalUpdate pg cmd = do
@@ -182,18 +263,18 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             m         <- getModel pg
             storedEvs <- traverse toStored evs
             let newM = foldl' (app pg) m storedEvs
-            _ <- writeEvents conn eventTable storedEvs
-            _ <- writeIORef (modelIORef pg) newM
+            lastEventNo <- writeEvents conn eventTable storedEvs
+            _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
             pure a
 
 
-migrate1to1
-    :: Connection
-    -> PreviosEventTableName
-    -> EventTableName
-    -> (Value -> Value)
-    -> IO Int64
-migrate1to1 conn prevTName tName f = do
-    _             <- createEventTable conn tName
-    currentEvents <- queryEvents @Value conn prevTName
-    writeEvents conn tName $ fmap (fmap f) currentEvents
+--migrate1to1
+--    :: Connection
+--    -> PreviosEventTableName
+--    -> EventTableName
+--    -> (Value -> Value)
+--    -> IO Int64
+--migrate1to1 conn prevTName tName f = do
+--    _             <- createEventTable conn tName
+--    currentEvents <- queryEvents @Value conn prevTName
+--    writeEvents conn tName $ fmap (fmap f) currentEvents
