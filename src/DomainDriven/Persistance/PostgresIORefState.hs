@@ -1,3 +1,4 @@
+-- | Postgres events with state as an IORef
 module DomainDriven.Persistance.PostgresIORefState where
 
 import           DomainDriven.Internal.Class
@@ -38,21 +39,14 @@ decodeEventRow (k, ts, e) = Stored e ts k
 
 data EventRowOut = EventRowOut
     { key         :: UUID
+    , eventNumber :: EventNumber
     , timestamp   :: UTCTime
     , event       :: Value
-    , eventNumber :: EventNumber
     }
-    deriving (Show, Eq, Generic)
-
-data EventRowIn = EventRowIn
-    { key       :: UUID
-    , timestamp :: UTCTime
-    , event     :: Value
-    }
-    deriving (Show, Eq, Generic)
+    deriving (Show, Eq, Generic, FromRow)
 
 fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
-fromEventRow (EventRowOut k ts ev no) = case fromJSON ev of
+fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
     Success a -> pure $ (Stored a ts k, no)
     Error err ->
         throwM
@@ -67,13 +61,11 @@ fromEventRow (EventRowOut k ts ev no) = case fromJSON ev of
 --toEventRow :: ToJSON e => Stored e -> EventRowIn
 --toEventRow (Stored e ts k) = EventRow k ts (toJSON e)
 
-instance FromRow EventRowOut where
-    fromRow =
-        EventRowOut
-            <$> field
-            <*> field
-            <*> fieldWith fromJSONField
-            <*> fmap EventNumber field
+--instance FromRow EventRowOut where
+--    fromRow = EventRowOut <$> field <*> field <*> field <*> fieldWith fromJSONField
+
+instance FromField EventNumber where
+    fromField f bs = EventNumber <$> fromField f bs
 
 data StateRow m = StateRow
     { modelName :: Text
@@ -89,14 +81,26 @@ fromStateRow :: StateRow s -> s
 fromStateRow = state
 
 -- | Create the table required for storing state and events, if they do not yet exist.
-createTables :: (FromJSON e, Typeable e) => PostgresEvent m e -> IO ()
-createTables runner = do
+createEventTable :: (FromJSON e, Typeable e) => PostgresEvent m e -> IO ()
+createEventTable runner = do
     conn <- getConnection runner
     void (getModel runner)
         `catch` (const @_ @SqlError $ do
-                    _ <- createEventTable conn (eventTableName runner)
-                    void $ getModel runner
+                    _ <- createTable conn (eventTableName runner)
+                    void $ refreshModel runner
                 )
+  where
+    createTable :: Connection -> EventTableName -> IO Int64
+    createTable conn eventTable =
+        execute_ conn
+            $ "create table \""
+            <> fromString eventTable
+            <> "\" \
+                                \( id uuid primary key\
+                                \, event_number bigserial\
+                                \, timestamp timestamptz not null default now()\
+                                \, event jsonb not null\
+                                \);"
 
 -- | Setup the persistance model and verify that the tables exist.
 simplePostgres
@@ -108,7 +112,7 @@ simplePostgres
     -> IO (PostgresEvent m e)
 simplePostgres getConn eventTable app' seed' = do
     runner <- createPostgresPersistance getConn eventTable app' seed'
-    createTables runner
+    createEventTable runner
     pure runner
 
 createPostgresPersistance
@@ -129,17 +133,6 @@ createPostgresPersistance getConn eventTable app' seed' = do
                          }
 
 
-createEventTable :: Connection -> EventTableName -> IO Int64
-createEventTable conn eventTable =
-    execute_ conn
-        $ "create table \""
-        <> fromString eventTable
-        <> "\" \
-                        \( id uuid primary key\
-                        \, event_number bigserial\
-                        \, timestamp timestamptz not null default now()\
-                        \, event jsonb not null\
-                        \);"
 
 queryEvents
     :: (Typeable a, FromJSON a)
@@ -148,7 +141,10 @@ queryEvents
     -> IO [(Stored a, EventNumber)]
 queryEvents conn eventTable = traverse fromEventRow =<< query_
     conn
-    ("select * from \"" <> fromString eventTable <> "\" order by event_number")
+    (  "select id, event_number,timestamp,event from \""
+    <> fromString eventTable
+    <> "\" order by event_number"
+    )
 
 
 queryEventsAfter
@@ -160,7 +156,7 @@ queryEventsAfter
 queryEventsAfter conn eventTable (EventNumber lastEvent) =
     traverse fromEventRow =<< query_
         conn
-        (  "select * from \""
+        (  "select id, event_number,timestamp,event from \""
         <> fromString eventTable
         <> "\" where event_number > "
         <> fromString (show lastEvent)
@@ -195,9 +191,8 @@ writeEvents conn eventTable storedEvents = do
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
               storedEvents
         )
-    rows <- traverse (fromEventRow @a) =<< query_
-        conn
-        ("select max(event_number) from \"" <> fromString eventTable <> "\"")
+    rows <- traverse (fromEventRow @a)
+        =<< query_ conn ("select * from \"" <> fromString eventTable <> "\"")
     pure $ foldl' max 0 (fmap snd rows)
 
 -- | Keep the events and state in postgres!

@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TemplateHaskell #-}
 module StoreModel where
 
@@ -6,6 +7,7 @@ import qualified Data.Map                                     as M
 import           DomainDriven
 import           DomainDriven.Server
 import           DomainDriven.Persistance.ForgetfulInMemory
+import           Data.Typeable
 import           Prelude
 import qualified Data.Text                                    as T
 import           Data.Aeson                     ( encode
@@ -91,8 +93,8 @@ data StoreEvent
     | Restocked ItemKey Quantity
     | AddedItem ItemKey ItemName Price
     | RemovedItem ItemKey
-    deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving stock (Show, Eq, Generic, Typeable)
+    deriving (FromJSON, ToJSON) via (NamedJsonFields StoreEvent)
 
 type StoreModel = M.Map ItemKey ItemInfo
 
