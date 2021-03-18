@@ -46,7 +46,7 @@ data Test2
     | Test2b Int MyText
     | Test2c MyText
     | Test2d String String
-    | Test2e String
+    | Test2e (Maybe String)
     deriving (Show, Eq, Ord, Generic)
     deriving (FromJSON, ToJSON, ToSchema) via (NamedJsonFields Test2)
 

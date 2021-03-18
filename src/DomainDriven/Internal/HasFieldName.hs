@@ -64,7 +64,7 @@ instance HasFieldName v => HasFieldName (Vector v) where
     fieldName = "vectorOf" <> fieldName @v
 
 instance HasFieldName v => HasFieldName (Maybe v) where
-    fieldName = "m" <> fieldName @v
+    fieldName = fieldName @v
 
 class GHasFieldName t where
   gfieldName :: t x -> Text
