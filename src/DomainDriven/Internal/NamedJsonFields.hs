@@ -124,6 +124,7 @@ instance {-# OVERLAPPING #-} (ToSchema f, HasFieldName f, Selector s)
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @(Maybe f)
         usedNames <- state (\used -> (used, fName : used))
+        lift $ declareSchemaRef $ Proxy @f
         pure
             .   NamedSchema Nothing
             $   mempty
@@ -136,6 +137,7 @@ instance {-# OVERLAPPABLE #-} (ToSchema f, HasFieldName f, Selector s)
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @f
         usedNames <- state (\used -> (used, fName : used))
+        lift $ declareSchemaRef $ Proxy @f
         pure
             .   NamedSchema Nothing
             $   mempty

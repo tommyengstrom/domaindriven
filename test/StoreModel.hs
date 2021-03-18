@@ -18,17 +18,9 @@ import           Data.Aeson                     ( encode
                                                 )
 import           Data.Text                      ( Text )
 import           Control.Monad.Catch            ( throwM )
-import           Servant                        ( ServerError(..)
-                                                , Proxy(..)
-                                                , FromHttpApiData
-                                                , ToHttpApiData
-                                                , err404
-                                                , err422
-                                                )
 import           GHC.Generics                   ( Generic )
 import           Control.Monad                  ( when )
 import qualified Data.ByteString.Lazy.Char8                   as BL
-import           Servant.Server                 ( serve )
 import           Data.String                    ( IsString )
 import           Data.OpenApi                   ( ToSchema
                                                 , ToParamSchema
@@ -67,7 +59,6 @@ data ItemInfo = ItemInfo
     , price    :: Price
     }
     deriving (Show, Eq, Generic, ToJSON, FromJSON, ToSchema)
-
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction method a where
