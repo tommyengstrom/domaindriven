@@ -99,8 +99,8 @@ mkUrlSegments n = do
 defaultApiOptions :: ApiOptions
 defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "_" }
 
-getCmdDec :: GadtName -> Q Dec
-getCmdDec (GadtName n) = do
+getActionDec :: GadtName -> Q Dec
+getActionDec (GadtName n) = do
     cmdType <- reify n
     let errMsg = fail "Must be GADT with two parameters, HandlerType and return type"
     case cmdType of
@@ -221,7 +221,7 @@ upperFirst = \case
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: ApiOptions -> GadtName -> Q ApiSpec
 mkServerSpec opts n = do
-    eps <- traverse (mkApiPiece opts) =<< getConstructors =<< getCmdDec n
+    eps <- traverse (mkApiPiece opts) =<< getConstructors =<< getActionDec n
 
     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
 

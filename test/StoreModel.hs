@@ -5,6 +5,7 @@ module StoreModel where
 
 import qualified Data.Map                                     as M
 import           DomainDriven
+import           DomainDriven.Internal.Class    ( ApiOpts(..) )
 import           DomainDriven.Server
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           Data.Typeable
@@ -67,14 +68,17 @@ data StoreAction method a where
     Search ::Text -> StoreAction QUERY [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
+    deriving ApiOpts
 
 data ItemAction method a where
     StockQuantity ::ItemAction QUERY Quantity
+    deriving ApiOpts
 
 data AdminAction method a where
     Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
     AddItem    ::ItemName -> Quantity -> Price -> AdminAction CMD ItemKey
     RemoveItem ::ItemKey -> AdminAction CMD ()
+    deriving ApiOpts
 
 -- | The event
 -- Store state of the store is fully defined by
@@ -86,6 +90,7 @@ data StoreEvent
     | RemovedItem ItemKey
     deriving stock (Show, Eq, Generic, Typeable)
     deriving (FromJSON, ToJSON) via (NamedJsonFields StoreEvent)
+
 
 type StoreModel = M.Map ItemKey ItemInfo
 

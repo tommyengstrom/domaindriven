@@ -70,6 +70,19 @@ runCmd p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< getModel p
     Cmd   m -> transactionalUpdate p $ m =<< getModel p
 
+
+
+class ApiOpts (action :: (Type -> Type) -> Type -> Type) where
+    -- | Rules for turning constructors into 0 or more path segments
+    constructorToSegments :: String -> [String]
+    constructorToSegments = pure
+
+    -- | Characters to insert between generated types
+    -- defaults to "_"
+    typeSeparator :: String
+    typeSeparator = "_"
+
+
 -- | Command handler
 --
 -- Expects a command, specified using a one-parameter GADT where the parameter specifies
