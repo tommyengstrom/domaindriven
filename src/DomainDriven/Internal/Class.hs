@@ -7,6 +7,8 @@ module DomainDriven.Internal.Class where
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Prelude
+import           Control.Lens                   ( (^.) )
+import           Data.Generics.Product
 import           Data.Time
 import           System.Random
 import           GHC.Generics                   ( Generic )
@@ -72,15 +74,25 @@ runCmd p handleCmd cmd = case handleCmd cmd of
 
 
 
-class ApiOpts (action :: (Type -> Type) -> Type -> Type) where
-    -- | Rules for turning constructors into 0 or more path segments
-    constructorToSegments :: String -> [String]
-    constructorToSegments = pure
+class HasApiOptions (action :: (Type -> Type) -> Type -> Type) where
+    apiOptions :: ApiOptions
+    apiOptions = defaultApiOptions
 
-    -- | Characters to insert between generated types
-    -- defaults to "_"
-    typeSeparator :: String
-    typeSeparator = "_"
+data ApiOptions = ApiOptions
+    { renameConstructor :: String -> [String]
+    , typenameSeparator :: String
+    }
+    deriving Generic
+
+defaultApiOptions :: ApiOptions
+defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "_" }
+
+instance Show ApiOptions  where
+    show o =
+        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
+            <> o
+            ^. field @"typenameSeparator"
+            <> "\"}"
 
 
 -- | Command handler

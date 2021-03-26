@@ -11,6 +11,8 @@ module DomainDriven
     , runCmd
     , CanMutate
     , UUID
+    , defaultApiOptions
+    , ApiOptions(..)
     , NamedJsonFields(..)
     , WriteModel(..)
     ) where

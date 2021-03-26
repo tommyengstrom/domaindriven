@@ -18,6 +18,7 @@ import           Servant.Client
 import           StoreModel
 import           Data.Text                      ( Text )
 
+$(mkServer apiOptionsMap ''StoreAction)
 
 buyItem :: NamedFields2 "BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]

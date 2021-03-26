@@ -5,8 +5,12 @@ module StoreModel where
 
 import qualified Data.Map                                     as M
 import           DomainDriven
-import           DomainDriven.Internal.Class    ( ApiOpts(..) )
+import           DomainDriven.Internal.Class    ( HasApiOptions(..)
+                                                , ApiOptions(..)
+                                                , defaultApiOptions
+                                                )
 import           DomainDriven.Server
+import           DomainDriven.Config
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           Data.Typeable
 import           Prelude
@@ -68,17 +72,17 @@ data StoreAction method a where
     Search ::Text -> StoreAction QUERY [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
-    deriving ApiOpts
+    deriving HasApiOptions
 
 data ItemAction method a where
     StockQuantity ::ItemAction QUERY Quantity
-    deriving ApiOpts
+    deriving HasApiOptions
 
 data AdminAction method a where
     Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
     AddItem    ::ItemName -> Quantity -> Price -> AdminAction CMD ItemKey
     RemoveItem ::ItemKey -> AdminAction CMD ()
-    deriving ApiOpts
+    deriving HasApiOptions
 
 -- | The event
 -- Store state of the store is fully defined by
@@ -146,15 +150,18 @@ applyStoreEvent m (Stored e _ _) = case e of
 ------------------------------------------------------------------------------------------
 -- Defining the server                                                                  --
 ------------------------------------------------------------------------------------------
-$(mkServer defaultApiOptions ''StoreAction)
+apiOptionsMap :: M.Map Name ApiOptions
+apiOptionsMap = $(getApiOptionsMap)
+
+
 
 --
-app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
-app port wm = do
-    putStrLn $ "Starting server on port: " <> show port
-    BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
-    run port $ serve (Proxy @StoreActionApi)
-                     (storeActionServer $ runCmd wm handleStoreAction)
-
-forgetfulApp :: Port -> IO ()
-forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty
+-- app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
+-- app port wm = do
+--     putStrLn $ "Starting server on port: " <> show port
+--     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
+--     run port $ serve (Proxy @StoreActionApi)
+--                      (storeActionServer $ runCmd wm handleStoreAction)
+--
+-- forgetfulApp :: Port -> IO ()
+-- forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty
