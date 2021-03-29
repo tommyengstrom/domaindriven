@@ -222,7 +222,7 @@ verifySpec _ = pure ()
 -- Due to GHC stage restrictions this cannot be generated in the same module.
 --
 -- Using this require you to
-mkServer :: M.Map Name ApiOptions -> Name -> Q [Dec]
+mkServer :: M.Map String ApiOptions -> Name -> Q [Dec]
 mkServer allOpts (GadtName -> gadtName) = do
     spec <- mkServerSpec getOpts gadtName
     opts <- getOpts gadtName
@@ -236,9 +236,18 @@ mkServer allOpts (GadtName -> gadtName) = do
     runReaderT (mkServerFromSpec spec) si
   where
     getOpts :: GadtName -> Q ApiOptions
-    getOpts (GadtName n) = case M.lookup n allOpts of
+    getOpts (GadtName n) = case M.lookup (nameBase n) allOpts of
         Just o  -> pure o
-        Nothing -> fail $ "Missing options for: " <> show n
+        Nothing -> do
+            let avail = L.intercalate ", " . L.sort $ M.keys allOpts
+            fail
+                $  "Missing options for: "
+                <> nameBase n
+                <> ". Available options are: "
+                <> avail
+                <> ".\n\n"
+                <> "WARNING! Template haskell may be fucking with you! Adding an empty \
+                   \splice, `$(return [])`, before `$(getApiOptionsMap)` may solve it!"
 
 ---- |  Generate the server with shared configuration
 mkServer' :: ApiOptions -> Name -> Q [Dec]
