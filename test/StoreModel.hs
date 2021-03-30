@@ -151,10 +151,12 @@ applyStoreEvent m (Stored e _ _) = case e of
 -- Grab the config for each GADT
 ------------------------------------------------------------------------------------------
 
-$(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
+$mkServerConfig
 
-apiOptionsMap :: M.Map String ApiOptions
-apiOptionsMap = $(getApiOptionsMap)
+-- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
+--
+-- apiOptionsMap :: M.Map String ApiOptions
+-- apiOptionsMap = $(getApiOptionsMap)
 
 --
 -- app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
