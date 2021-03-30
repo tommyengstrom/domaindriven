@@ -25,6 +25,9 @@ data ServerConfig = ServerConfig
     }
     deriving Show
 
+defaultServerConfig :: ServerConfig
+defaultServerConfig = ServerConfig M.empty M.empty
+
 configName :: Name
 configName = mkName "domaindrivenServerConfig"
 

@@ -16,11 +16,14 @@ import           Prelude
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Control.Monad
+import           Data.Text                      ( Text )
+import qualified Data.Text                                    as T
 import qualified Data.List                                    as L
 import qualified Data.Map                                     as M
 import           Servant
 import           Data.Char
 import           Control.Monad.Trans
+import           DomainDriven.Config            ( ServerConfig(..) )
 import           Control.Lens
 import           Data.Generics.Product
 import           GHC.Generics                   ( Generic )
@@ -146,8 +149,8 @@ getConstructors = \case
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
 
-mkApiPiece :: (GadtName -> Q ApiOptions) -> Con -> Q ApiPiece
-mkApiPiece getOpts = \case
+mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
+mkApiPiece cfg = \case
     -- The normal case
     GadtC [gadtName] bangArgs (AppT (AppT _ verb) retType) -> do
 
@@ -183,7 +186,7 @@ mkApiPiece getOpts = \case
                         <> pprint ty
                 [] -> fail "I thought this coulnd't happen!"
 
-            subServerSpec <- mkServerSpec getOpts (GadtName subCmd')
+            subServerSpec <- mkServerSpec cfg (GadtName subCmd')
             pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
     c ->
         fail
@@ -204,10 +207,10 @@ upperFirst = \case
 
 -- | Create a ApiSpec from a GADT
 -- The GADT must have one parameter representing the return type
-mkServerSpec :: (GadtName -> Q ApiOptions) -> GadtName -> Q ApiSpec
-mkServerSpec getOpts n = do
-    eps  <- traverse (mkApiPiece getOpts) =<< getConstructors =<< getActionDec n
-    opts <- getOpts n
+mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
+mkServerSpec cfg n = do
+    eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
+    opts <- getApiOptions cfg n
     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
 
 -- | Verifies that the server do not generate overlapping paths
@@ -222,45 +225,25 @@ verifySpec _ = pure ()
 -- Due to GHC stage restrictions this cannot be generated in the same module.
 --
 -- Using this require you to
-mkServer :: M.Map String ApiOptions -> Name -> Q [Dec]
-mkServer allOpts (GadtName -> gadtName) = do
-    spec <- mkServerSpec getOpts gadtName
-    opts <- getOpts gadtName
+mkServer :: ServerConfig -> Name -> Q [Dec]
+mkServer cfg (GadtName -> gadtName) = do
+    spec <- mkServerSpec cfg gadtName
+    opts <- getApiOptions cfg gadtName
     verifySpec spec
     let si :: ServerInfo
         si = ServerInfo { baseGadt           = spec ^. typed
                         , parentConstructors = []
                         , prefixSegments     = []
                         , options            = opts
+                        , allFieldNames'     = (allFieldNames cfg)
                         }
     runReaderT (mkServerFromSpec spec) si
-  where
-    getOpts :: GadtName -> Q ApiOptions
-    getOpts (GadtName n) = case M.lookup (nameBase n) allOpts of
-        Just o  -> pure o
-        Nothing -> do
-            let avail = L.intercalate ", " . L.sort $ M.keys allOpts
-            fail
-                $  "Missing options for: "
-                <> nameBase n
-                <> ". Available options are: "
-                <> avail
-                <> ".\n\n"
-                <> "WARNING! Template haskell may be fucking with you! Adding an empty \
-                   \splice, `$(return [])`, before `$(getApiOptionsMap)` may solve it!"
 
----- |  Generate the server with shared configuration
-mkServer' :: ApiOptions -> Name -> Q [Dec]
-mkServer' opts gadtName = do
-    spec <- mkServerSpec (const $ pure opts) (GadtName gadtName)
-    verifySpec spec
-    let si :: ServerInfo
-        si = ServerInfo { baseGadt           = spec ^. typed
-                        , parentConstructors = []
-                        , prefixSegments     = []
-                        , options            = opts
-                        }
-    runReaderT (mkServerFromSpec spec) si
+getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
+getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
+    Just o  -> pure o
+    Nothing -> pure $ ApiOptions pure "_"
+
 
 -- | Carries information regarding how the API looks at the place we're currently at.
 data ServerInfo = ServerInfo
@@ -268,6 +251,7 @@ data ServerInfo = ServerInfo
     , parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
     , prefixSegments     :: [UrlSegment] -- ^ Used to give a good name to the request body
     , options            :: ApiOptions -- ^ The current options
+    , allFieldNames'     :: M.Map String Text
     }
     deriving (Show, Generic)
 
@@ -362,15 +346,18 @@ mkEndpointApiType p = enterApiPiece p $ case p of
     SubApi cName cArgs _ -> do
         urlSegments <- mkUrlSegments cName
         n           <- askApiTypeName
-        -- FIXME: This should use `fieldName` but I don't know how.
+        fieldNames  <- asks allFieldNames'
         let mkCapture :: Type -> Q Type
             mkCapture ty =
                 let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
 
+            useFieldname :: String -> String
+            useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
+
             mkLitType :: Type -> Type
             mkLitType = \case
-                VarT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
-                ConT n' -> LitT . StrTyLit $ n' ^. unqualifiedString
+                VarT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
+                ConT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
                 _       -> LitT $ StrTyLit "unknown"
 
         finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
@@ -487,7 +474,6 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
-            bodyTag        <- askBodyTag
             runnerName     <- lift $ newName "runner"
             let funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of

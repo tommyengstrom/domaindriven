@@ -15,9 +15,12 @@ module DomainDriven
     , ApiOptions(..)
     , NamedJsonFields(..)
     , WriteModel(..)
+    , ServerConfig(..)
+    , defaultServerConfig
     ) where
 
 import           DomainDriven.Internal.Class
+import           DomainDriven.Config
 import           DomainDriven.Internal.HasFieldName           as X
 import           DomainDriven.Internal.NamedJsonFields
                                                 ( NamedJsonFields(..) )
