@@ -20,7 +20,7 @@ import           Data.Text                      ( Text )
 
 $(mkServer domaindrivenServerConfig ''StoreAction)
 
-buyItem :: NamedFields2 "BuyItem" ItemKey Quantity -> ClientM NoContent
+buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity

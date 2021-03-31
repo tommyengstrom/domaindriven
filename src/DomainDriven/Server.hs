@@ -62,18 +62,6 @@ newtype ConstructorArgs = ConstructorArgs [Type]
 newtype Runner = Runner Type
     deriving (Show, Generic, Eq)
 
---    pure . StrTyLit . show $ s & unqualifiedString <>~ "Body"
---
---
---askApiPieceTypeName :: Monad m => ApiPiece -> ReaderT [Name] m Name
---askApiPieceTypeName = \case
---    Endpoint e -> local (<> e ^. typed) askApiTypeName
---    SubApi   e -> local (<> e ^. typed) askApiTypeName
---
---mkUrlSegments :: ApiOptions -> ConstructorName -> [UrlSegment]
---mkUrlSegments opts n =
---    n ^.. typed . unqualifiedString . to (renameConstructor opts) . folded . to UrlSegment
-
 mkUrlSegments :: Monad m => ConstructorName -> ReaderT ServerInfo m [UrlSegment]
 mkUrlSegments n = do
     opts <- asks (view typed)
@@ -232,6 +220,7 @@ mkServer cfg (GadtName -> gadtName) = do
     verifySpec spec
     let si :: ServerInfo
         si = ServerInfo { baseGadt           = spec ^. typed
+                        , currentGadt        = spec ^. typed
                         , parentConstructors = []
                         , prefixSegments     = []
                         , options            = opts
@@ -242,12 +231,13 @@ mkServer cfg (GadtName -> gadtName) = do
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
     Just o  -> pure o
-    Nothing -> pure $ ApiOptions pure "_"
+    Nothing -> pure $ ApiOptions pure "_" Nothing
 
 
 -- | Carries information regarding how the API looks at the place we're currently at.
 data ServerInfo = ServerInfo
     { baseGadt           :: GadtName -- ^ Use as a prefix of all types
+    , currentGadt        :: GadtName
     , parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
     , prefixSegments     :: [UrlSegment] -- ^ Used to give a good name to the request body
     , options            :: ApiOptions -- ^ The current options
@@ -259,7 +249,7 @@ askTypeName :: Monad m => ReaderT ServerInfo m Name
 askTypeName = do
     si <- ask
     let baseName :: String
-        baseName = si ^. typed @GadtName . typed @Name . unqualifiedString
+        baseName = si ^. field @"baseGadt" . typed @Name . unqualifiedString
 
         cNames :: [String]
         cNames =
@@ -293,17 +283,29 @@ askHandlerName =
 -- the normal names without any mapping.
 ------------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------
-askBodyTag :: Monad m => ReaderT ServerInfo m TyLit
-askBodyTag = do
-    urlSegments <- asks (view $ typed @[UrlSegment])
-    separator   <- asks (view $ typed @ApiOptions . field @"typenameSeparator")
-    pure . StrTyLit . L.intercalate separator $ urlSegments ^.. folded . typed
+--askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
+askBodyTag :: ConstructorName -> ReaderT ServerInfo Q TyLit
+askBodyTag cName = do
+    constructorSegments <- mkUrlSegments cName
+    gadtSegment <- asks (view $ field @"options" . field @"bodyNameBase") >>= \case
+        Just n -> pure $ UrlSegment n
+        Nothing ->
+            asks (view $ field @"currentGadt" . typed . to nameBase . to UrlSegment)
+
+    separator <- asks (view $ typed @ApiOptions . field @"typenameSeparator")
+    pure
+        .   StrTyLit
+        .   L.intercalate separator
+        $   (gadtSegment : constructorSegments)
+        ^.. folded
+        .   typed
 
 enterApi :: Monad m => ApiSpec -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
 enterApi s = local extendServerInfo
   where
     extendServerInfo :: ServerInfo -> ServerInfo
-    extendServerInfo i = i & typed .~ s ^. typed @ApiOptions
+    extendServerInfo i =
+        i & typed .~ s ^. typed @ApiOptions & field @"currentGadt" .~ s ^. typed
 
 enterApiPiece :: Monad m => ApiPiece -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
 enterApiPiece p m = do
@@ -398,7 +400,7 @@ mkHandlerTypeDec p = enterApiPiece p $ do
         Endpoint name args hs Mutable retType -> do
             -- Non-get endpoints use a request body
             ty <- do
-                reqBody   <- mkReqBody args
+                reqBody   <- mkReqBody name args
                 reqReturn <- lift $ mkReturnType retType
                 middle    <- case reqBody of
                     Nothing -> pure $ mkVerb hs reqReturn
@@ -492,13 +494,13 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint _ cArgs _ Mutable ty -> do
+        Endpoint cName cArgs _ Mutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
-            bodyTag        <- askBodyTag
+            bodyTag        <- askBodyTag cName
             runnerName     <- lift $ newName "runner"
             let varPat :: Pat
                 varPat = ConP nfName (fmap VarP varNames)
@@ -577,9 +579,9 @@ prependServerEndpointName prefix rest = do
           (pure rest)
           (fmap (LitT . StrTyLit . view typed) prefix)
 
-mkReqBody :: ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
-mkReqBody args = do
-    bodyTag <- askBodyTag
+mkReqBody :: ConstructorName -> ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
+mkReqBody name args = do
+    bodyTag <- askBodyTag name
     let body = case args of
             ConstructorArgs [] -> Nothing
             ConstructorArgs ts ->

@@ -81,11 +81,15 @@ class HasApiOptions (action :: (Type -> Type) -> Type -> Type) where
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> [String]
     , typenameSeparator :: String
+    , bodyNameBase      :: Maybe String
     }
     deriving Generic
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { renameConstructor = pure, typenameSeparator = "_" }
+defaultApiOptions = ApiOptions { renameConstructor = pure
+                               , typenameSeparator = "_"
+                               , bodyNameBase      = Nothing
+                               }
 
 instance Show ApiOptions  where
     show o =
