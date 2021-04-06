@@ -93,7 +93,7 @@ createEventTable runner = do
     createTable :: Connection -> EventTableName -> IO Int64
     createTable conn eventTable =
         execute_ conn
-            $ "create table \""
+            $ "create table if not exists \""
             <> fromString eventTable
             <> "\" \
                                 \( id uuid primary key\
