@@ -33,7 +33,10 @@ configName = mkName "domaindrivenServerConfig"
 
 mkServerConfig :: Q [Dec]
 mkServerConfig = do
-    [d| $(varP configName) = ServerConfig $(getApiOptionsMap) $(getFieldNameMap)   |]
+    sig'  <- sigD configName (conT ''ServerConfig)
+    body' <-
+        [d| $(varP configName) = ServerConfig $(getApiOptionsMap) $(getFieldNameMap) |]
+    pure $ sig' : body'
 
 -- | Generates `Map String ApiOptions`
 -- Containing the ApiOptions of all types with an ApiOpts instance
