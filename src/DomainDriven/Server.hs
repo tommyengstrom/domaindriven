@@ -459,7 +459,7 @@ mkServerDec spec = do
 
 mkRunner :: ApiSpec -> Q Runner
 mkRunner spec = do
-    Runner <$> [t| CmdRunner  $(pure cmdType) |]
+    Runner <$> [t| ActionRunner  $(pure cmdType) |]
   where
     cmdType :: Type
     cmdType = spec ^. field @"gadtName" . typed @Name . to ConT

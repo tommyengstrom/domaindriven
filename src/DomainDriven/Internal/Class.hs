@@ -111,10 +111,10 @@ instance Show ApiOptions  where
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type CmdHandler model event cmd
+type ActionHandler model event cmd
     = forall method a . cmd method a -> HandlerType method model event a
 
-type CmdRunner c = forall method a . c method a -> IO a
+type ActionRunner c = forall method a . c method a -> IO a
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

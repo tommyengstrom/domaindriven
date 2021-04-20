@@ -1,6 +1,6 @@
 module DomainDriven
-    ( CmdHandler
-    , CmdRunner
+    ( ActionHandler
+    , ActionRunner
     , mkId
     , module X
     , ReadModel(..)
@@ -9,6 +9,7 @@ module DomainDriven
     , QUERY
     , HandlerType(..)
     , runCmd
+    , HasApiOptions(..)
     , CanMutate
     , UUID
     , defaultApiOptions

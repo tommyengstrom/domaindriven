@@ -5,18 +5,11 @@ module StoreModel where
 
 import qualified Data.Map                                     as M
 import           DomainDriven
-import           DomainDriven.Internal.Class    ( HasApiOptions(..)
-                                                , ApiOptions(..)
-                                                , defaultApiOptions
-                                                )
-import           DomainDriven.Server
 import           DomainDriven.Config
-import           DomainDriven.Persistance.ForgetfulInMemory
 import           Data.Typeable
 import           Prelude
 import qualified Data.Text                                    as T
-import           Data.Aeson                     ( encode
-                                                , ToJSON
+import           Data.Aeson                     ( ToJSON
                                                 , FromJSON
                                                 , FromJSONKey
                                                 , ToJSONKey
@@ -25,14 +18,9 @@ import           Data.Text                      ( Text )
 import           Control.Monad.Catch            ( throwM )
 import           GHC.Generics                   ( Generic )
 import           Control.Monad                  ( when )
-import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.String                    ( IsString )
 import           Data.OpenApi                   ( ToSchema
                                                 , ToParamSchema
-                                                )
-import           Servant.OpenApi
-import           Network.Wai.Handler.Warp       ( run
-                                                , Port
                                                 )
 import           Servant
 
@@ -101,7 +89,7 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction :: CmdHandler StoreModel StoreEvent StoreAction
+handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -115,7 +103,7 @@ handleStoreAction = \case
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction :: CmdHandler StoreModel StoreEvent AdminAction
+handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -127,7 +115,7 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
-handleItemAction :: ItemKey -> CmdHandler StoreModel StoreEvent ItemAction
+handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m

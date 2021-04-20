@@ -53,6 +53,6 @@ main = do
     -- Pick a persistance model to create the domain model
     dm <- createForgetful applyCounterEvent 0
     BL.writeFile "/tmp/counter_schema.json" $ encode $ toOpenApi (Proxy @CounterCmdApi)
-    -- Now we can supply the CmdRunner to the generated server and run it as any other
+    -- Now we can supply the ActionRunner to the generated server and run it as any other
     -- Servant server.
     run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runCmd dm handleCmd)
