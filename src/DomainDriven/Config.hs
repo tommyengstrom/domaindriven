@@ -9,6 +9,8 @@ import           Language.Haskell.TH
 import           Prelude
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.HasFieldName
+import qualified Data.List                                    as L
+import           Data.Char                      ( isLower )
 import qualified Data.Map                                     as M
 import           Data.Text                      ( Text )
 import           Data.Maybe
@@ -69,3 +71,15 @@ getFieldNameMap = reify ''HasFieldName >>= \case
             Just <$> [e| ($(stringE $ nameBase n), fieldName @($(pure ty)))|]
         InstanceD _ _ _ _ -> pure Nothing
         d                 -> fail $ "Expected instance InstanceD but got: " <> show d
+
+------------------------------------------------------------------------------------------
+-- Some utility functions that can be useful when remapping names
+------------------------------------------------------------------------------------------
+dropPrefix :: String -> String -> String
+dropPrefix pre s = if pre `L.isPrefixOf` s then drop (length pre) s else s
+
+dropSuffix :: String -> String -> String
+dropSuffix pre s = if pre `L.isSuffixOf` s then take (length s - length pre) s else s
+
+dropFirstWord :: String -> String
+dropFirstWord = L.dropWhile isLower . drop 1
