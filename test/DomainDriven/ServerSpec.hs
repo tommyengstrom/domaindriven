@@ -37,7 +37,7 @@ withServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
     server <- async . run 9898 $ serve
         (Proxy @StoreActionApi)
-        (storeActionServer $ runCmd p handleStoreAction)
+        (storeActionServer $ runAction p handleStoreAction)
     runTests
     cancel server
 

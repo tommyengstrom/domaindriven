@@ -61,14 +61,14 @@ class ReadModel p => WriteModel p where
     transactionalUpdate :: p -> IO (a, [Event p]) -> IO a
 
 
-runCmd
+runAction
     :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
     -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
     -> (forall a . cmd method a -> HandlerType method model event a)
     -> cmd method ret
     -> IO ret
-runCmd p handleCmd cmd = case handleCmd cmd of
+runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< getModel p
     Cmd   m -> transactionalUpdate p $ m =<< getModel p
 

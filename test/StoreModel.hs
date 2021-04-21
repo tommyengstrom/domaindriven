@@ -152,7 +152,7 @@ $mkServerConfig
 --     putStrLn $ "Starting server on port: " <> show port
 --     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
 --     run port $ serve (Proxy @StoreActionApi)
---                      (storeActionServer $ runCmd wm handleStoreAction)
+--                      (storeActionServer $ runAction wm handleStoreAction)
 --
 -- forgetfulApp :: Port -> IO ()
 -- forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty

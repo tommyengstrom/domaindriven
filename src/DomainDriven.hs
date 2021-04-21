@@ -8,7 +8,7 @@ module DomainDriven
     , CMD
     , QUERY
     , HandlerType(..)
-    , runCmd
+    , runAction
     , HasApiOptions(..)
     , CanMutate
     , UUID
