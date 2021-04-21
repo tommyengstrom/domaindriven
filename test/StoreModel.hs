@@ -5,13 +5,11 @@ module StoreModel where
 
 import qualified Data.Map                                     as M
 import           DomainDriven
-import           DomainDriven.Server
-import           DomainDriven.Persistance.ForgetfulInMemory
+import           DomainDriven.Config
 import           Data.Typeable
 import           Prelude
 import qualified Data.Text                                    as T
-import           Data.Aeson                     ( encode
-                                                , ToJSON
+import           Data.Aeson                     ( ToJSON
                                                 , FromJSON
                                                 , FromJSONKey
                                                 , ToJSONKey
@@ -20,14 +18,9 @@ import           Data.Text                      ( Text )
 import           Control.Monad.Catch            ( throwM )
 import           GHC.Generics                   ( Generic )
 import           Control.Monad                  ( when )
-import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.String                    ( IsString )
 import           Data.OpenApi                   ( ToSchema
                                                 , ToParamSchema
-                                                )
-import           Servant.OpenApi
-import           Network.Wai.Handler.Warp       ( run
-                                                , Port
                                                 )
 import           Servant
 
@@ -67,14 +60,17 @@ data StoreAction method a where
     Search ::Text -> StoreAction QUERY [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
+    deriving HasApiOptions
 
 data ItemAction method a where
     StockQuantity ::ItemAction QUERY Quantity
+    deriving HasApiOptions
 
 data AdminAction method a where
     Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
     AddItem    ::ItemName -> Quantity -> Price -> AdminAction CMD ItemKey
     RemoveItem ::ItemKey -> AdminAction CMD ()
+    deriving HasApiOptions
 
 -- | The event
 -- Store state of the store is fully defined by
@@ -87,12 +83,13 @@ data StoreEvent
     deriving stock (Show, Eq, Generic, Typeable)
     deriving (FromJSON, ToJSON) via (NamedJsonFields StoreEvent)
 
+
 type StoreModel = M.Map ItemKey ItemInfo
 
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction :: CmdHandler StoreModel StoreEvent StoreAction
+handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -106,7 +103,7 @@ handleStoreAction = \case
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction :: CmdHandler StoreModel StoreEvent AdminAction
+handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -118,7 +115,7 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
-handleItemAction :: ItemKey -> CmdHandler StoreModel StoreEvent ItemAction
+handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m
@@ -139,17 +136,23 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 ------------------------------------------------------------------------------------------
--- Defining the server                                                                  --
+-- Grab the config for each GADT
 ------------------------------------------------------------------------------------------
-$(mkServer defaultApiOptions ''StoreAction)
+
+$mkServerConfig
+
+-- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
+--
+-- apiOptionsMap :: M.Map String ApiOptions
+-- apiOptionsMap = $(getApiOptionsMap)
 
 --
-app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
-app port wm = do
-    putStrLn $ "Starting server on port: " <> show port
-    BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
-    run port $ serve (Proxy @StoreActionApi)
-                     (storeActionServer $ runCmd wm handleStoreAction)
-
-forgetfulApp :: Port -> IO ()
-forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty
+-- app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
+-- app port wm = do
+--     putStrLn $ "Starting server on port: " <> show port
+--     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
+--     run port $ serve (Proxy @StoreActionApi)
+--                      (storeActionServer $ runAction wm handleStoreAction)
+--
+-- forgetfulApp :: Port -> IO ()
+-- forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty

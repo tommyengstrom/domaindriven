@@ -114,7 +114,7 @@ queryEventsSpec = describe "queryEvents" $ do
 storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 storeModelSpec = describe "Test basic functionality" $ do
     it "Can add item" $ \p -> do
-        iKey <- runCmd p Store.handleStoreAction $ Store.AdminAction $ Store.AddItem
+        iKey <- runAction p Store.handleStoreAction $ Store.AdminAction $ Store.AddItem
             "test item"
             10
             99
@@ -126,7 +126,7 @@ storeModelSpec = describe "Test basic functionality" $ do
 
     it "Can buy item" $ \p -> do
         iKey <- headNote "Ops" . M.keys <$> getModel p
-        runCmd p Store.handleStoreAction $ Store.BuyItem iKey 7
+        runAction p Store.handleStoreAction $ Store.BuyItem iKey 7
         m    <- getModel p
         item <- maybe (fail $ show iKey <> " is not part of:\n" <> show m) pure
             $ M.lookup iKey m
@@ -135,19 +135,19 @@ storeModelSpec = describe "Test basic functionality" $ do
 
 
     it "Can run Query" $ \p -> do
-        items <- runCmd p Store.handleStoreAction Store.ListItems
+        items <- runAction p Store.handleStoreAction Store.ListItems
         items `shouldSatisfy` (== 1) . length
 
-        _ <- runCmd p Store.handleStoreAction $ Store.AdminAction $ Store.AddItem
+        _ <- runAction p Store.handleStoreAction $ Store.AdminAction $ Store.AddItem
             "another item"
             1
             10
 
-        items' <- runCmd p Store.handleStoreAction Store.ListItems
+        items' <- runAction p Store.handleStoreAction Store.ListItems
         items' `shouldSatisfy` (== 2) . length
     it "Concurrent commands work" $ \p -> do
         -- This test relies on the postgres max connections being reasonably high.
-        c0 <- runCmd p Store.handleStoreAction Store.ListItems
+        c0 <- runAction p Store.handleStoreAction Store.ListItems
         let newItems :: [Store.StoreAction CMD Store.ItemKey]
             newItems = replicate
                 n
@@ -157,8 +157,8 @@ storeModelSpec = describe "Test basic functionality" $ do
 
             n :: Int
             n = 30
-        mapConcurrently_ (runCmd p Store.handleStoreAction) newItems
+        mapConcurrently_ (runAction p Store.handleStoreAction) newItems
 
-        c1 <- runCmd p Store.handleStoreAction Store.ListItems
+        c1 <- runAction p Store.handleStoreAction Store.ListItems
         (length c1, length c0)
             `shouldSatisfy` (\(after', before') -> after' - before' == n)

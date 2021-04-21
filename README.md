@@ -59,10 +59,10 @@ Commands, in contrast to events, are allowed to fail. If a command succeeds we n
 
 In addition you may need to make requests, read from disk, or perform other side effects in order to calculate the result.
 
-`CmdHandler` is defined as:
+`ActionHandler` is defined as:
 
 ``` haskell
-type CmdHandler model event cmd err
+type ActionHandler model event cmd err
     = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
 ```
 
@@ -73,12 +73,12 @@ The reason for this approach is that it allows the library to guarantee that the
 
 ### Generating the server
 
-Now we have defined the core parts of our domain. We can now generate the server using the template-haskell function `mkCmdServer`. It will generate a Servant API and server implementation. The only thing you need to do is to supply a `CmdRunner`.
+Now we have defined the core parts of our domain. We can now generate the server using the template-haskell function `mkCmdServer`. It will generate a Servant API and server implementation. The only thing you need to do is to supply a `ActionRunner`.
 
 To get a command runner we first have to define a persistance model, which tells us how the events are to be stored (note that the state is not persisted). We can then pick a start state and tie all the things together using `createModel`.
 
 ### Simple example
 
-Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs). 
+Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs).
 
 For a slightly more realistic example check out [examples/hierarchical/Main.hs](examples/hierarchical/Main.hs).

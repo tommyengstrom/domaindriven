@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 531cf25c4cec3661dfa9eeedaa46b9173e67f1c0c9c5c7fca4a6205ce1eb3e1d
+-- hash: b376c52e0313848b9bc1556ee94ed687b089ff8fcb5643fdbca212c0cd37d5ca
 
 name:           domain-driven
 version:        0.1.0.0
@@ -28,6 +28,7 @@ source-repository head
 library
   exposed-modules:
       DomainDriven
+      DomainDriven.Config
       DomainDriven.Internal.Class
       DomainDriven.Internal.HasFieldName
       DomainDriven.Internal.NamedFields
@@ -121,7 +122,6 @@ test-suite domain-driven-test
   other-modules:
       DomainDriven.Internal.NamedJsonFieldsSpec
       DomainDriven.Persistance.PostgresIORefStateSpec
-      DomainDriven.ServerOptions
       DomainDriven.ServerSpec
       StoreModel
       Paths_domain_driven

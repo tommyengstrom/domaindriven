@@ -18,8 +18,9 @@ import           Servant.Client
 import           StoreModel
 import           Data.Text                      ( Text )
 
+$(mkServer domaindrivenServerConfig ''StoreAction)
 
-buyItem :: NamedFields2 "BuyItem" ItemKey Quantity -> ClientM NoContent
+buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
@@ -36,7 +37,7 @@ withServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
     server <- async . run 9898 $ serve
         (Proxy @StoreActionApi)
-        (storeActionServer $ runCmd p handleStoreAction)
+        (storeActionServer $ runAction p handleStoreAction)
     runTests
     cancel server
 

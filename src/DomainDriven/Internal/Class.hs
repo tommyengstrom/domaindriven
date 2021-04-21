@@ -7,6 +7,8 @@ module DomainDriven.Internal.Class where
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Prelude
+import           Control.Lens                   ( (^.) )
+import           Data.Generics.Product
 import           Data.Time
 import           System.Random
 import           GHC.Generics                   ( Generic )
@@ -59,16 +61,43 @@ class ReadModel p => WriteModel p where
     transactionalUpdate :: p -> IO (a, [Event p]) -> IO a
 
 
-runCmd
+runAction
     :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
     -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
     -> (forall a . cmd method a -> HandlerType method model event a)
     -> cmd method ret
     -> IO ret
-runCmd p handleCmd cmd = case handleCmd cmd of
+runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< getModel p
     Cmd   m -> transactionalUpdate p $ m =<< getModel p
+
+
+
+class HasApiOptions (action :: (Type -> Type) -> Type -> Type) where
+    apiOptions :: ApiOptions
+    apiOptions = defaultApiOptions
+
+data ApiOptions = ApiOptions
+    { renameConstructor :: String -> [String]
+    , typenameSeparator :: String
+    , bodyNameBase      :: Maybe String
+    }
+    deriving Generic
+
+defaultApiOptions :: ApiOptions
+defaultApiOptions = ApiOptions { renameConstructor = pure
+                               , typenameSeparator = "_"
+                               , bodyNameBase      = Nothing
+                               }
+
+instance Show ApiOptions  where
+    show o =
+        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
+            <> o
+            ^. field @"typenameSeparator"
+            <> "\"}"
+
 
 -- | Command handler
 --
@@ -82,10 +111,10 @@ runCmd p handleCmd cmd = case handleCmd cmd of
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type CmdHandler model event cmd
+type ActionHandler model event cmd
     = forall method a . cmd method a -> HandlerType method model event a
 
-type CmdRunner c = forall method a . c method a -> IO a
+type ActionRunner c = forall method a . c method a -> IO a
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
