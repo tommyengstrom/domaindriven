@@ -30,7 +30,7 @@ data PersistanceError
 type PreviosEventTableName = String
 type EventTableName = String
 
-newtype EventNumber = EventNumber {unEventNumber :: Int64}
+newtype CommitNumber = CommitNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
     deriving newtype (Eq, Ord, Num)
 
@@ -38,14 +38,14 @@ decodeEventRow :: (UUID, UTCTime, e) -> Stored e
 decodeEventRow (k, ts, e) = Stored e ts k
 
 data EventRowOut = EventRowOut
-    { key         :: UUID
-    , eventNumber :: EventNumber
-    , timestamp   :: UTCTime
-    , event       :: Value
+    { key          :: UUID
+    , commitNumber :: CommitNumber
+    , timestamp    :: UTCTime
+    , event        :: Value
     }
     deriving (Show, Eq, Generic, FromRow)
 
-fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
+fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, CommitNumber)
 fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
     Success a -> pure $ (Stored a ts k, no)
     Error err ->
@@ -64,8 +64,8 @@ fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
 --instance FromRow EventRowOut where
 --    fromRow = EventRowOut <$> field <*> field <*> field <*> fieldWith fromJSONField
 
-instance FromField EventNumber where
-    fromField f bs = EventNumber <$> fromField f bs
+instance FromField CommitNumber where
+    fromField f bs = CommitNumber <$> fromField f bs
 
 data StateRow m = StateRow
     { modelName :: Text
@@ -86,21 +86,20 @@ createEventTable runner = do
     conn <- getConnection runner
     void (getModel runner)
         `catch` (const @_ @SqlError $ do
-                    _ <- createTable conn (eventTableName runner)
+                    _ <- createEventTable' conn (eventTableName runner)
                     void $ refreshModel runner
                 )
-  where
-    createTable :: Connection -> EventTableName -> IO Int64
-    createTable conn eventTable =
-        execute_ conn
-            $ "create table if not exists \""
-            <> fromString eventTable
-            <> "\" \
-                                \( id uuid primary key\
-                                \, event_number bigserial\
-                                \, timestamp timestamptz not null default now()\
-                                \, event jsonb not null\
-                                \);"
+createEventTable' :: Connection -> EventTableName -> IO Int64
+createEventTable' conn eventTable =
+    execute_ conn
+        $ "create table if not exists \""
+        <> fromString eventTable
+        <> "\" \
+                            \( id uuid primary key\
+                            \, commit_number bigserial\
+                            \, timestamp timestamptz not null default now()\
+                            \, event jsonb not null\
+                            \);"
 
 -- | Setup the persistance model and verify that the tables exist.
 simplePostgres
@@ -138,12 +137,12 @@ queryEvents
     :: (Typeable a, FromJSON a)
     => Connection
     -> EventTableName
-    -> IO [(Stored a, EventNumber)]
+    -> IO [(Stored a, CommitNumber)]
 queryEvents conn eventTable = traverse fromEventRow =<< query_
     conn
-    (  "select id, event_number,timestamp,event from \""
+    (  "select id, commit_number,timestamp,event from \""
     <> fromString eventTable
-    <> "\" order by event_number"
+    <> "\" order by commit_number"
     )
 
 
@@ -151,16 +150,16 @@ queryEventsAfter
     :: (Typeable a, FromJSON a)
     => Connection
     -> EventTableName
-    -> EventNumber
-    -> IO [(Stored a, EventNumber)]
-queryEventsAfter conn eventTable (EventNumber lastEvent) =
+    -> CommitNumber
+    -> IO [(Stored a, CommitNumber)]
+queryEventsAfter conn eventTable (CommitNumber lastEvent) =
     traverse fromEventRow =<< query_
         conn
-        (  "select id, event_number,timestamp,event from \""
+        (  "select id, commit_number,timestamp,event from \""
         <> fromString eventTable
-        <> "\" where event_number > "
+        <> "\" where commit_number > "
         <> fromString (show lastEvent)
-        <> " order by event_number"
+        <> " order by commit_number"
         )
 
 
@@ -179,7 +178,7 @@ writeEvents
     => Connection
     -> EventTableName
     -> [Stored a]
-    -> IO EventNumber
+    -> IO CommitNumber
 writeEvents conn eventTable storedEvents = do
     _ <- executeMany
         conn
@@ -199,7 +198,7 @@ writeEvents conn eventTable storedEvents = do
 data PostgresEvent model event = PostgresEvent
     { getConnection  :: IO Connection
     , eventTableName :: EventTableName
-    , modelIORef     :: IORef (model, EventNumber)
+    , modelIORef     :: IORef (model, CommitNumber)
     , app            :: model -> Stored event -> model
     , seed           :: model
     }
@@ -222,7 +221,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-refreshModel :: (Typeable e, FromJSON e) => (PostgresEvent m e) -> IO (m, EventNumber)
+refreshModel :: (Typeable e, FromJSON e) => (PostgresEvent m e) -> IO (m, CommitNumber)
 refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     withExclusiveLock pg $ \conn -> do
@@ -263,13 +262,9 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             pure a
 
 
---migrate1to1
---    :: Connection
---    -> PreviosEventTableName
---    -> EventTableName
---    -> (Value -> Value)
---    -> IO Int64
---migrate1to1 conn prevTName tName f = do
---    _             <- createEventTable conn tName
---    currentEvents <- queryEvents @Value conn prevTName
---    writeEvents conn tName $ fmap (fmap f) currentEvents
+migrate1to1
+    :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+migrate1to1 conn prevTName tName f = do
+    _             <- createEventTable' conn tName
+    currentEvents <- queryEvents @Value conn prevTName
+    void $ writeEvents conn tName $ fmap (fmap f . fst) currentEvents
