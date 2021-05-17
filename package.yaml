@@ -48,6 +48,7 @@ dependencies:
 - vector
 - unordered-containers
 - uuid
+- unliftio
 
 default-extensions:
 - Arrows

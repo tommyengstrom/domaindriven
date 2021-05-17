@@ -10,14 +10,14 @@ import           Data.String
 import           Control.Monad
 import           Data.List                      ( foldl' )
 import           Data.Typeable
-import           Control.Monad.Catch
+import           Control.Monad.Catch            ( MonadThrow(..) )
+import           UnliftIO
 import           GHC.Generics                   ( Generic )
 import           Data.Text                      ( Text )
 import           Data.Aeson
 import           Data.UUID                      ( UUID )
 import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
-import           Data.IORef
 
 
 
@@ -134,11 +134,11 @@ createPostgresPersistance getConn eventTable app' seed' = do
 
 
 queryEvents
-    :: (Typeable a, FromJSON a)
+    :: (MonadIO m, Typeable a, FromJSON a)
     => Connection
     -> EventTableName
-    -> IO [(Stored a, CommitNumber)]
-queryEvents conn eventTable = traverse fromEventRow =<< query_
+    -> m [(Stored a, CommitNumber)]
+queryEvents conn eventTable = liftIO $ traverse fromEventRow =<< query_
     conn
     (  "select id, commit_number,timestamp,event from \""
     <> fromString eventTable
@@ -147,13 +147,13 @@ queryEvents conn eventTable = traverse fromEventRow =<< query_
 
 
 queryEventsAfter
-    :: (Typeable a, FromJSON a)
+    :: (MonadIO m, Typeable a, FromJSON a)
     => Connection
     -> EventTableName
     -> CommitNumber
-    -> IO [(Stored a, CommitNumber)]
+    -> m [(Stored a, CommitNumber)]
 queryEventsAfter conn eventTable (CommitNumber lastEvent) =
-    traverse fromEventRow =<< query_
+    liftIO $ traverse fromEventRow =<< query_
         conn
         (  "select id, commit_number,timestamp,event from \""
         <> fromString eventTable
@@ -173,13 +173,13 @@ queryEventsAfter conn eventTable (CommitNumber lastEvent) =
 
 
 writeEvents
-    :: forall a
-     . (FromJSON a, ToJSON a)
+    :: forall a m
+     . (MonadIO m, FromJSON a, ToJSON a)
     => Connection
     -> EventTableName
     -> [Stored a]
-    -> IO CommitNumber
-writeEvents conn eventTable storedEvents = do
+    -> m CommitNumber
+writeEvents conn eventTable storedEvents = liftIO $ do
     _ <- executeMany
         conn
         (  "insert into \""
@@ -205,26 +205,30 @@ data PostgresEvent model event = PostgresEvent
     deriving Generic
 
 
-instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
-    type Model (PostgresEvent m e) = m
-    type Event (PostgresEvent m e) = e
+instance (FromJSON e, Typeable e, MonadUnliftIO m)
+        => ReadModel (PostgresEvent model e) m where
+    type Model (PostgresEvent model e) = model
+    type Event (PostgresEvent model e) = e
     applyEvent pg = app pg
     getModel pg = do
         (model, lastEventNo) <- readIORef (modelIORef pg)
-        conn                 <- getConnection pg
-        newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
+        conn <- liftIO $ getConnection pg
+        newEvents <- queryEventsAfter @m @e conn (eventTableName pg) lastEventNo
         case newEvents of
             [] -> pure model
             _  -> fst <$> refreshModel pg -- The model must be updated within a transaction
 
-    getEvents pg = do
+    getEvents pg = liftIO $ do
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-refreshModel :: (Typeable e, FromJSON e) => (PostgresEvent m e) -> IO (m, CommitNumber)
+refreshModel
+    :: (Typeable e, FromJSON e, MonadUnliftIO m)
+    => (PostgresEvent model e)
+    -> m (model, CommitNumber)
 refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
-    withExclusiveLock pg $ \conn -> do
+    withExclusiveLock pg $ \conn -> liftIO $ do
         (model    , lastEventNo   ) <- readIORef (modelIORef pg)
         (newEvents, lastNewEventNo) <- do
             (evs, nos) <- unzip <$> queryEventsAfter conn (eventTableName pg) lastEventNo
@@ -236,24 +240,26 @@ refreshModel pg = do
                 _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
                 pure (newModel, lastNewEventNo)
 
-withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
-withExclusiveLock pg f = do
+withExclusiveLock
+    :: MonadUnliftIO m => PostgresEvent model e -> (Connection -> m a) -> m a
+withExclusiveLock pg f = withRunInIO $ \runInIO -> do
     conn <- getConnection pg
     withTransaction conn $ do
         _ <- execute_
             conn
             ("lock \"" <> fromString (eventTableName pg) <> "\" in exclusive mode")
-        f conn
+        runInIO $ f conn
 
-instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
-    transactionalUpdate pg cmd = do
+instance (ToJSON e, FromJSON e, Typeable e, MonadUnliftIO m)
+        => WriteModel (PostgresEvent model e) m where
+    transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
         conn <- getConnection pg
         withTransaction conn $ do
             let eventTable = eventTableName pg
             _ <- execute_
                 conn
                 ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            (a, evs)  <- cmd
+            (a, evs)  <- runInIO cmd
             m         <- getModel pg
             storedEvs <- traverse toStored evs
             let newM = foldl' (app pg) m storedEvs
@@ -266,5 +272,5 @@ migrate1to1
     :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()
 migrate1to1 conn prevTName tName f = do
     _             <- createEventTable' conn tName
-    currentEvents <- queryEvents @Value conn prevTName
+    currentEvents <- queryEvents @IO @Value conn prevTName
     void $ writeEvents conn tName $ fmap (fmap f . fst) currentEvents

@@ -35,6 +35,7 @@ buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (restock :<|> addItem
 withServer :: IO () -> IO ()
 withServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
+    -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
     server <- async . run 9898 $ serve
         (Proxy @StoreActionApi)
         (storeActionServer $ runAction p handleStoreAction)
