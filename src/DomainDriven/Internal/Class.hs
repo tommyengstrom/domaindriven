@@ -17,8 +17,8 @@ import           Data.Kind
 import           Data.UUID                      ( UUID )
 import           UnliftIO
 
-type CMD = Verb 'POST 200 '[JSON]
-type QUERY = Verb 'GET 200 '[JSON]
+type Cmd = Verb 'POST 200 '[JSON]
+type Query = Verb 'GET 200 '[JSON]
 
 -- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
 type family CanMutate (method :: Type -> Type) :: Bool where

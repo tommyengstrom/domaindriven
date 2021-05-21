@@ -5,8 +5,8 @@ module DomainDriven
     , module X
     , ReadModel(..)
     , Stored(..)
-    , CMD
-    , QUERY
+    , Cmd
+    , Query
     , HandlerType(..)
     , runAction
     , HasApiOptions(..)

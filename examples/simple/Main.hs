@@ -27,9 +27,9 @@ data CounterEvent
     deriving (Show, Generic, ToJSON, FromJSON)
 
 data CounterCmd method return where
-   GetCounter ::CounterCmd QUERY Int
-   IncreaseCounter ::CounterCmd CMD Int
-   AddToCounter ::Int -> CounterCmd CMD Int
+   GetCounter ::CounterCmd Query Int
+   IncreaseCounter ::CounterCmd Cmd Int
+   AddToCounter ::Int -> CounterCmd Cmd Int
 
 handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
 handleCmd = \case

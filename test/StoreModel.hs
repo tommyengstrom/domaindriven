@@ -55,21 +55,21 @@ data ItemInfo = ItemInfo
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction method a where
-    BuyItem    ::ItemKey -> Quantity -> StoreAction CMD ()
+    BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
     ListItems ::StoreAction (Verb 'GET 200 '[JSON]) [ItemInfo]
-    Search ::Text -> StoreAction QUERY [ItemInfo]
+    Search ::Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
     deriving HasApiOptions
 
 data ItemAction method a where
-    StockQuantity ::ItemAction QUERY Quantity
+    StockQuantity ::ItemAction Query Quantity
     deriving HasApiOptions
 
 data AdminAction method a where
-    Restock    ::ItemKey -> Quantity -> AdminAction CMD ()
-    AddItem    ::ItemName -> Quantity -> Price -> AdminAction CMD ItemKey
-    RemoveItem ::ItemKey -> AdminAction CMD ()
+    Restock    ::ItemKey -> Quantity -> AdminAction Cmd ()
+    AddItem    ::ItemName -> Quantity -> Price -> AdminAction Cmd ItemKey
+    RemoveItem ::ItemKey -> AdminAction Cmd ()
     deriving HasApiOptions
 
 -- | The event
