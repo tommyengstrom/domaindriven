@@ -84,7 +84,7 @@ queryEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 queryEventsSpec = describe "queryEvents" $ do
     it "Can query events" $ \p -> do
         conn <- getConnection p
-        evs  <- queryEvents @IO @Store.StoreEvent conn eventTable
+        evs  <- queryEvents @Store.StoreEvent conn eventTable
         evs `shouldSatisfy` (>= 1) . length
     it "Events come out in the right order" $ \p -> do
         -- write few more events before
@@ -103,7 +103,7 @@ queryEventsSpec = describe "queryEvents" $ do
                         eventTable
                         [Stored ev2 (UTCTime (fromGregorian 2020 10 18) 1) id2]
 
-        evs <- queryEvents @IO @Store.StoreEvent conn eventTable
+        evs <- queryEvents @Store.StoreEvent conn eventTable
         evs `shouldSatisfy` (> 1) . length
         let event_numbers = fmap snd evs
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
