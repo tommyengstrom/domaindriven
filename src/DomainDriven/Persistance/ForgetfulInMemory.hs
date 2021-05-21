@@ -28,14 +28,14 @@ data ForgetfulInMemory model event = ForgetfulInMemory
     }
     deriving Generic
 
-instance MonadUnliftIO m => ReadModel (ForgetfulInMemory model e) m where
+instance ReadModel (ForgetfulInMemory model e) where
     type Model (ForgetfulInMemory model e) = model
     type Event (ForgetfulInMemory model e) = e
     applyEvent ff = apply ff
     getModel ff = readIORef $ stateRef ff
     getEvents ff = readIORef $ events ff
 
-instance MonadUnliftIO m => WriteModel (ForgetfulInMemory model e) m where
+instance WriteModel (ForgetfulInMemory model e)  where
     transactionalUpdate ff evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
             model     <- readIORef $ stateRef ff

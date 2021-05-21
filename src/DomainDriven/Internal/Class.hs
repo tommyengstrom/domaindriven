@@ -63,27 +63,28 @@ mapResult f = \case
         (ret, evs) <- h m
         pure (f ret, evs)
 
-class MonadUnliftIO m => ReadModel p m where
+class ReadModel p where
     type Model p :: Type
     type Event p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: p -> m (Model p)
-    getEvents :: p -> m [Stored (Event p)] -- TODO: Make it p stream!
+    getModel :: p -> IO (Model p)
+    getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
-class ReadModel p m => WriteModel p m where
-    transactionalUpdate :: p -> m (a, [Event p]) -> m a
+class ReadModel p  => WriteModel p where
+    transactionalUpdate :: p -> IO (a, [Event p]) -> IO a
 
 
 runAction
-    :: (WriteModel p m, model ~ Model p, event ~ Event p)
+    :: (WriteModel p, MonadUnliftIO m, model ~ Model p, event ~ Event p)
     => p
     -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
     -> (forall a . cmd method a -> HandlerType method model event m a)
     -> cmd method ret
     -> m ret
 runAction p handleCmd cmd = case handleCmd cmd of
-    Query m -> m =<< getModel p
-    Cmd   m -> transactionalUpdate p $ m =<< getModel p
+    Query m -> m =<< liftIO (getModel p)
+    Cmd   m -> withRunInIO $ \toIO' -> do
+        transactionalUpdate p $ toIO' (m =<< liftIO (getModel p))
 
 
 

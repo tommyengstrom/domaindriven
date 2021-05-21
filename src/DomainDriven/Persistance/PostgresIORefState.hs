@@ -205,15 +205,15 @@ data PostgresEvent model event = PostgresEvent
     deriving Generic
 
 
-instance (FromJSON e, Typeable e, MonadUnliftIO m)
-        => ReadModel (PostgresEvent model e) m where
+instance (FromJSON e, Typeable e)
+        => ReadModel (PostgresEvent model e) where
     type Model (PostgresEvent model e) = model
     type Event (PostgresEvent model e) = e
     applyEvent pg = app pg
     getModel pg = do
         (model, lastEventNo) <- readIORef (modelIORef pg)
-        conn <- liftIO $ getConnection pg
-        newEvents <- queryEventsAfter @m @e conn (eventTableName pg) lastEventNo
+        conn                 <- liftIO $ getConnection pg
+        newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
         case newEvents of
             [] -> pure model
             _  -> fst <$> refreshModel pg -- The model must be updated within a transaction
@@ -250,16 +250,16 @@ withExclusiveLock pg f = withRunInIO $ \runInIO -> do
             ("lock \"" <> fromString (eventTableName pg) <> "\" in exclusive mode")
         runInIO $ f conn
 
-instance (ToJSON e, FromJSON e, Typeable e, MonadUnliftIO m)
-        => WriteModel (PostgresEvent model e) m where
-    transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
+instance (ToJSON e, FromJSON e, Typeable e)
+        => WriteModel (PostgresEvent model e) where
+    transactionalUpdate pg cmd = do
         conn <- getConnection pg
         withTransaction conn $ do
             let eventTable = eventTableName pg
             _ <- execute_
                 conn
                 ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            (a, evs)  <- runInIO cmd
+            (a, evs)  <- cmd
             m         <- getModel pg
             storedEvs <- traverse toStored evs
             let newM = foldl' (app pg) m storedEvs
