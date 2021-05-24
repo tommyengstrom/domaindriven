@@ -13,6 +13,7 @@ module DomainDriven
     , CanMutate
     , UUID
     , defaultApiOptions
+    , RequestType
     , ApiOptions(..)
     , NamedJsonFields(..)
     , WriteModel(..)

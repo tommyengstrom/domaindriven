@@ -7,6 +7,7 @@ import           Prelude
 import           Test.Hspec
 import           Test.Hspec.Core.Hooks
 import           Control.Concurrent.Async
+import           Control.Concurrent
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven
 import           Servant
@@ -39,6 +40,7 @@ withServer runTests = do
     server <- async . run 9898 $ serve
         (Proxy @StoreActionApi)
         (storeActionServer $ runAction p handleStoreAction)
+    threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
     cancel server
 

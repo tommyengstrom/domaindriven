@@ -17,18 +17,29 @@ import           Data.Kind
 import           Data.UUID                      ( UUID )
 import           UnliftIO
 
-type Cmd = Verb 'POST 200 '[JSON]
-type Query = Verb 'GET 200 '[JSON]
+
+data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
+type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
+type Query = RequestType '[JSON] (Verb 'GET 200 '[JSON])
+-- type Cmd = Verb 'POST 200 '[JSON]
+-- type Query = Verb 'GET 200 '[JSON]
 
 -- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
-type family CanMutate (method :: Type -> Type) :: Bool where
-    CanMutate (Verb 'GET code cts) = 'False
-    CanMutate (Verb 'POST code cts) = 'True
-    CanMutate (Verb 'PUT code cts) = 'True
-    CanMutate (Verb 'PATCH code cts) = 'True
-    CanMutate (Verb 'DELETE code cts) = 'True
+--type family CanMutate (method :: Type -> Type) :: Bool where
+--    CanMutate (Verb 'GET code cts) = 'False
+--    CanMutate (Verb 'POST code cts) = 'True
+--    CanMutate (Verb 'PUT code cts) = 'True
+--    CanMutate (Verb 'PATCH code cts) = 'True
+--    CanMutate (Verb 'DELETE code cts) = 'True
 
-data HandlerType (method :: Type -> Type) model event m a where
+type family CanMutate method :: Bool where
+    CanMutate (RequestType c (Verb 'GET code cts)) = 'False
+    CanMutate (RequestType c (Verb 'POST code cts)) = 'True
+    CanMutate (RequestType c (Verb 'PUT code cts)) = 'True
+    CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
+    CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
+
+data HandlerType method model event m a where
     Query ::CanMutate method ~ 'False => (model -> m a) -> HandlerType method model event m a
     Cmd ::CanMutate method ~ 'True => (model -> m (a, [event])) -> HandlerType method model event m a
 
@@ -88,7 +99,7 @@ runAction p handleCmd cmd = case handleCmd cmd of
 
 
 
-class HasApiOptions (action :: (Type -> Type) -> Type -> Type) where
+class HasApiOptions (action :: Type -> Type -> Type) where
     apiOptions :: ApiOptions
     apiOptions = defaultApiOptions
 

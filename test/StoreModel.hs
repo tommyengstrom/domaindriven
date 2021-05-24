@@ -56,7 +56,7 @@ data ItemInfo = ItemInfo
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
-    ListItems ::StoreAction (Verb 'GET 200 '[JSON]) [ItemInfo]
+    ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
     Search ::Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions

@@ -45,7 +45,10 @@ data ApiPiece
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
-newtype HandlerSettings = HandlerSettings Type
+data HandlerSettings = HandlerSettings
+    { contentTypes :: Type
+    , verb         :: Type
+    }
     deriving (Show, Generic, Eq)
 
 newtype ConstructorName = ConstructorName Name
@@ -98,11 +101,12 @@ guardMethodVar = \case
     PlainTV _    -> check StarT
   where
     check :: Type -> Q ()
-    check k =
-        unless (k == AppT (AppT ArrowT StarT) StarT)
-            .  fail
-            $  "Method must have be a `Verb` without the return type applied. Got: "
-            <> show k
+    check _ = pure ()
+--    check k =
+--        unless (k == AppT (AppT ArrowT StarT) StarT)
+--            .  fail
+--            $  "Method must have be a `Verb` without the return type applied. Got: "
+--            <> show k
 
 getActionType :: Type -> Q ActionType
 getActionType = \case
@@ -141,12 +145,28 @@ unqualifiedString = typed @OccName . typed
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
 mkApiPiece cfg = \case
     -- The normal case
-    GadtC [gadtName] bangArgs (AppT (AppT _ verb) retType) -> do
+    GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
+        handlerSettings <- do
+            expandedReqType <- case requestType of
+                ConT n -> reify n >>= \case
+                    TyConI (TySynD _ _ realType) -> pure realType
+                    ty ->
+                        fail
+                            $  "Expected "
+                            <> show n
+                            <> " to be a type synonym, got: "
+                            <> show ty
+                (AppT _ _) -> pure requestType
+                ty         -> fail $ "Expected RequestType, got: " <> show ty
+            case expandedReqType of
+                (AppT (AppT _RequesType contentTypes') verb') ->
+                    pure $ HandlerSettings contentTypes' verb'
+                ty -> fail $ "Expected RequestType, got: " <> show ty
 
-        actionType <- getActionType verb
+        actionType <- getActionType $ handlerSettings ^. field @"verb"
         pure $ Endpoint (ConstructorName gadtName)
                         (ConstructorArgs $ fmap snd bangArgs)
-                        (HandlerSettings verb)
+                        handlerSettings
                         actionType
                         retType
     -- When the constructor contain references to other domain models
@@ -181,6 +201,7 @@ mkApiPiece cfg = \case
         fail
             $  "Expected a GADT constructor representing an endpoint but got:\n"
             <> pprint c
+            <> show c -- FIXME: Remove once it works
 
 -- | Turn "OhYEAH" into "ohYEAH"...
 lowerFirst :: String -> String
@@ -429,7 +450,7 @@ mkQueryParams (ConstructorArgs args) = do
         ty -> fail $ "Expected type ConT, got: " <> show ty
 
 mkVerb :: HandlerSettings -> Type -> Type
-mkVerb (HandlerSettings hs) ret = hs `AppT` ret
+mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
 -- | Declare then handlers for the API
 --
 mkServerDec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
