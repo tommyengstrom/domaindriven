@@ -37,10 +37,10 @@ data TestAction method a where
     ReverseText ::Text -> TestAction (RequestType '[PlainText] (Verb 'POST 200 '[JSON])) Text
 
 type ExpectedReverseText
-    = "ReverseText" :> ReqBody '[JSON] (NamedFields1 "Text" Text) :> Post '[JSON] Text
+    = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
 
 expectedReverseText :: Text -> ClientM Text
-expectedReverseText = client (Proxy @ExpectedReverseText) . NamedFields1
+expectedReverseText = client (Proxy @ExpectedReverseText)
 
 handleTestAction :: ActionHandler () () TestAction IO
 handleTestAction = \case

@@ -298,15 +298,7 @@ askHandlerName :: Monad m => ReaderT ServerInfo m Name
 askHandlerName =
     (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler")
         <$> askTypeName
---
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
--- I need to create a structure that contians both Name and [UrlSegment] to use for the
--- reader. BodyTag should have the "exposed name" but the rest of the stuff should have
--- the normal names without any mapping.
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
---askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
+
 askBodyTag :: ConstructorName -> ReaderT ServerInfo Q TyLit
 askBodyTag cName = do
     constructorSegments <- mkUrlSegments cName
@@ -423,7 +415,7 @@ mkHandlerTypeDec p = enterApiPiece p $ do
         Endpoint name args hs Mutable retType -> do
             -- Non-get endpoints use a request body
             ty <- do
-                reqBody   <- mkReqBody name args
+                reqBody   <- mkReqBody hs name args
                 reqReturn <- lift $ mkReturnType retType
                 middle    <- case reqBody of
                     Nothing -> pure $ mkVerb hs reqReturn
@@ -520,7 +512,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs _ Mutable ty -> do
+        Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
@@ -546,6 +538,37 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                     AppE
                     (ConE $ apiPiece ^. typed @ConstructorName . typed)
                     (fmap VarE varNames)
+
+                funBody = case ty of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                (normalB [| liftIO $ $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        Endpoint cName cArgs hs Mutable ty -> do
+            -- Fixme: Non JSON case is poorly supported. Reason is simply that this was
+            -- all I needed.
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
+            varName       <- lift $ newName "arg"
+            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerName    <- askHandlerName
+            runnerName     <- lift $ newName "runner"
+            let varPat :: Pat
+                varPat = VarP varName
+
+                funSig :: Dec
+                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+                    ConstructorArgs [] -> handlerRetType
+                    ConstructorArgs (ty:_) -> AppT (AppT ArrowT ty) handlerRetType
+
+                funBodyBase = AppE (VarE runnerName) $
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (VarE varName)
 
                 funBody = case ty of
                     TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
@@ -605,16 +628,40 @@ prependServerEndpointName prefix rest = do
           (pure rest)
           (fmap (LitT . StrTyLit . view typed) prefix)
 
-mkReqBody :: ConstructorName -> ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
-mkReqBody name args = do
-    bodyTag <- askBodyTag name
-    let body = case args of
-            ConstructorArgs [] -> Nothing
-            ConstructorArgs ts ->
-                let n = length ts
-                    constructor =
-                        AppT (ConT (mkName $ "NamedFields" <> show n)) (LitT bodyTag)
-                in  Just $ foldl AppT constructor ts
-    case body of
-        Nothing -> pure Nothing
-        Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
+mkReqBody
+    :: HandlerSettings
+    -> ConstructorName
+    -> ConstructorArgs
+    -> ReaderT ServerInfo Q (Maybe Type)
+mkReqBody hs name args = if hasJsonContentType hs
+    then do
+        bodyTag <- askBodyTag name
+        let
+            body = case args of
+                ConstructorArgs [] -> Nothing
+                ConstructorArgs ts ->
+                    let n           = length ts
+                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+                                           (LitT bodyTag)
+                    in  Just $ foldl AppT constructor ts
+        case body of
+            Nothing -> pure Nothing
+            Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
+    else do
+        let
+            body = case args of
+                ConstructorArgs []  -> Nothing
+                ConstructorArgs [t] -> Just t
+                ConstructorArgs _ ->
+                    fail "Multiple arguments are only supported for JSON content"
+        case body of
+            Nothing -> pure Nothing
+            Just b ->
+                Just <$> lift
+                    [t| ReqBody $(pure $ hs ^. field @"contentTypes") $(pure b) |]
+
+hasJsonContentType :: HandlerSettings -> Bool
+hasJsonContentType hs = case hs ^. field @"contentTypes" of
+    AppT (AppT PromotedConsT (ConT n)) (SigT PromotedNilT (AppT ListT StarT)) ->
+        nameBase n == "JSON"
+    _ -> False
