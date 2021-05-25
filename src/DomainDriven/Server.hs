@@ -31,9 +31,10 @@ import           DomainDriven.Internal.NamedFields
 import           Control.Monad.Reader
 
 data ApiSpec = ApiSpec
-    { gadtName   :: GadtName -- ^ Name of the GADT representing the command
-    , endpoints  :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
-    , apiOptions :: ApiOptions -- ^ The setting to use when generating part of the API
+    { gadtName    :: GadtName -- ^ Name of the GADT representing the command
+    , endpoints   :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
+    , apiOptions  :: ApiOptions -- ^ The setting to use when generating part of the API
+    , targetMonad :: Type -- ^ The monad that runs the handler
     }
     deriving (Show, Generic)
 
@@ -44,7 +45,10 @@ data ApiPiece
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
-newtype HandlerSettings = HandlerSettings Type
+data HandlerSettings = HandlerSettings
+    { contentTypes :: Type
+    , verb         :: Type
+    }
     deriving (Show, Generic, Eq)
 
 newtype ConstructorName = ConstructorName Name
@@ -97,11 +101,12 @@ guardMethodVar = \case
     PlainTV _    -> check StarT
   where
     check :: Type -> Q ()
-    check k =
-        unless (k == AppT (AppT ArrowT StarT) StarT)
-            .  fail
-            $  "Method must have be a `Verb` without the return type applied. Got: "
-            <> show k
+    check _ = pure ()
+--    check k =
+--        unless (k == AppT (AppT ArrowT StarT) StarT)
+--            .  fail
+--            $  "Method must have be a `Verb` without the return type applied. Got: "
+--            <> show k
 
 getActionType :: Type -> Q ActionType
 getActionType = \case
@@ -140,12 +145,28 @@ unqualifiedString = typed @OccName . typed
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
 mkApiPiece cfg = \case
     -- The normal case
-    GadtC [gadtName] bangArgs (AppT (AppT _ verb) retType) -> do
+    GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
+        handlerSettings <- do
+            expandedReqType <- case requestType of
+                ConT n -> reify n >>= \case
+                    TyConI (TySynD _ _ realType) -> pure realType
+                    ty ->
+                        fail
+                            $  "Expected "
+                            <> show n
+                            <> " to be a type synonym, got: "
+                            <> show ty
+                (AppT _ _) -> pure requestType
+                ty         -> fail $ "Expected RequestType, got: " <> show ty
+            case expandedReqType of
+                (AppT (AppT _RequesType contentTypes') verb') ->
+                    pure $ HandlerSettings contentTypes' verb'
+                ty -> fail $ "Expected RequestType, got: " <> show ty
 
-        actionType <- getActionType verb
+        actionType <- getActionType $ handlerSettings ^. field @"verb"
         pure $ Endpoint (ConstructorName gadtName)
                         (ConstructorArgs $ fmap snd bangArgs)
-                        (HandlerSettings verb)
+                        handlerSettings
                         actionType
                         retType
     -- When the constructor contain references to other domain models
@@ -180,6 +201,7 @@ mkApiPiece cfg = \case
         fail
             $  "Expected a GADT constructor representing an endpoint but got:\n"
             <> pprint c
+            <> show c -- FIXME: Remove once it works
 
 -- | Turn "OhYEAH" into "ohYEAH"...
 lowerFirst :: String -> String
@@ -199,7 +221,8 @@ mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
     opts <- getApiOptions cfg n
-    pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
+    m    <- [t| IO |]
+    pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts, targetMonad = m }
 
 -- | Verifies that the server do not generate overlapping paths
 verifySpec :: ApiSpec -> Q ()
@@ -275,15 +298,7 @@ askHandlerName :: Monad m => ReaderT ServerInfo m Name
 askHandlerName =
     (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler")
         <$> askTypeName
---
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
--- I need to create a structure that contians both Name and [UrlSegment] to use for the
--- reader. BodyTag should have the "exposed name" but the rest of the stuff should have
--- the normal names without any mapping.
-------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------
---askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
+
 askBodyTag :: ConstructorName -> ReaderT ServerInfo Q TyLit
 askBodyTag cName = do
     constructorSegments <- mkUrlSegments cName
@@ -400,7 +415,7 @@ mkHandlerTypeDec p = enterApiPiece p $ do
         Endpoint name args hs Mutable retType -> do
             -- Non-get endpoints use a request body
             ty <- do
-                reqBody   <- mkReqBody name args
+                reqBody   <- mkReqBody hs name args
                 reqReturn <- lift $ mkReturnType retType
                 middle    <- case reqBody of
                     Nothing -> pure $ mkVerb hs reqReturn
@@ -427,7 +442,7 @@ mkQueryParams (ConstructorArgs args) = do
         ty -> fail $ "Expected type ConT, got: " <> show ty
 
 mkVerb :: HandlerSettings -> Type -> Type
-mkVerb (HandlerSettings hs) ret = hs `AppT` ret
+mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
 -- | Declare then handlers for the API
 --
 mkServerDec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
@@ -459,10 +474,13 @@ mkServerDec spec = do
 
 mkRunner :: ApiSpec -> Q Runner
 mkRunner spec = do
-    Runner <$> [t| ActionRunner  $(pure cmdType) |]
+    Runner <$> [t| ActionRunner  $(pure cmdType) $(pure m) |]
   where
     cmdType :: Type
     cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
+
+    m :: Type
+    m = spec ^. field @"targetMonad"
 
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
@@ -494,7 +512,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs _ Mutable ty -> do
+        Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
@@ -520,6 +538,39 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                     AppE
                     (ConE $ apiPiece ^. typed @ConstructorName . typed)
                     (fmap VarE varNames)
+
+                funBody = case ty of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                (normalB [| liftIO $ $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        Endpoint cName cArgs hs Mutable ty -> do
+            -- FIXME: For non-JSON request bodies we support only one argument.
+            -- Combining JSON with other content types do not work properly at this point.
+            -- It could probably be fixed by adding MimeRender instances to NamedField1
+            -- that just uses the underlying MimeRender.
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
+            varName       <- lift $ newName "arg"
+            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerName    <- askHandlerName
+            runnerName     <- lift $ newName "runner"
+            let varPat :: Pat
+                varPat = VarP varName
+
+                funSig :: Dec
+                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+                    ConstructorArgs [] -> handlerRetType
+                    ConstructorArgs (ty:_) -> AppT (AppT ArrowT ty) handlerRetType
+
+                funBodyBase = AppE (VarE runnerName) $
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (VarE varName)
 
                 funBody = case ty of
                     TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
@@ -579,16 +630,40 @@ prependServerEndpointName prefix rest = do
           (pure rest)
           (fmap (LitT . StrTyLit . view typed) prefix)
 
-mkReqBody :: ConstructorName -> ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
-mkReqBody name args = do
-    bodyTag <- askBodyTag name
-    let body = case args of
-            ConstructorArgs [] -> Nothing
-            ConstructorArgs ts ->
-                let n = length ts
-                    constructor =
-                        AppT (ConT (mkName $ "NamedFields" <> show n)) (LitT bodyTag)
-                in  Just $ foldl AppT constructor ts
-    case body of
-        Nothing -> pure Nothing
-        Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
+mkReqBody
+    :: HandlerSettings
+    -> ConstructorName
+    -> ConstructorArgs
+    -> ReaderT ServerInfo Q (Maybe Type)
+mkReqBody hs name args = if hasJsonContentType hs
+    then do
+        bodyTag <- askBodyTag name
+        let
+            body = case args of
+                ConstructorArgs [] -> Nothing
+                ConstructorArgs ts ->
+                    let n           = length ts
+                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+                                           (LitT bodyTag)
+                    in  Just $ foldl AppT constructor ts
+        case body of
+            Nothing -> pure Nothing
+            Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
+    else do
+        let
+            body = case args of
+                ConstructorArgs []  -> Nothing
+                ConstructorArgs [t] -> Just t
+                ConstructorArgs _ ->
+                    fail "Multiple arguments are only supported for JSON content"
+        case body of
+            Nothing -> pure Nothing
+            Just b ->
+                Just <$> lift
+                    [t| ReqBody $(pure $ hs ^. field @"contentTypes") $(pure b) |]
+
+hasJsonContentType :: HandlerSettings -> Bool
+hasJsonContentType hs = case hs ^. field @"contentTypes" of
+    AppT (AppT PromotedConsT (ConT n)) (SigT PromotedNilT (AppT ListT StarT)) ->
+        nameBase n == "JSON"
+    _ -> False

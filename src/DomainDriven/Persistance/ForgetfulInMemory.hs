@@ -3,16 +3,15 @@ module DomainDriven.Persistance.ForgetfulInMemory where
 import           DomainDriven.Internal.Class
 import           Prelude
 import           GHC.Generics                   ( Generic )
-import           Control.Concurrent
-import           Data.IORef
-import           Control.Monad.Catch
 import           Data.List                      ( foldl' )
+import           UnliftIO
 
 
 createForgetful
-    :: (model -> Stored event -> model)
+    :: MonadIO m
+    => (model -> Stored event -> model)
     -> model -- ^ initial model
-    -> IO (ForgetfulInMemory model event)
+    -> m (ForgetfulInMemory model event)
 createForgetful appEvent m0 = do
     state <- newIORef m0
     evs   <- newIORef []
@@ -29,14 +28,14 @@ data ForgetfulInMemory model event = ForgetfulInMemory
     }
     deriving Generic
 
-instance ReadModel (ForgetfulInMemory m e) where
-    type Model (ForgetfulInMemory m e) = m
-    type Event (ForgetfulInMemory m e) = e
+instance ReadModel (ForgetfulInMemory model e) where
+    type Model (ForgetfulInMemory model e) = model
+    type Event (ForgetfulInMemory model e) = e
     applyEvent ff = apply ff
     getModel ff = readIORef $ stateRef ff
     getEvents ff = readIORef $ events ff
 
-instance WriteModel (ForgetfulInMemory m e) where
+instance WriteModel (ForgetfulInMemory model e)  where
     transactionalUpdate ff evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
             model     <- readIORef $ stateRef ff

@@ -37,7 +37,7 @@ mkTestConn :: IO Connection
 mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
                                    , connectPort     = 5432
                                    , connectUser     = "postgres"
-                                   , connectPassword = "postgres"
+                                   , connectPassword = "test"
                                    , connectDatabase = "domaindriven"
                                    }
 
@@ -148,7 +148,7 @@ storeModelSpec = describe "Test basic functionality" $ do
     it "Concurrent commands work" $ \p -> do
         -- This test relies on the postgres max connections being reasonably high.
         c0 <- runAction p Store.handleStoreAction Store.ListItems
-        let newItems :: [Store.StoreAction CMD Store.ItemKey]
+        let newItems :: [Store.StoreAction Cmd Store.ItemKey]
             newItems = replicate
                 n
                 ( Store.AdminAction

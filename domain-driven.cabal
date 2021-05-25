@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: b376c52e0313848b9bc1556ee94ed687b089ff8fcb5643fdbca212c0cd37d5ca
+-- hash: 1e504cd9935d8cb1bc3a509ac477111c6247f18c0a3a88166a7dbebd2cbd43ef
 
 name:           domain-driven
 version:        0.1.0.0
@@ -40,7 +40,38 @@ library
       Paths_domain_driven
   hs-source-dirs:
       src
-  default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
   build-depends:
       aeson
     , aeson-pretty
@@ -68,6 +99,7 @@ library
     , text
     , time
     , transformers
+    , unliftio
     , unordered-containers
     , uuid
     , vector
@@ -79,7 +111,38 @@ executable simple
       Paths_domain_driven
   hs-source-dirs:
       examples/simple
-  default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
   build-depends:
       aeson
@@ -109,6 +172,7 @@ executable simple
     , text
     , time
     , transformers
+    , unliftio
     , unordered-containers
     , uuid
     , vector
@@ -127,7 +191,38 @@ test-suite domain-driven-test
       Paths_domain_driven
   hs-source-dirs:
       test
-  default-extensions: Arrows ConstraintKinds DataKinds DeriveAnyClass DeriveFunctor DeriveGeneric DeriveTraversable DerivingStrategies DuplicateRecordFields FlexibleContexts FunctionalDependencies FlexibleInstances GADTs GeneralizedNewtypeDeriving LambdaCase MultiParamTypeClasses PolyKinds MultiWayIf NamedFieldPuns NoImplicitPrelude OverloadedLabels OverloadedStrings RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeApplications TypeFamilyDependencies TypeOperators TypeSynonymInstances ViewPatterns
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       QuickCheck
@@ -164,6 +259,7 @@ test-suite domain-driven-test
     , text
     , time
     , transformers
+    , unliftio
     , unordered-containers
     , uuid
     , vector
