@@ -548,8 +548,10 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 []
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty -> do
-            -- Fixme: Non JSON case is poorly supported. Reason is simply that this was
-            -- all I needed.
+            -- FIXME: For non-JSON request bodies we support only one argument.
+            -- Combining JSON with other content types do not work properly at this point.
+            -- It could probably be fixed by adding MimeRender instances to NamedField1
+            -- that just uses the underlying MimeRender.
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
