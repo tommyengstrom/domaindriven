@@ -5,6 +5,7 @@ module DomainDriven.ServerSpec where
 import           DomainDriven.Server
 import           Prelude
 import           Test.Hspec
+import           Control.Monad.Except
 import           Test.Hspec.Core.Hooks
 import           Control.Concurrent.Async
 import           Control.Concurrent
@@ -19,6 +20,7 @@ import           Servant.Client
 import qualified Data.Text                                    as T
 import           StoreModel
 import           Data.Text                      ( Text )
+import           Control.Monad.Reader
 
 $(mkServer domaindrivenServerConfig ''StoreAction)
 
@@ -42,7 +44,7 @@ type ExpectedReverseText
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
-handleTestAction :: ActionHandler () () TestAction IO
+handleTestAction :: ActionHandler () () TestAction (ReaderT () IO)
 handleTestAction = \case
     ReverseText t -> Cmd $ \() -> pure (T.reverse t, [])
 
@@ -52,8 +54,9 @@ withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
-    server <- async . run 9898 $ serve
+    server <- async . run 9898 $ serve (Proxy @StoreActionApi) $ hoistServer
         (Proxy @StoreActionApi)
+        (\m -> Handler $ ExceptT $ fmap Right $ runReaderT m ())
         (storeActionServer $ runAction p handleStoreAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
@@ -63,8 +66,9 @@ withTestServer :: IO () -> IO ()
 withTestServer runTests = do
     p      <- createForgetful (\m _ -> m) ()
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
-    server <- async . run 9898 $ serve
+    server <- async . run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
         (Proxy @TestActionApi)
+        (\m -> Handler $ ExceptT $ fmap Right $ runReaderT m ())
         (testActionServer $ runAction p handleTestAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests

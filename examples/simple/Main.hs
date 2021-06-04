@@ -12,11 +12,12 @@ import           Servant
 import           Data.Typeable                  ( Typeable )
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Servant.OpenApi
-import           Control.Monad.Catch
+import           Control.Monad.Catch     hiding ( Handler )
 import           Network.Wai.Handler.Warp       ( run )
 import           Data.Aeson
 import           GHC.Generics                   ( Generic )
-
+import           Control.Monad.Except
+import           Control.Monad.Reader
 
 -- | The model, representing the current state
 type CounterModel = Int
@@ -31,7 +32,9 @@ data CounterCmd method return where
    IncreaseCounter ::CounterCmd Cmd Int
    AddToCounter ::Int -> CounterCmd Cmd Int
 
-handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
+handleCmd
+    :: CounterCmd method a
+    -> HandlerType method CounterModel CounterEvent (ReaderT () IO) a
 handleCmd = \case
     GetCounter      -> Query $ pure
     IncreaseCounter -> Cmd $ \m -> pure (m + 1, [CounterIncreased])
@@ -45,7 +48,7 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
     CounterIncreased -> m + 1
     CounterDecreased -> m - 1
 
-$(mkServer defaultServerConfig ''CounterCmd)
+$(mkServer (Proxy @(ReaderT () IO)) defaultServerConfig ''CounterCmd)
 
 main :: IO ()
 --main = pure ()
@@ -55,4 +58,7 @@ main = do
     BL.writeFile "/tmp/counter_schema.json" $ encode $ toOpenApi (Proxy @CounterCmdApi)
     -- Now we can supply the ActionRunner to the generated server and run it as any other
     -- Servant server.
-    run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runAction dm handleCmd)
+    run 8888 $ serve (Proxy @CounterCmdApi) $ hoistServer
+        (Proxy @CounterCmdApi)
+        (Handler . ExceptT . fmap Right . flip runReaderT ())
+        (counterCmdServer $ runAction dm handleCmd)

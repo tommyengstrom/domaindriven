@@ -34,11 +34,13 @@ data ApiSpec = ApiSpec
     { gadtName    :: GadtName -- ^ Name of the GADT representing the command
     , endpoints   :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
     , apiOptions  :: ApiOptions -- ^ The setting to use when generating part of the API
-    , targetMonad :: Type -- ^ The monad that runs the handler
+    , targetMonad :: TargetMonad -- ^ The monad that runs the handler
     }
     deriving (Show, Generic)
 
 data ActionType = Mutable | Immutable deriving (Show, Eq)
+
+newtype TargetMonad = TargetMonad Type deriving (Show, Generic)
 
 data ApiPiece
     = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType Type
@@ -142,8 +144,8 @@ getConstructors = \case
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
 
-mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
-mkApiPiece cfg = \case
+mkApiPiece :: TargetMonad -> ServerConfig -> Con -> Q ApiPiece
+mkApiPiece m cfg = \case
     -- The normal case
     GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
         handlerSettings <- do
@@ -195,7 +197,7 @@ mkApiPiece cfg = \case
                         <> pprint ty
                 [] -> fail "I thought this coulnd't happen!"
 
-            subServerSpec <- mkServerSpec cfg (GadtName subCmd')
+            subServerSpec <- mkServerSpec m cfg (GadtName subCmd')
             pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
     c ->
         fail
@@ -215,13 +217,20 @@ upperFirst = \case
     []     -> []
 
 
+-- mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
+-- mkServerSpec cfg n = do
+--     eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
+--     opts <- getApiOptions cfg n
+--     m    <- [t| ReaderT () IO |]
+--     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts, targetMonad = m }
+
+
 -- | Create a ApiSpec from a GADT
 -- The GADT must have one parameter representing the return type
-mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
-mkServerSpec cfg n = do
-    eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
+mkServerSpec :: TargetMonad -> ServerConfig -> GadtName -> Q ApiSpec
+mkServerSpec m cfg n = do
+    eps  <- traverse (mkApiPiece m cfg) =<< getConstructors =<< getActionDec n
     opts <- getApiOptions cfg n
-    m    <- [t| IO |]
     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts, targetMonad = m }
 
 -- | Verifies that the server do not generate overlapping paths
@@ -236,9 +245,19 @@ verifySpec _ = pure ()
 -- Due to GHC stage restrictions this cannot be generated in the same module.
 --
 -- Using this require you to
-mkServer :: ServerConfig -> Name -> Q [Dec]
-mkServer cfg (GadtName -> gadtName) = do
-    spec <- mkServerSpec cfg gadtName
+mkServer
+    :: forall targetMonad
+     . Proxy (targetMonad :: Type -> Type)
+    -> ServerConfig
+    -> Name
+    -> Q [Dec]
+mkServer p cfg (GadtName -> gadtName) = do
+    kuken <- [t|  $(_ p) |]
+    m     <- case kuken of
+        AppKindT (ConT _proxy) t -> pure t
+        a                        -> fail $ "Well this was unexpected: " <> show a
+
+    spec <- mkServerSpec (TargetMonad m) cfg gadtName
     opts <- getApiOptions cfg gadtName
     verifySpec spec
     let si :: ServerInfo
@@ -452,7 +471,11 @@ mkServerDec spec = do
 
     runner      <- lift $ mkRunner spec
     let runnerName = mkName "runner"
-    ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
+        m :: Type
+        m = spec ^. typed @TargetMonad . typed
+    ret <-
+        lift
+            [t| ServerT $(pure $ ConT apiTypeName) $(pure m)|]
     let serverSigDec :: Dec
         serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
 
@@ -468,7 +491,7 @@ mkServerDec spec = do
     let serverFunDec :: Dec
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <- mconcat
-        <$> traverse (mkApiPieceHandler runner) (spec ^. typed @[ApiPiece])
+        <$> traverse (mkApiPieceHandler (spec ^. typed) runner) (spec ^. typed @[ApiPiece])
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
@@ -480,19 +503,19 @@ mkRunner spec = do
     cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
 
     m :: Type
-    m = spec ^. field @"targetMonad"
+    m = spec ^. field @"targetMonad" . typed
 
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
-mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
-mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
+mkApiPieceHandler :: TargetMonad -> Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
+mkApiPieceHandler (view typed -> m) (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
         Endpoint _ cArgs _ Immutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerRetType <- lift [t| $(pure m) $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
             let funSig :: Dec
@@ -509,14 +532,14 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (fmap (pure . VarP) (runnerName:varNames ))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [| $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerRetType <- lift [t| $(pure m) $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             bodyTag        <- askBodyTag cName
             runnerName     <- lift $ newName "runner"
@@ -544,7 +567,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [| $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty -> do
@@ -556,7 +579,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 nrArgs = length $ cArgs ^. typed @[Type]
             unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
             varName       <- lift $ newName "arg"
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
+            handlerRetType <- lift [t| $(pure m) $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
             let varPat :: Pat
@@ -577,7 +600,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [| $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         SubApi cName cArgs spec -> do
@@ -589,7 +612,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             runnerName     <- lift $ newName "runner"
 
             funSig <- lift $ do
-                returnSig <- [t| Server $(pure $ ConT targetApiTypeName) |]
+                returnSig <- [t| ServerT $(pure $ ConT targetApiTypeName) $(pure m)|]
                 params <- case cArgs ^. typed  of
                     [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
                     ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
