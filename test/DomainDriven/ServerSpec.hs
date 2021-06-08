@@ -22,7 +22,13 @@ import           StoreModel
 import           Data.Text                      ( Text )
 import           Control.Monad.Reader
 
-$(mkServer domaindrivenServerConfig ''StoreAction)
+data Stuff = Stuff
+    { theSecretSause :: Text
+    }
+    deriving Show
+
+
+$(mkServer (Proxy @()) domaindrivenServerConfig ''StoreAction)
 
 buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
@@ -37,6 +43,7 @@ buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (restock :<|> addItem
 
 data TestAction method a where
     ReverseText ::Text -> TestAction (RequestType '[PlainText] (Verb 'POST 200 '[JSON])) Text
+    SecretSauce ::TestAction Query Text
 
 type ExpectedReverseText
     = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
@@ -44,11 +51,13 @@ type ExpectedReverseText
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
-handleTestAction :: ActionHandler () () TestAction (ReaderT () IO)
+handleTestAction :: ActionHandler () () TestAction (ReaderT Stuff IO)
 handleTestAction = \case
     ReverseText t -> Cmd $ \() -> pure (T.reverse t, [])
+    SecretSauce   -> Query $ \_ -> asks theSecretSause
 
-$(mkServer defaultServerConfig ''TestAction)
+
+$(mkServer (Proxy @()) defaultServerConfig ''TestAction)
 
 withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
@@ -68,7 +77,7 @@ withTestServer runTests = do
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
     server <- async . run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
         (Proxy @TestActionApi)
-        (\m -> Handler $ ExceptT $ fmap Right $ runReaderT m ())
+        (\m -> Handler $ ExceptT $ fmap Right $ runReaderT m (Stuff "ketchup"))
         (testActionServer $ runAction p handleTestAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
@@ -95,3 +104,9 @@ spec = do
             it "Plaintext endpoint works" $ do
                 r <- runClientM (expectedReverseText "Hej") clientEnv
                 r `shouldBe` Right "jeH"
+    describe "Testing the reader" $ do
+        it "Gives the secret source" $ do
+            p <- createForgetful const ()
+            r <- runReaderT (runAction p handleTestAction SecretSauce)
+                            (Stuff "this is secret")
+            r `shouldBe` "this is secret"

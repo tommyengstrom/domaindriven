@@ -34,7 +34,7 @@ data ApiSpec = ApiSpec
     { gadtName    :: GadtName -- ^ Name of the GADT representing the command
     , endpoints   :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
     , apiOptions  :: ApiOptions -- ^ The setting to use when generating part of the API
-    , targetMonad :: TargetMonad -- ^ The monad that runs the handler
+    , targetMonad :: TargetMonad -- ^ The content of the reader monad runnig it
     }
     deriving (Show, Generic)
 
@@ -217,14 +217,6 @@ upperFirst = \case
     []     -> []
 
 
--- mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
--- mkServerSpec cfg n = do
---     eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
---     opts <- getApiOptions cfg n
---     m    <- [t| ReaderT () IO |]
---     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts, targetMonad = m }
-
-
 -- | Create a ApiSpec from a GADT
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: TargetMonad -> ServerConfig -> GadtName -> Q ApiSpec
@@ -245,19 +237,10 @@ verifySpec _ = pure ()
 -- Due to GHC stage restrictions this cannot be generated in the same module.
 --
 -- Using this require you to
-mkServer
-    :: forall targetMonad
-     . Proxy (targetMonad :: Type -> Type)
-    -> ServerConfig
-    -> Name
-    -> Q [Dec]
-mkServer p cfg (GadtName -> gadtName) = do
-    kuken <- [t|  $(_ p) |]
-    m     <- case kuken of
-        AppKindT (ConT _proxy) t -> pure t
-        a                        -> fail $ "Well this was unexpected: " <> show a
-
-    spec <- mkServerSpec (TargetMonad m) cfg gadtName
+mkServer :: forall context . Proxy context -> ServerConfig -> Name -> Q [Dec]
+mkServer _ cfg (GadtName -> gadtName) = do
+    m    <- TargetMonad <$> [t| ReaderT context IO |]
+    spec <- mkServerSpec m cfg gadtName
     opts <- getApiOptions cfg gadtName
     verifySpec spec
     let si :: ServerInfo
@@ -471,11 +454,10 @@ mkServerDec spec = do
 
     runner      <- lift $ mkRunner spec
     let runnerName = mkName "runner"
-        m :: Type
-        m = spec ^. typed @TargetMonad . typed
+
     ret <-
         lift
-            [t| ServerT $(pure $ ConT apiTypeName) $(pure m)|]
+            [t| ServerT $(pure $ ConT apiTypeName) $(pure $ spec ^. typed @TargetMonad . typed)|]
     let serverSigDec :: Dec
         serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
 
@@ -491,25 +473,24 @@ mkServerDec spec = do
     let serverFunDec :: Dec
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <- mconcat
-        <$> traverse (mkApiPieceHandler (spec ^. typed) runner) (spec ^. typed @[ApiPiece])
+        <$> traverse (mkApiPieceHandler (spec ^. typed) runner)
+                     (spec ^. typed @[ApiPiece])
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
 mkRunner :: ApiSpec -> Q Runner
 mkRunner spec = do
-    Runner <$> [t| ActionRunner  $(pure cmdType) $(pure m) |]
+    Runner
+        <$> [t| ActionRunner  $(pure cmdType) $(pure $ spec ^. typed @TargetMonad . typed) |]
   where
     cmdType :: Type
     cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
-
-    m :: Type
-    m = spec ^. field @"targetMonad" . typed
 
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
 mkApiPieceHandler :: TargetMonad -> Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
-mkApiPieceHandler (view typed -> m) (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
+mkApiPieceHandler (TargetMonad m) (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
         Endpoint _ cArgs _ Immutable ty -> do
             let nrArgs :: Int
@@ -570,7 +551,7 @@ mkApiPieceHandler (view typed -> m) (Runner runnerType) apiPiece = enterApiPiece
                 (normalB [| $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs hs Mutable ty -> do
+        Endpoint _cName cArgs _hs Mutable ty -> do
             -- FIXME: For non-JSON request bodies we support only one argument.
             -- Combining JSON with other content types do not work properly at this point.
             -- It could probably be fixed by adding MimeRender instances to NamedField1
@@ -588,7 +569,7 @@ mkApiPieceHandler (view typed -> m) (Runner runnerType) apiPiece = enterApiPiece
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
                     ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs (ty:_) -> AppT (AppT ArrowT ty) handlerRetType
+                    ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
@@ -612,7 +593,7 @@ mkApiPieceHandler (view typed -> m) (Runner runnerType) apiPiece = enterApiPiece
             runnerName     <- lift $ newName "runner"
 
             funSig <- lift $ do
-                returnSig <- [t| ServerT $(pure $ ConT targetApiTypeName) $(pure m)|]
+                returnSig <- [t| ServerT $(pure $ ConT targetApiTypeName) $(pure m) |]
                 params <- case cArgs ^. typed  of
                     [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
                     ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
