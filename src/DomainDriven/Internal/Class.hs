@@ -4,7 +4,6 @@
 {-# LANGUAGE TypeFamilyDependencies #-}
 module DomainDriven.Internal.Class where
 
-import           Control.Monad.Reader
 import           Data.Aeson
 import           Prelude
 import           Control.Lens                   ( (^.) )
@@ -15,22 +14,13 @@ import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Kind
 import           Data.UUID                      ( UUID )
-import           UnliftIO
+import Control.Monad.Reader
+import UnliftIO
 
 
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
 type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType '[JSON] (Verb 'GET 200 '[JSON])
--- type Cmd = Verb 'POST 200 '[JSON]
--- type Query = Verb 'GET 200 '[JSON]
-
--- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
---type family CanMutate (method :: Type -> Type) :: Bool where
---    CanMutate (Verb 'GET code cts) = 'False
---    CanMutate (Verb 'POST code cts) = 'True
---    CanMutate (Verb 'PUT code cts) = 'True
---    CanMutate (Verb 'PATCH code cts) = 'True
---    CanMutate (Verb 'DELETE code cts) = 'True
 
 type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'GET code cts)) = 'False
@@ -39,24 +29,22 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
     CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
 
-data HandlerType method model event m a where
-    Query ::CanMutate method ~ 'False => (model -> m a) -> HandlerType method model event m a
-    Cmd ::CanMutate method ~ 'True => (model -> m (a, [event])) -> HandlerType method model event m a
+data HandlerType method model event r a where
+    Query ::CanMutate method ~ 'False => (model -> ReaderT r IO a) -> HandlerType method model event r a
+    Cmd ::CanMutate method ~ 'True => (model -> ReaderT r IO (a, [event])) -> HandlerType method model event r a
 
 mapModel
-    :: Monad m
-    => (model0 -> model1)
-    -> HandlerType method model1 event m a
-    -> HandlerType method model0 event m a
+    :: (model0 -> model1)
+    -> HandlerType method model1 event r a
+    -> HandlerType method model0 event r a
 mapModel f = \case
     Query h -> Query (h . f)
     Cmd   h -> Cmd (h . f)
 
 mapEvent
-    :: Monad m
-    => (e0 -> e1)
-    -> HandlerType method model e0 m a
-    -> HandlerType method model e1 m a
+    :: (e0 -> e1)
+    -> HandlerType method model e0 r a
+    -> HandlerType method model e1 r a
 mapEvent f = \case
     Query h -> Query h
     Cmd   h -> Cmd $ \m -> do
@@ -64,10 +52,9 @@ mapEvent f = \case
         pure (ret, fmap f evs)
 
 mapResult
-    :: Monad m
-    => (r0 -> r1)
-    -> HandlerType method model e m r0
-    -> HandlerType method model e m r1
+    :: (r0 -> r1)
+    -> HandlerType method model e r r0
+    -> HandlerType method model e r r1
 mapResult f = \case
     Query h -> Query $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
@@ -86,12 +73,11 @@ class ReadModel p  => WriteModel p where
 
 
 runAction
-    :: (WriteModel p, MonadUnliftIO m, model ~ Model p, event ~ Event p)
+    :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
-    -> (forall a . cmd method a -> HandlerType method model event m a)
+    -> (forall a . cmd method a -> HandlerType method model event r a)
     -> cmd method ret
-    -> m ret
+    -> ReaderT r IO ret
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
     Cmd   m -> withRunInIO $ \toIO' -> do
@@ -136,10 +122,10 @@ instance Show ApiOptions  where
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type ActionHandler model event cmd m
-    = forall method a . cmd method a -> HandlerType method model event m a
+type ActionHandler model event cmd r
+    = forall method a . cmd method a -> HandlerType method model event r a
 
-type ActionRunner c m = forall method a . MonadUnliftIO m => c method a -> m a
+type ActionRunner c r = forall method a . c method a -> ReaderT r IO a
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

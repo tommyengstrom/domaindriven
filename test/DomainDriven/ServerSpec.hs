@@ -51,7 +51,7 @@ type ExpectedReverseText
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
-handleTestAction :: ActionHandler () () TestAction (ReaderT Stuff IO)
+handleTestAction :: ActionHandler () () TestAction Stuff
 handleTestAction = \case
     ReverseText t -> Cmd $ \() -> pure (T.reverse t, [])
     SecretSauce   -> Query $ \_ -> asks theSecretSause

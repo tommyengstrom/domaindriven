@@ -16,6 +16,7 @@ import           Data.Aeson                     ( ToJSON
                                                 )
 import           Data.Text                      ( Text )
 import           Control.Monad.Catch            ( throwM )
+import           Control.Monad.Reader
 import           GHC.Generics                   ( Generic )
 import           Control.Monad                  ( when )
 import           Data.String                    ( IsString )
@@ -91,8 +92,7 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction
-    :: (MonadThrow m, MonadIO m) => ActionHandler StoreModel StoreEvent StoreAction m
+handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction ()
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -106,8 +106,7 @@ handleStoreAction = \case
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction
-    :: (MonadThrow m, MonadIO m) => ActionHandler StoreModel StoreEvent AdminAction m
+handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction ()
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -119,17 +118,13 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
-handleItemAction
-    :: forall m
-     . (MonadThrow m, MonadIO m)
-    => ItemKey
-    -> ActionHandler StoreModel StoreEvent ItemAction m
+handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction ()
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
   where
-    getItem :: StoreModel -> m ItemInfo
+    getItem :: StoreModel -> ReaderT () IO ItemInfo
     getItem = maybe (throwM err404) pure . M.lookup iKey
 ------------------------------------------------------------------------------------------
 -- Event handler                                                                        --
