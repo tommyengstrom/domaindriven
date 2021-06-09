@@ -42,7 +42,7 @@ type ExpectedReverseText
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
-handleTestAction :: ActionHandler () () TestAction IO
+handleTestAction :: ActionHandler () () TestAction
 handleTestAction = \case
     ReverseText t -> Cmd $ \() -> pure (T.reverse t, [])
 
