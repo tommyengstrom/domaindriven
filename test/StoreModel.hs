@@ -89,7 +89,7 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction IO
+handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -103,7 +103,7 @@ handleStoreAction = \case
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction IO
+handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -115,7 +115,7 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure ((), [RemovedItem iKey])
 
-handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction IO
+handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m

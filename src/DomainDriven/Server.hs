@@ -31,10 +31,9 @@ import           DomainDriven.Internal.NamedFields
 import           Control.Monad.Reader
 
 data ApiSpec = ApiSpec
-    { gadtName    :: GadtName -- ^ Name of the GADT representing the command
-    , endpoints   :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
-    , apiOptions  :: ApiOptions -- ^ The setting to use when generating part of the API
-    , targetMonad :: Type -- ^ The monad that runs the handler
+    { gadtName   :: GadtName -- ^ Name of the GADT representing the command
+    , endpoints  :: [ApiPiece] -- ^ Endpoints created from the constructors of the GADT
+    , apiOptions :: ApiOptions -- ^ The setting to use when generating part of the API
     }
     deriving (Show, Generic)
 
@@ -221,8 +220,7 @@ mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     eps  <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
     opts <- getApiOptions cfg n
-    m    <- [t| IO |]
-    pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts, targetMonad = m }
+    pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
 
 -- | Verifies that the server do not generate overlapping paths
 verifySpec :: ApiSpec -> Q ()
@@ -474,14 +472,10 @@ mkServerDec spec = do
 
 mkRunner :: ApiSpec -> Q Runner
 mkRunner spec = do
-    Runner <$> [t| ActionRunner  $(pure cmdType) $(pure m) |]
+    Runner <$> [t| ActionRunner $(pure cmdType)  |]
   where
     cmdType :: Type
     cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
-
-    m :: Type
-    m = spec ^. field @"targetMonad"
-
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied

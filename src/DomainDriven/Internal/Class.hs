@@ -15,7 +15,6 @@ import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Kind
 import           Data.UUID                      ( UUID )
-import           UnliftIO
 
 
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
@@ -39,24 +38,22 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
     CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
 
-data HandlerType method model event m a where
-    Query ::CanMutate method ~ 'False => (model -> m a) -> HandlerType method model event m a
-    Cmd ::CanMutate method ~ 'True => (model -> m (a, [event])) -> HandlerType method model event m a
+data HandlerType method model event a where
+    Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
+    Cmd ::CanMutate method ~ 'True => (model -> IO (a, [event])) -> HandlerType method model event a
 
 mapModel
-    :: Monad m
-    => (model0 -> model1)
-    -> HandlerType method model1 event m a
-    -> HandlerType method model0 event m a
+    :: (model0 -> model1)
+    -> HandlerType method model1 event a
+    -> HandlerType method model0 event a
 mapModel f = \case
     Query h -> Query (h . f)
     Cmd   h -> Cmd (h . f)
 
 mapEvent
-    :: Monad m
-    => (e0 -> e1)
-    -> HandlerType method model e0 m a
-    -> HandlerType method model e1 m a
+    :: (e0 -> e1)
+    -> HandlerType method model e0 a
+    -> HandlerType method model e1 a
 mapEvent f = \case
     Query h -> Query h
     Cmd   h -> Cmd $ \m -> do
@@ -64,10 +61,9 @@ mapEvent f = \case
         pure (ret, fmap f evs)
 
 mapResult
-    :: Monad m
-    => (r0 -> r1)
-    -> HandlerType method model e m r0
-    -> HandlerType method model e m r1
+    :: (r0 -> r1)
+    -> HandlerType method model e r0
+    -> HandlerType method model e r1
 mapResult f = \case
     Query h -> Query $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
@@ -86,16 +82,14 @@ class ReadModel p  => WriteModel p where
 
 
 runAction
-    :: (WriteModel p, MonadUnliftIO m, model ~ Model p, event ~ Event p)
+    :: (WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -- -> (forall a . cmd method a -> HandlerType (CanMutate method) model event a)
-    -> (forall a . cmd method a -> HandlerType method model event m a)
+    -> (forall a . cmd method a -> HandlerType method model event a)
     -> cmd method ret
-    -> m ret
+    -> IO ret
 runAction p handleCmd cmd = case handleCmd cmd of
-    Query m -> m =<< liftIO (getModel p)
-    Cmd   m -> withRunInIO $ \toIO' -> do
-        transactionalUpdate p $ toIO' (m =<< liftIO (getModel p))
+    Query m -> m =<< getModel p
+    Cmd   m -> transactionalUpdate p $ m =<< getModel p
 
 
 
@@ -136,10 +130,10 @@ instance Show ApiOptions  where
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type ActionHandler model event cmd m
-    = forall method a . cmd method a -> HandlerType method model event m a
+type ActionHandler model event cmd
+    = forall method a . cmd method a -> HandlerType method model event a
 
-type ActionRunner c m = forall method a . MonadUnliftIO m => c method a -> m a
+type ActionRunner c = forall method a . c method a -> IO a
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

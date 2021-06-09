@@ -31,7 +31,7 @@ data CounterCmd method return where
    IncreaseCounter ::CounterCmd Cmd Int
    AddToCounter ::Int -> CounterCmd Cmd Int
 
-handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
+handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent a
 handleCmd = \case
     GetCounter      -> Query $ pure
     IncreaseCounter -> Cmd $ \m -> pure (m + 1, [CounterIncreased])
