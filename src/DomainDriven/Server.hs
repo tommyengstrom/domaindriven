@@ -9,26 +9,26 @@ module DomainDriven.Server
     , HasFieldName(..)
     ) where
 
+import           Control.Lens
+import           Control.Monad
+import           Control.Monad.Reader
+import           Control.Monad.Trans
+import           Data.Char
+import           Data.Generics.Product
+import qualified Data.List                                    as L
+import qualified Data.Map                                     as M
+import           Data.Text                      ( Text )
+import qualified Data.Text                                    as T
+import           DomainDriven.Config            ( ServerConfig(..) )
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.HasFieldName
                                                 ( HasFieldName(..) )
-import           Prelude
+import           DomainDriven.Internal.NamedFields
+import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
-import           Control.Monad
-import           Data.Text                      ( Text )
-import qualified Data.Text                                    as T
-import qualified Data.List                                    as L
-import qualified Data.Map                                     as M
+import           Prelude
 import           Servant
-import           Data.Char
-import           Control.Monad.Trans
-import           DomainDriven.Config            ( ServerConfig(..) )
-import           Control.Lens
-import           Data.Generics.Product
-import           GHC.Generics                   ( Generic )
-import           DomainDriven.Internal.NamedFields
-import           Control.Monad.Reader
 
 data ApiSpec = ApiSpec
     { gadtName   :: GadtName -- ^ Name of the GADT representing the command
@@ -252,7 +252,7 @@ mkServer cfg (GadtName -> gadtName) = do
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
     Just o  -> pure o
-    Nothing -> pure $ ApiOptions pure "_" Nothing
+    Nothing -> pure defaultApiOptions
 
 
 -- | Carries information regarding how the API looks at the place we're currently at.
@@ -342,7 +342,8 @@ enterApiPiece p m = do
 mkApiTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
-    epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
+    epTypes     <- traverse (mkEndpointApiType $ spec ^. typed @ApiOptions)
+                            (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         []     -> fail "Server contains no endpoints"
         t : ts -> do
@@ -355,8 +356,8 @@ mkApiTypeDecs spec = do
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
 -- * For SubApi we apply the path parameters before referencing the SubApi
-mkEndpointApiType :: ApiPiece -> ReaderT ServerInfo Q Type
-mkEndpointApiType p = enterApiPiece p $ case p of
+mkEndpointApiType :: ApiOptions -> ApiPiece -> ReaderT ServerInfo Q Type
+mkEndpointApiType opts p = enterApiPiece p $ case p of
     Endpoint{}           -> ConT <$> askEndpointTypeName
     SubApi cName cArgs _ -> do
         urlSegments <- mkUrlSegments cName
@@ -367,7 +368,10 @@ mkEndpointApiType p = enterApiPiece p $ case p of
                 let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
 
             useFieldname :: String -> String
-            useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
+            useFieldname n' =
+                (opts ^. field @"renamePathParams") . maybe n' T.unpack $ M.lookup
+                    n'
+                    fieldNames
 
             mkLitType :: Type -> Type
             mkLitType = \case
