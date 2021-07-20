@@ -12,7 +12,6 @@ module DomainDriven.Server
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Reader
-import           Control.Monad.Trans
 import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
@@ -365,18 +364,15 @@ mkEndpointApiType opts p = enterApiPiece p $ case p of
         fieldNames  <- asks allFieldNames'
         let mkCapture :: Type -> Q Type
             mkCapture ty =
-                let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
+                let tyLit = pure $ mkLitType id ty in [t| Capture $tyLit $(pure ty) |]
 
             useFieldname :: String -> String
-            useFieldname n' =
-                (opts ^. field @"renamePathParams") . maybe n' T.unpack $ M.lookup
-                    n'
-                    fieldNames
+            useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
 
-            mkLitType :: Type -> Type
-            mkLitType = \case
-                VarT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
-                ConT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
+            mkLitType :: (String -> String) -> Type -> Type
+            mkLitType f = \case
+                VarT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
+                ConT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
                 _       -> LitT $ StrTyLit "unknown"
 
         finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
@@ -385,7 +381,10 @@ mkEndpointApiType opts p = enterApiPiece p $ case p of
             ConstructorArgs ts -> lift $ do
                 capturesWithTitles <- do
                     captures <- traverse mkCapture ts
-                    pure . mconcat $ zipWith (\a b -> [mkLitType a, b]) ts captures
+                    pure . mconcat $ zipWith
+                        (\a b -> [mkLitType (opts ^. field @"renamePathParams") a, b])
+                        ts
+                        captures
                 bird <- [t| (:>) |]
                 pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType capturesWithTitles
 
@@ -545,7 +544,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs hs Mutable ty -> do
+        Endpoint _cName cArgs _hs Mutable ty -> do
             -- FIXME: For non-JSON request bodies we support only one argument.
             -- Combining JSON with other content types do not work properly at this point.
             -- It could probably be fixed by adding MimeRender instances to NamedField1
@@ -563,7 +562,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
                     ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs (ty:_) -> AppT (AppT ArrowT ty) handlerRetType
+                    ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
