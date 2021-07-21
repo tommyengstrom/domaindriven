@@ -4,27 +4,28 @@
 
 module DomainDriven.Internal.NamedJsonFields where
 
-import           Prelude
-import           DomainDriven.Internal.HasFieldName
-import           GHC.Generics
+import           Control.Applicative
+import           Control.Lens            hiding ( from
+                                                , to
+                                                )
+import           Control.Monad.State
 import           Data.Aeson
 import           Data.Aeson.Types
-import           Data.Text                      ( Text )
-import qualified Data.Text                                    as T
-import qualified Data.HashMap.Strict                          as HM
-import           Control.Applicative
-import           Control.Monad.State
 import           Data.Generics.Product
-import           Data.OpenApi            hiding ( put
-                                                , get
-                                                )
+import qualified Data.HashMap.Strict                          as HM
 import           Data.Kind                      ( Type )
+import           Data.OpenApi            hiding ( get
+                                                , put
+                                                )
 import           Data.OpenApi.Declare
 import           Data.Proxy
-import           Control.Lens            hiding ( to
-                                                , from
-                                                )
+import           Data.Text                      ( Text )
+import qualified Data.Text                                    as T
 import           Data.Text.Lens                 ( packed )
+import           Data.Typeable
+import           DomainDriven.Internal.HasFieldName
+import           GHC.Generics
+import           Prelude
 
 newtype NamedJsonFields a = NamedJsonFields a
 
@@ -34,7 +35,7 @@ instance (GNamedToJSON (Rep a), Generic a) => ToJSON (NamedJsonFields a) where
 instance (GNamedFromJSON (Rep a), Generic a) => FromJSON (NamedJsonFields a) where
     parseJSON = fmap NamedJsonFields . gNamedParseJson defaultNamedJsonOptions
 
-instance (GNamedToSchema (Rep a), Generic a) => ToSchema (NamedJsonFields a) where
+instance (Typeable a, GNamedToSchema (Rep a), Generic a) => ToSchema (NamedJsonFields a) where
     declareNamedSchema _ = gNamedDeclareNamedSchema defaultNamedJsonOptions (Proxy @a)
         -- evalStateT (gDeclareNamedSchema defaultNamedJsonOptions $ Proxy @(Rep a)) []
 
@@ -124,7 +125,7 @@ instance {-# OVERLAPPING #-} (ToSchema f, HasFieldName f, Selector s)
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @(Maybe f)
         usedNames <- state (\used -> (used, fName : used))
-        lift $ declareSchemaRef $ Proxy @f
+        _         <- lift $ declareSchemaRef $ Proxy @f
         pure
             .   NamedSchema Nothing
             $   mempty
@@ -137,7 +138,7 @@ instance {-# OVERLAPPABLE #-} (ToSchema f, HasFieldName f, Selector s)
     gDeclareNamedSchema _opts _ = do
         let fName = fieldName @f
         usedNames <- state (\used -> (used, fName : used))
-        lift $ declareSchemaRef $ Proxy @f
+        _         <- lift $ declareSchemaRef $ Proxy @f
         pure
             .   NamedSchema Nothing
             $   mempty
