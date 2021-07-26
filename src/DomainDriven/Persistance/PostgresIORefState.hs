@@ -1,23 +1,23 @@
 -- | Postgres events with state as an IORef
 module DomainDriven.Persistance.PostgresIORefState where
 
-import           DomainDriven.Internal.Class
-import           Prelude
-import           Data.Time
-import           Database.PostgreSQL.Simple
-import           Data.Int
-import           Data.String
 import           Control.Monad
-import           Data.List                      ( foldl' )
-import           Data.Typeable
 import           Control.Monad.Catch
-import           GHC.Generics                   ( Generic )
-import           Data.Text                      ( Text )
 import           Data.Aeson
+import           Data.IORef
+import           Data.Int
+import           Data.List                      ( foldl' )
+import           Data.String
+import           Data.Text                      ( Text )
+import           Data.Time
+import           Data.Typeable
 import           Data.UUID                      ( UUID )
+import           Database.PostgreSQL.Simple
 import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
-import           Data.IORef
+import           DomainDriven.Internal.Class
+import           GHC.Generics                   ( Generic )
+import           Prelude
 
 
 
@@ -174,7 +174,7 @@ queryEventsAfter conn eventTable (CommitNumber lastEvent) =
 
 writeEvents
     :: forall a
-     . (FromJSON a, ToJSON a)
+     . (ToJSON a)
     => Connection
     -> EventTableName
     -> [Stored a]
@@ -190,9 +190,10 @@ writeEvents conn eventTable storedEvents = do
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
               storedEvents
         )
-    rows <- traverse (fromEventRow @a)
-        =<< query_ conn ("select * from \"" <> fromString eventTable <> "\"")
-    pure $ foldl' max 0 (fmap snd rows)
+    commitNumber <- foldl' max 0 . fmap fromOnly <$> query_
+        conn
+        ("select max(commit_number) from \"" <> fromString eventTable <> "\"")
+    pure $ commitNumber
 
 -- | Keep the events and state in postgres!
 data PostgresEvent model event = PostgresEvent
@@ -261,10 +262,19 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
             pure a
 
+migrateValue1to1
+    :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
 
 migrate1to1
-    :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+    :: forall a b
+     . (Typeable a, FromJSON a, ToJSON b)
+    => Connection
+    -> PreviosEventTableName
+    -> EventTableName
+    -> (Stored a -> Stored b)
+    -> IO ()
 migrate1to1 conn prevTName tName f = do
     _             <- createEventTable' conn tName
-    currentEvents <- queryEvents @Value conn prevTName
-    void $ writeEvents conn tName $ fmap (fmap f . fst) currentEvents
+    currentEvents <- queryEvents @a conn prevTName
+    void $ writeEvents conn tName $ fmap (f . fst) currentEvents
