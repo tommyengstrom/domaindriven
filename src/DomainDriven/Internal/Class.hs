@@ -99,6 +99,7 @@ class HasApiOptions (action :: Type -> Type -> Type) where
 
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> [String]
+    , renamePathParams :: String -> String
     , typenameSeparator :: String
     , bodyNameBase      :: Maybe String
     }
@@ -106,6 +107,7 @@ data ApiOptions = ApiOptions
 
 defaultApiOptions :: ApiOptions
 defaultApiOptions = ApiOptions { renameConstructor = pure
+                               , renamePathParams = id
                                , typenameSeparator = "_"
                                , bodyNameBase      = Nothing
                                }

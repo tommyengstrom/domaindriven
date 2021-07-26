@@ -9,26 +9,25 @@ module DomainDriven.Server
     , HasFieldName(..)
     ) where
 
+import           Control.Lens
+import           Control.Monad
+import           Control.Monad.Reader
+import           Data.Char
+import           Data.Generics.Product
+import qualified Data.List                                    as L
+import qualified Data.Map                                     as M
+import           Data.Text                      ( Text )
+import qualified Data.Text                                    as T
+import           DomainDriven.Config            ( ServerConfig(..) )
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.HasFieldName
                                                 ( HasFieldName(..) )
-import           Prelude
+import           DomainDriven.Internal.NamedFields
+import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
-import           Control.Monad
-import           Data.Text                      ( Text )
-import qualified Data.Text                                    as T
-import qualified Data.List                                    as L
-import qualified Data.Map                                     as M
+import           Prelude
 import           Servant
-import           Data.Char
-import           Control.Monad.Trans
-import           DomainDriven.Config            ( ServerConfig(..) )
-import           Control.Lens
-import           Data.Generics.Product
-import           GHC.Generics                   ( Generic )
-import           DomainDriven.Internal.NamedFields
-import           Control.Monad.Reader
 
 data ApiSpec = ApiSpec
     { gadtName   :: GadtName -- ^ Name of the GADT representing the command
@@ -252,7 +251,7 @@ mkServer cfg (GadtName -> gadtName) = do
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
     Just o  -> pure o
-    Nothing -> pure $ ApiOptions pure "_" Nothing
+    Nothing -> pure defaultApiOptions
 
 
 -- | Carries information regarding how the API looks at the place we're currently at.
@@ -342,7 +341,8 @@ enterApiPiece p m = do
 mkApiTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
-    epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
+    epTypes     <- traverse (mkEndpointApiType $ spec ^. typed @ApiOptions)
+                            (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         []     -> fail "Server contains no endpoints"
         t : ts -> do
@@ -355,8 +355,8 @@ mkApiTypeDecs spec = do
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
 -- * For SubApi we apply the path parameters before referencing the SubApi
-mkEndpointApiType :: ApiPiece -> ReaderT ServerInfo Q Type
-mkEndpointApiType p = enterApiPiece p $ case p of
+mkEndpointApiType :: ApiOptions -> ApiPiece -> ReaderT ServerInfo Q Type
+mkEndpointApiType opts p = enterApiPiece p $ case p of
     Endpoint{}           -> ConT <$> askEndpointTypeName
     SubApi cName cArgs _ -> do
         urlSegments <- mkUrlSegments cName
@@ -364,15 +364,15 @@ mkEndpointApiType p = enterApiPiece p $ case p of
         fieldNames  <- asks allFieldNames'
         let mkCapture :: Type -> Q Type
             mkCapture ty =
-                let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
+                let tyLit = pure $ mkLitType id ty in [t| Capture $tyLit $(pure ty) |]
 
             useFieldname :: String -> String
             useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
 
-            mkLitType :: Type -> Type
-            mkLitType = \case
-                VarT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
-                ConT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
+            mkLitType :: (String -> String) -> Type -> Type
+            mkLitType f = \case
+                VarT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
+                ConT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
                 _       -> LitT $ StrTyLit "unknown"
 
         finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
@@ -381,7 +381,10 @@ mkEndpointApiType p = enterApiPiece p $ case p of
             ConstructorArgs ts -> lift $ do
                 capturesWithTitles <- do
                     captures <- traverse mkCapture ts
-                    pure . mconcat $ zipWith (\a b -> [mkLitType a, b]) ts captures
+                    pure . mconcat $ zipWith
+                        (\a b -> [mkLitType (opts ^. field @"renamePathParams") a, b])
+                        ts
+                        captures
                 bird <- [t| (:>) |]
                 pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType capturesWithTitles
 
@@ -541,7 +544,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs hs Mutable ty -> do
+        Endpoint _cName cArgs _hs Mutable ty -> do
             -- FIXME: For non-JSON request bodies we support only one argument.
             -- Combining JSON with other content types do not work properly at this point.
             -- It could probably be fixed by adding MimeRender instances to NamedField1
@@ -559,7 +562,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
                     ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs (ty:_) -> AppT (AppT ArrowT ty) handlerRetType
+                    ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
