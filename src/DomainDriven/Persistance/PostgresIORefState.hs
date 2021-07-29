@@ -278,3 +278,18 @@ migrate1to1 conn prevTName tName f = do
     _             <- createEventTable' conn tName
     currentEvents <- queryEvents @a conn prevTName
     void $ writeEvents conn tName $ fmap (f . fst) currentEvents
+
+migrate1toMany
+    :: forall a b
+     . (Typeable a, FromJSON a, ToJSON b)
+    => Connection
+    -> PreviosEventTableName
+    -> EventTableName
+    -> (Stored a -> [Stored b])
+    -> IO CommitNumber
+migrate1toMany conn prevTName tName f = do
+    _             <- createEventTable' conn tName
+    currentEvents <- queryEvents @a conn prevTName
+    let mkNewEvents :: [(Stored a, CommitNumber)] -> [Stored b]
+        mkNewEvents = join . fmap (f . fst)
+    writeEvents conn tName $ mkNewEvents currentEvents
