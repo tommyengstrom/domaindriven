@@ -175,7 +175,7 @@ data Stored a = Stored
     , storedTimestamp :: UTCTime
     , storedUUID      :: UUID
     }
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor)
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable)
 
 mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO
