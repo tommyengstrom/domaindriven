@@ -50,6 +50,14 @@ mapModel f = \case
     Query h -> Query (h . f)
     Cmd   h -> Cmd (h . f)
 
+bindModel
+    :: (model0 -> IO model1)
+    -> HandlerType method model1 event a
+    -> HandlerType method model0 event a
+bindModel f = \case
+    Query h -> Query (h <=< f)
+    Cmd   h -> Cmd (h <=< f)
+
 mapEvent
     :: (e0 -> e1)
     -> HandlerType method model e0 a
@@ -60,6 +68,17 @@ mapEvent f = \case
         (ret, evs) <- h m
         pure (ret, fmap f evs)
 
+bindEvent
+    :: (e0 -> IO e1)
+    -> HandlerType method model e0 a
+    -> HandlerType method model e1 a
+bindEvent f = \case
+    Query h -> Query h
+    Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        evs' <- mapM f evs
+        pure (ret, evs')
+
 mapResult
     :: (r0 -> r1)
     -> HandlerType method model e r0
@@ -69,6 +88,17 @@ mapResult f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (f ret, evs)
+
+bindResult
+    :: (r0 -> IO r1)
+    -> HandlerType method model e r0
+    -> HandlerType method model e r1
+bindResult f = \case
+    Query h -> Query $ f <=< h
+    Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        ret' <- f ret
+        pure (ret', evs)
 
 class ReadModel p where
     type Model p :: Type

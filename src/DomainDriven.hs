@@ -8,6 +8,12 @@ module DomainDriven
     , Cmd
     , Query
     , HandlerType(..)
+    , mapModel
+    , bindModel
+    , mapEvent
+    , bindEvent
+    , mapResult
+    , bindResult
     , runAction
     , HasApiOptions(..)
     , CanMutate
