@@ -251,7 +251,7 @@ mkServer cfg (GadtName -> gadtName) = do
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
     Just o  -> pure o
-    Nothing -> pure defaultApiOptions
+    Nothing -> fail $ "Missing HasApiOptions instance for " <> show n
 
 
 -- | Carries information regarding how the API looks at the place we're currently at.

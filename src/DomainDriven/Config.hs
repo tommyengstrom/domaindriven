@@ -5,15 +5,15 @@ module DomainDriven.Config
     , Name
     ) where
 
-import           Language.Haskell.TH
-import           Prelude
+import           Data.Char                      ( isLower )
+import qualified Data.List                                    as L
+import qualified Data.Map                                     as M
+import           Data.Maybe
+import           Data.Text                      ( Text )
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.HasFieldName
-import qualified Data.List                                    as L
-import           Data.Char                      ( isLower )
-import qualified Data.Map                                     as M
-import           Data.Text                      ( Text )
-import           Data.Maybe
+import           Language.Haskell.TH
+import           Prelude
 
 
 -- | Configuration used to generate server
@@ -30,14 +30,11 @@ data ServerConfig = ServerConfig
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty M.empty
 
-configName :: Name
-configName = mkName "domaindrivenServerConfig"
-
-mkServerConfig :: Q [Dec]
-mkServerConfig = do
-    sig'  <- sigD configName (conT ''ServerConfig)
+mkServerConfig :: String -> Q [Dec]
+mkServerConfig (mkName -> cfgName) = do
+    sig'  <- sigD cfgName (conT ''ServerConfig)
     body' <-
-        [d| $(varP configName) = ServerConfig $(getApiOptionsMap) $(getFieldNameMap) |]
+        [d| $(varP cfgName) = ServerConfig $(getApiOptionsMap) $(getFieldNameMap) |]
     pure $ sig' : body'
 
 -- | Generates `Map String ApiOptions`

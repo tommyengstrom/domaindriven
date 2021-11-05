@@ -3,25 +3,25 @@
 module StoreModel where
 
 
-import qualified Data.Map                                     as M
-import           DomainDriven
-import           DomainDriven.Config
-import           Data.Typeable
-import           Prelude
-import qualified Data.Text                                    as T
-import           Data.Aeson                     ( ToJSON
-                                                , FromJSON
+import           Control.Monad                  ( when )
+import           Control.Monad.Catch            ( throwM )
+import           Data.Aeson                     ( FromJSON
                                                 , FromJSONKey
+                                                , ToJSON
                                                 , ToJSONKey
                                                 )
-import           Data.Text                      ( Text )
-import           Control.Monad.Catch            ( throwM )
-import           GHC.Generics                   ( Generic )
-import           Control.Monad                  ( when )
-import           Data.String                    ( IsString )
-import           Data.OpenApi                   ( ToSchema
-                                                , ToParamSchema
+import qualified Data.Map                                     as M
+import           Data.OpenApi                   ( ToParamSchema
+                                                , ToSchema
                                                 )
+import           Data.String                    ( IsString )
+import qualified Data.Text                                    as T
+import           Data.Text                      ( Text )
+import           Data.Typeable
+import           DomainDriven
+import           DomainDriven.Config
+import           GHC.Generics                   ( Generic )
+import           Prelude
 import           Servant
 
 ------------------------------------------------------------------------------------------
@@ -139,7 +139,7 @@ applyStoreEvent m (Stored e _ _) = case e of
 -- Grab the config for each GADT
 ------------------------------------------------------------------------------------------
 
-$mkServerConfig
+$(mkServerConfig "storeActionConfig")
 
 -- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
 --

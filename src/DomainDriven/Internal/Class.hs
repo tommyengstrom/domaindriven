@@ -20,16 +20,6 @@ import           Data.UUID                      ( UUID )
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
 type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType '[JSON] (Verb 'GET 200 '[JSON])
--- type Cmd = Verb 'POST 200 '[JSON]
--- type Query = Verb 'GET 200 '[JSON]
-
--- | This duplicates HandlerReturn. I wasn't able to get GHC to understand the types with
---type family CanMutate (method :: Type -> Type) :: Bool where
---    CanMutate (Verb 'GET code cts) = 'False
---    CanMutate (Verb 'POST code cts) = 'True
---    CanMutate (Verb 'PUT code cts) = 'True
---    CanMutate (Verb 'PATCH code cts) = 'True
---    CanMutate (Verb 'DELETE code cts) = 'True
 
 type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'GET code cts)) = 'False
