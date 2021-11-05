@@ -2,25 +2,25 @@
 
 module DomainDriven.ServerSpec where
 
-import           DomainDriven.Server
-import           Prelude
-import           Test.Hspec
-import           Test.Hspec.Core.Hooks
-import           Control.Concurrent.Async
 import           Control.Concurrent
-import           DomainDriven.Persistance.ForgetfulInMemory
+import           Control.Concurrent.Async
+import           Data.Text                      ( Text )
 import           DomainDriven
-import           Servant
-import           Network.HTTP.Client            ( newManager
-                                                , defaultManagerSettings
+import           DomainDriven.Persistance.ForgetfulInMemory
+import           DomainDriven.Server
+import           DomainDriven.ServerSpecModel
+import           Network.HTTP.Client            ( defaultManagerSettings
+                                                , newManager
                                                 )
 import           Network.Wai.Handler.Warp       ( run )
+import           Prelude
+import           Servant
 import           Servant.Client
-import qualified Data.Text                                    as T
 import           StoreModel
-import           Data.Text                      ( Text )
+import           Test.Hspec
+import           Test.Hspec.Core.Hooks
 
-$(mkServer domaindrivenServerConfig ''StoreAction)
+$(mkServer storeActionConfig ''StoreAction)
 
 buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
@@ -33,20 +33,14 @@ removeItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
 buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (restock :<|> addItem :<|> removeItem)
     = client $ Proxy @StoreActionApi
 
-data TestAction method a where
-    ReverseText ::Text -> TestAction (RequestType '[PlainText] (Verb 'POST 200 '[JSON])) Text
 
 type ExpectedReverseText
     = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
 
+$(mkServer testActionConfig ''TestAction)
+
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
-
-handleTestAction :: ActionHandler () () TestAction
-handleTestAction = \case
-    ReverseText t -> Cmd $ \() -> pure (T.reverse t, [])
-
-$(mkServer defaultServerConfig ''TestAction)
 
 withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
