@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 431781d85a82b21d7b1d9578b2373549d7be1e7110cf1a448489fbf0057e2caf
+-- hash: 501f1648a5d77b37385ca9484ee3562014e6a08710037031ea20fc386388ceb3
 
 name:           domain-driven
 version:        0.1.0.0
@@ -108,6 +108,7 @@ library
 executable simple
   main-is: Main.hs
   other-modules:
+      App
       Paths_domain_driven
   hs-source-dirs:
       examples/simple
