@@ -21,7 +21,7 @@ data CounterEvent
 data CounterCmd method return where
    GetCounter ::CounterCmd Query Int
    IncreaseCounter ::CounterCmd Cmd Int
-   AddToCounter ::Int -> CounterCmd Cmd Int
+   AddToCounter ::{ amount :: Int } ->  CounterCmd Cmd Int
    deriving HasApiOptions
 
 handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent a

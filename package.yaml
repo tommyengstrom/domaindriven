@@ -46,6 +46,7 @@ dependencies:
 - time
 - transformers
 - vector
+- ghc-prim
 - unordered-containers
 - uuid
 - unliftio

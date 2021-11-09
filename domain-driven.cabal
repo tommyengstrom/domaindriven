@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 501f1648a5d77b37385ca9484ee3562014e6a08710037031ea20fc386388ceb3
+-- hash: 052d89ca439fb0755e5115c7971724fc88a1c9bae5708141f9c4cab03404f3e3
 
 name:           domain-driven
 version:        0.1.0.0
@@ -83,6 +83,7 @@ library
     , directory
     , exceptions
     , generic-lens
+    , ghc-prim
     , http-types
     , lens
     , monad-loops
@@ -157,6 +158,7 @@ executable simple
     , domain-driven
     , exceptions
     , generic-lens
+    , ghc-prim
     , lens
     , monad-loops
     , mtl
@@ -239,6 +241,7 @@ test-suite domain-driven-test
     , domain-driven
     , exceptions
     , generic-lens
+    , ghc-prim
     , hspec
     , hspec-core
     , http-client

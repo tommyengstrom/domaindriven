@@ -143,6 +143,31 @@ unqualifiedString = typed @OccName . typed
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
 mkApiPiece cfg = \case
     -- The normal case
+    RecGadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
+        handlerSettings <- do
+            expandedReqType <- case requestType of
+                ConT n -> reify n >>= \case
+                    TyConI (TySynD _ _ realType) -> pure realType
+                    ty ->
+                        fail
+                            $  "Expected "
+                            <> show n
+                            <> " to be a type synonym, got: "
+                            <> show ty
+                (AppT _ _) -> pure requestType
+                ty         -> fail $ "Expected RequestType, got: " <> show ty
+            case expandedReqType of
+                (AppT (AppT _RequesType contentTypes') verb') ->
+                    pure $ HandlerSettings contentTypes' verb'
+                ty -> fail $ "Expected RequestType, got: " <> show ty
+
+        actionType <- getActionType $ handlerSettings ^. field @"verb"
+        pure $ Endpoint
+            (ConstructorName gadtName)
+            (ConstructorArgs $ fmap snd ((\(_, b, c) -> (b, c)) <$> bangArgs))
+            handlerSettings
+            actionType
+            retType
     GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
         handlerSettings <- do
             expandedReqType <- case requestType of
