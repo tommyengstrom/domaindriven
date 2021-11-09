@@ -61,6 +61,12 @@ newtype UrlSegment = UrlSegment String
 newtype ConstructorArgs = ConstructorArgs [Type]
     deriving (Show, Generic, Eq)
 
+data ConstructorArg = ConstructorArg
+    { constructorName :: Name
+    , constructorType :: Type
+    }
+    deriving (Show, Generic, Eq)
+
 newtype Runner = Runner Type
     deriving (Show, Generic, Eq)
 
