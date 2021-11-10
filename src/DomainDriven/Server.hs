@@ -39,8 +39,8 @@ data ApiSpec = ApiSpec
 data ActionType = Mutable | Immutable deriving (Show, Eq)
 
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType Type
-    | SubApi ConstructorName ConstructorArgs ApiSpec
+    = Endpoint ConstructorName [ConstructorArg] HandlerSettings ActionType Type
+    | SubApi ConstructorName [ConstructorArg] ApiSpec
     deriving (Show, Generic)
 
 data HandlerSettings = HandlerSettings
@@ -56,9 +56,6 @@ newtype GadtName = GadtName Name
     deriving (Show, Generic, Eq)
 
 newtype UrlSegment = UrlSegment String
-    deriving (Show, Generic, Eq)
-
-newtype ConstructorArgs = ConstructorArgs [Type]
     deriving (Show, Generic, Eq)
 
 data ConstructorArg = ConstructorArg
@@ -168,12 +165,11 @@ mkApiPiece cfg = \case
                 ty -> fail $ "Expected RequestType, got: " <> show ty
 
         actionType <- getActionType $ handlerSettings ^. field @"verb"
-        pure $ Endpoint
-            (ConstructorName gadtName)
-            (ConstructorArgs $ fmap snd ((\(_, b, c) -> (b, c)) <$> bangArgs))
-            handlerSettings
-            actionType
-            retType
+        pure $ Endpoint (ConstructorName gadtName)
+                        ((\(n, _, t) -> ConstructorArg n t) <$> bangArgs)
+                        handlerSettings
+                        actionType
+                        retType
     GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
         handlerSettings <- do
             expandedReqType <- case requestType of
@@ -194,7 +190,7 @@ mkApiPiece cfg = \case
 
         actionType <- getActionType $ handlerSettings ^. field @"verb"
         pure $ Endpoint (ConstructorName gadtName)
-                        (ConstructorArgs $ fmap snd bangArgs)
+                        (ConstructorArg (mkName "FIXME1") . snd <$> bangArgs)
                         handlerSettings
                         actionType
                         retType
@@ -216,7 +212,7 @@ mkApiPiece cfg = \case
                             $  "\nSubCmd must use the method type variable of the parent."
                             <> ("\n\tExpected: " <> show methodName)
                             <> ("\n\tGot: " <> show methodName')
-                        pure (reverse rest, subCmd')
+                        pure (ConstructorArg (mkName "FIXME2") <$> reverse rest, subCmd')
                 ty : _ ->
                     fail
                         $ "Last constructor argument must have form \
@@ -225,7 +221,7 @@ mkApiPiece cfg = \case
                 [] -> fail "I thought this coulnd't happen!"
 
             subServerSpec <- mkServerSpec cfg (GadtName subCmd')
-            pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
+            pure $ SubApi (ConstructorName gadtName) args subServerSpec
     c ->
         fail
             $  "Expected a GADT constructor representing an endpoint but got:\n"
@@ -408,8 +404,8 @@ mkEndpointApiType opts p = enterApiPiece p $ case p of
 
         finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
 
-        case cArgs of
-            ConstructorArgs ts -> lift $ do
+        case view typed <$> cArgs of
+            ts -> lift $ do
                 capturesWithTitles <- do
                     captures <- traverse mkCapture ts
                     pure . mconcat $ zipWith
@@ -459,19 +455,19 @@ mkHandlerTypeDec p = enterApiPiece p $ do
         SubApi _name _args spec' -> mkServerFromSpec spec'
 
 
-mkQueryParams :: ConstructorArgs -> ReaderT ServerInfo Q [Type]
-mkQueryParams (ConstructorArgs args) = do
+mkQueryParams :: [ConstructorArg] -> ReaderT ServerInfo Q [Type]
+mkQueryParams args = do
     may <- lift [t| Maybe |] -- Maybe parameters are optional, others required
     let mkTyName :: Name -> Q Type
         mkTyName n = pure . LitT . StrTyLit $ n ^. unqualifiedString
     flip traverse args $ \case
-        ty@(AppT may'  (ConT n)) | may' == may ->
+        ConstructorArg _ ty@(AppT may'  (ConT n)) | may' == may ->
             lift
                 [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]
-        ty@(ConT n) ->
+        ConstructorArg _ ty@(ConT n) ->
             lift
                 [t| QueryParam' '[Required, Servant.Strict] $(mkTyName n) $(pure ty) |]
-        ty -> fail $ "Expected type ConT, got: " <> show ty
+        ConstructorArg _ ty -> fail $ "Expected type ConT, got: " <> show ty
 
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
@@ -516,7 +512,7 @@ mkRunner spec = do
 mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
     case apiPiece of
-        Endpoint _ cArgs _ Immutable ty -> do
+        Endpoint _ (fmap (view typed) -> cArgs) _ Immutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
@@ -525,7 +521,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             runnerName     <- lift $ newName "runner"
             let funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
+                    args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
 
                 funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
@@ -542,7 +538,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
+                nrArgs = length cArgs
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
@@ -556,8 +552,8 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
 
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs as ->
+                    [] -> handlerRetType
+                    (fmap (view typed) -> as) ->
                         let nfType :: Type
                             nfType = AppT (ConT nfName) (LitT bodyTag)
                         in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
@@ -581,7 +577,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             -- It could probably be fixed by adding MimeRender instances to NamedField1
             -- that just uses the underlying MimeRender.
             let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
+                nrArgs = length cArgs
             unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
             varName       <- lift $ newName "arg"
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
@@ -592,8 +588,8 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
 
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
+                    [] -> handlerRetType
+                    (ConstructorArg _ ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
@@ -610,7 +606,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             pure [funSig, FunD handlerName [funClause]]
         SubApi cName cArgs spec -> do
             -- Apply the arguments to the constructor before referencing the subserver
-            varNames  <- lift $ replicateM (length (cArgs ^. typed @[Type])) (newName "arg")
+            varNames  <- lift $ replicateM (length cArgs) (newName "arg")
             handlerName    <- askHandlerName
             targetApiTypeName <- enterApi spec askApiTypeName
             targetServer <- enterApi spec askServerName
@@ -618,10 +614,10 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
 
             funSig <- lift $ do
                 returnSig <- [t| Server $(pure $ ConT targetApiTypeName) |]
-                params <- case cArgs ^. typed  of
+                params <- case cArgs  of
                     [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
                     ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
-                                (runnerType : ts <> [returnSig])
+                                (runnerType : (ts ^.. folded . field @"constructorType") <> [returnSig])
                 SigD handlerName <$> pure params
 
 
@@ -661,15 +657,15 @@ prependServerEndpointName prefix rest = do
 mkReqBody
     :: HandlerSettings
     -> ConstructorName
-    -> ConstructorArgs
+    -> [ConstructorArg]
     -> ReaderT ServerInfo Q (Maybe Type)
 mkReqBody hs name args = if hasJsonContentType hs
     then do
         bodyTag <- askBodyTag name
         let
             body = case args of
-                ConstructorArgs [] -> Nothing
-                ConstructorArgs ts ->
+                [] -> Nothing
+                (fmap (view $ field @"constructorType") -> ts) ->
                     let n           = length ts
                         constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
                                            (LitT bodyTag)
@@ -680,9 +676,9 @@ mkReqBody hs name args = if hasJsonContentType hs
     else do
         let
             body = case args of
-                ConstructorArgs []  -> Nothing
-                ConstructorArgs [t] -> Just t
-                ConstructorArgs _ ->
+                []  -> Nothing
+                [ca] -> Just $ ca ^. field @"constructorType"
+                _ ->
                     fail "Multiple arguments are only supported for JSON content"
         case body of
             Nothing -> pure Nothing
