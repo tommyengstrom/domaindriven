@@ -10,6 +10,7 @@ import qualified Data.ByteString.Lazy.Char8                   as BL
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven.Server
+import           Language.Haskell.TH
 import           Network.Wai.Handler.Warp       ( run )
 import           Prelude
 import           Servant
@@ -27,3 +28,6 @@ main = do
     -- Now we can supply the ActionRunner to the generated server and run it as any other
     -- Servant server.
     run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runAction dm handleCmd)
+
+
+$(mkRecord (mkName "Olle") [ConstructorArg (mkName "apa") (ConT ''Int)])

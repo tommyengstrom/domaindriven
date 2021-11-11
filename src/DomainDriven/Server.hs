@@ -12,6 +12,9 @@ module DomainDriven.Server
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Reader
+import           Data.Aeson                     ( FromJSON
+                                                , ToJSON
+                                                )
 import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
@@ -25,7 +28,9 @@ import           DomainDriven.Internal.HasFieldName
 import           DomainDriven.Internal.NamedFields
 import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
-import           Language.Haskell.TH.Syntax     ( OccName(..) )
+import           Language.Haskell.TH.Syntax     ( OccName(..)
+                                                , VarBangType
+                                                )
 import           Prelude
 import           Servant
 
@@ -685,6 +690,24 @@ mkReqBody hs name args = if hasJsonContentType hs
             Just b ->
                 Just <$> lift
                     [t| ReqBody $(pure $ hs ^. field @"contentTypes") $(pure b) |]
+
+mkRecord :: Name -> [ConstructorArg] -> Q [Dec]
+mkRecord name cArgs = do
+    pure [DataD [] recName [] Nothing [RecC recName recFields] deriv]
+  where
+    recName :: Name
+    recName = mkName $ nameBase name <> "Body"
+
+    recFields :: [VarBangType]
+    recFields = fmap
+        (\(ConstructorArg n ty) -> (n, Bang NoSourceUnpackedness SourceStrict, ty))
+        cArgs
+
+    deriv :: [DerivClause]
+    deriv =
+        [ DerivClause (Just StockStrategy)    [ConT ''Show, ConT ''Generic]
+        , DerivClause (Just AnyclassStrategy) [ConT ''FromJSON, ConT ''ToJSON]
+        ]
 
 hasJsonContentType :: HandlerSettings -> Bool
 hasJsonContentType hs = case hs ^. field @"contentTypes" of
