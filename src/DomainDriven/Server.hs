@@ -18,6 +18,8 @@ import           Data.Aeson                     ( FromJSON
 import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
+import           Data.List.NonEmpty             ( NonEmpty(..) )
+import qualified Data.List.NonEmpty                           as NE
 import qualified Data.Map                                     as M
 import           Data.Text                      ( Text )
 import qualified Data.Text                                    as T
@@ -311,6 +313,10 @@ askTypeName = do
 
     pure . mkName . L.intercalate separator $ baseName : cNames
 
+askBodyName :: Monad m => ReaderT ServerInfo m Name
+askBodyName = do
+    tn <- askTypeName
+    pure $ mkName $ nameBase tn <> "Body"
 
 askApiTypeName :: Monad m => ReaderT ServerInfo m Name
 askApiTypeName = (unqualifiedString <>~ "Api") <$> askTypeName
@@ -447,16 +453,22 @@ mkHandlerTypeDec p = enterApiPiece p $ do
             pure [TySynD epTypeName [] ty]
         Endpoint name args hs Mutable retType -> do
             -- Non-get endpoints use a request body
-            ty <- do
-                reqBody   <- mkReqBody hs name args
-                reqReturn <- lift $ mkReturnType retType
-                middle    <- case reqBody of
-                    Nothing -> pure $ mkVerb hs reqReturn
-                    Just b  -> lift [t| $(pure b) :> $(pure $ mkVerb hs reqReturn) |]
-                urlSegments <- mkUrlSegments name
-                lift $ prependServerEndpointName urlSegments middle
-            epTypeName <- askEndpointTypeName
-            pure [TySynD epTypeName [] ty]
+            case args of
+                [] -> do
+                    reqReturn   <- lift $ mkReturnType retType
+                    middle      <- lift [t|  $(pure $ mkVerb hs reqReturn) |]
+                    urlSegments <- mkUrlSegments name
+                    ty          <- lift $ prependServerEndpointName urlSegments middle
+                    epTypeName  <- askEndpointTypeName
+                    pure $ TySynD epTypeName [] ty : []
+                a : as -> do
+                    (reqBody, decs) <- mkReqBody hs (a :| as)
+                    reqReturn       <- lift $ mkReturnType retType
+                    middle <- lift [t| $(pure reqBody) :> $(pure $ mkVerb hs reqReturn) |]
+                    urlSegments     <- mkUrlSegments name
+                    ty              <- lift $ prependServerEndpointName urlSegments middle
+                    epTypeName      <- askEndpointTypeName
+                    pure $ TySynD epTypeName [] ty : decs
         SubApi _name _args spec' -> mkServerFromSpec spec'
 
 
@@ -660,47 +672,55 @@ prependServerEndpointName prefix rest = do
           (fmap (LitT . StrTyLit . view typed) prefix)
 
 mkReqBody
-    :: HandlerSettings
-    -> ConstructorName
-    -> [ConstructorArg]
-    -> ReaderT ServerInfo Q (Maybe Type)
-mkReqBody hs name args = if hasJsonContentType hs
+    :: HandlerSettings -> NonEmpty ConstructorArg -> ReaderT ServerInfo Q (Type, [Dec])
+mkReqBody hs args = if hasJsonContentType hs
+--    then do
+--        bodyTag <- askBodyTag name
+--        let
+--            body = case args of
+--                [] -> Nothing
+--                (fmap (view $ field @"constructorType") -> ts) ->
+--                    let n           = length ts
+--                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+--                                           (LitT bodyTag)
+--                    in  Just $ foldl AppT constructor ts
+--        case body of
+--            Nothing -> pure (Nothing, [])
+--            Just b  -> do
+--                ty <- lift [t| ReqBody '[JSON] $(pure b) |]
+--                pure (Just ty, [])
     then do
-        bodyTag <- askBodyTag name
-        let
-            body = case args of
-                [] -> Nothing
-                (fmap (view $ field @"constructorType") -> ts) ->
-                    let n           = length ts
-                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-                                           (LitT bodyTag)
-                    in  Just $ foldl AppT constructor ts
-        case body of
-            Nothing -> pure Nothing
-            Just b  -> Just <$> lift [t| ReqBody '[JSON] $(pure b) |]
-    else do
-        let
-            body = case args of
-                []  -> Nothing
-                [ca] -> Just $ ca ^. field @"constructorType"
-                _ ->
-                    fail "Multiple arguments are only supported for JSON content"
-        case body of
-            Nothing -> pure Nothing
-            Just b ->
-                Just <$> lift
+        -- bodyTag <- askBodyTag name
+        bodyName <- askBodyName
+        decs <- lift $ mkRecord bodyName args
+        pure (ConT bodyName, decs)
+        --case args of
+        --    [] -> pure (Nothing, [])
+        --    (fmap (view $ field @"constructorType") -> ts) -> do
+        --        let n           = length ts
+        --            constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+        --                               (LitT bodyTag)
+        --            body = foldl AppT constructor ts
+        --        ty <- lift [t| ReqBody '[JSON] $(pure body) |]
+        --        pure (Just ty, [])
+    else case args of
+            ca :| []  -> do
+                let b = ca ^. field @"constructorType"
+                ty <- lift
                     [t| ReqBody $(pure $ hs ^. field @"contentTypes") $(pure b) |]
+                pure (ty, [])
+            _ ->
+                    fail "Multiple arguments are only supported for JSON content"
 
-mkRecord :: Name -> [ConstructorArg] -> Q [Dec]
-mkRecord name cArgs = do
-    pure [DataD [] recName [] Nothing [RecC recName recFields] deriv]
+mkRecord :: Name -> NonEmpty ConstructorArg -> Q [Dec]
+mkRecord name (NE.toList -> cArgs) = do
+    pure [DataD [] name [] Nothing [RecC name recFields] deriv]
   where
-    recName :: Name
-    recName = mkName $ nameBase name <> "Body"
-
     recFields :: [VarBangType]
     recFields = fmap
-        (\(ConstructorArg n ty) -> (n, Bang NoSourceUnpackedness SourceStrict, ty))
+        (\(ConstructorArg n ty) ->
+            (mkName $ nameBase n, Bang NoSourceUnpackedness SourceStrict, ty)
+        )
         cArgs
 
     deriv :: [DerivClause]

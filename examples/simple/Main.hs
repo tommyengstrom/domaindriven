@@ -7,6 +7,7 @@ module Main where
 import           App
 import           Data.Aeson
 import qualified Data.ByteString.Lazy.Char8                   as BL
+import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven.Server
@@ -30,4 +31,4 @@ main = do
     run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runAction dm handleCmd)
 
 
-$(mkRecord (mkName "Olle") [ConstructorArg (mkName "apa") (ConT ''Int)])
+$(mkRecord "Olle" (ConstructorArg (mkName "apa") (ConT ''Int) :| []))
