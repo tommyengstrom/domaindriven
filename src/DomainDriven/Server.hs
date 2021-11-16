@@ -19,6 +19,7 @@ import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
 import           Data.List.NonEmpty             ( NonEmpty(..) )
+import           Data.OpenApi                   ( ToSchema )
 import qualified Data.List.NonEmpty                           as NE
 import qualified Data.Map                                     as M
 import           Data.Text                      ( Text )
@@ -150,6 +151,18 @@ getConstructors = \case
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
 
+-- FIXME: Make the signature reasonable
+selectorNamePart :: String -> String
+selectorNamePart s = case betweenTheColons of
+    [] -> error $ "selectorNamePart got: " <> show s
+    s' -> s'
+  where
+    notColon :: Char -> Bool
+    notColon = (/= ':')
+
+    betweenTheColons :: String
+    betweenTheColons = L.takeWhile notColon . L.drop 1 $ L.dropWhile notColon s
+
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
 mkApiPiece cfg = \case
     -- The normal case
@@ -172,11 +185,14 @@ mkApiPiece cfg = \case
                 ty -> fail $ "Expected RequestType, got: " <> show ty
 
         actionType <- getActionType $ handlerSettings ^. field @"verb"
-        pure $ Endpoint (ConstructorName gadtName)
-                        ((\(n, _, t) -> ConstructorArg n t) <$> bangArgs)
-                        handlerSettings
-                        actionType
-                        retType
+        pure $ Endpoint
+            (ConstructorName gadtName)
+            (   (\(n, _, t) -> ConstructorArg (mkName . selectorNamePart $ show n) t)
+            <$> bangArgs
+            )
+            handlerSettings
+            actionType
+            retType
     GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
         handlerSettings <- do
             expandedReqType <- case requestType of
@@ -197,7 +213,7 @@ mkApiPiece cfg = \case
 
         actionType <- getActionType $ handlerSettings ^. field @"verb"
         pure $ Endpoint (ConstructorName gadtName)
-                        (ConstructorArg (mkName "FIXME1") . snd <$> bangArgs)
+                        (ConstructorArg (mkName "fixme1") . snd <$> bangArgs)
                         handlerSettings
                         actionType
                         retType
@@ -219,7 +235,7 @@ mkApiPiece cfg = \case
                             $  "\nSubCmd must use the method type variable of the parent."
                             <> ("\n\tExpected: " <> show methodName)
                             <> ("\n\tGot: " <> show methodName')
-                        pure (ConstructorArg (mkName "FIXME2") <$> reverse rest, subCmd')
+                        pure (ConstructorArg (mkName "fixme2") <$> reverse rest, subCmd')
                 ty : _ ->
                     fail
                         $ "Last constructor argument must have form \
@@ -464,10 +480,12 @@ mkHandlerTypeDec p = enterApiPiece p $ do
                 a : as -> do
                     (reqBody, decs) <- mkReqBody hs (a :| as)
                     reqReturn       <- lift $ mkReturnType retType
-                    middle <- lift [t| $(pure reqBody) :> $(pure $ mkVerb hs reqReturn) |]
-                    urlSegments     <- mkUrlSegments name
-                    ty              <- lift $ prependServerEndpointName urlSegments middle
-                    epTypeName      <- askEndpointTypeName
+                    middle          <-
+                        lift
+                            [t| ReqBody '[JSON] $(pure reqBody) :> $(pure $ mkVerb hs reqReturn) |]
+                    urlSegments <- mkUrlSegments name
+                    ty          <- lift $ prependServerEndpointName urlSegments middle
+                    epTypeName  <- askEndpointTypeName
                     pure $ TySynD epTypeName [] ty : decs
         SubApi _name _args spec' -> mkServerFromSpec spec'
 
@@ -553,27 +571,24 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
                 (normalB [| liftIO $ $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
+        Endpoint _cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
                 nrArgs = length cArgs
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
-            bodyTag        <- askBodyTag cName
             runnerName     <- lift $ newName "runner"
+            bodyName <- askBodyName
             let varPat :: Pat
-                varPat = ConP nfName (fmap VarP varNames)
+                varPat = ConP bodyName (fmap VarP varNames)
 
-                nfName :: Name
-                nfName = mkName $ "NamedFields" <> show nrArgs
+                bodyType :: Type
+                bodyType = ConT bodyName
 
                 funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
                     [] -> handlerRetType
-                    (fmap (view typed) -> as) ->
-                        let nfType :: Type
-                            nfType = AppT (ConT nfName) (LitT bodyTag)
-                        in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
+                    _ -> AppT ArrowT bodyType `AppT` handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
@@ -674,35 +689,10 @@ prependServerEndpointName prefix rest = do
 mkReqBody
     :: HandlerSettings -> NonEmpty ConstructorArg -> ReaderT ServerInfo Q (Type, [Dec])
 mkReqBody hs args = if hasJsonContentType hs
---    then do
---        bodyTag <- askBodyTag name
---        let
---            body = case args of
---                [] -> Nothing
---                (fmap (view $ field @"constructorType") -> ts) ->
---                    let n           = length ts
---                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
---                                           (LitT bodyTag)
---                    in  Just $ foldl AppT constructor ts
---        case body of
---            Nothing -> pure (Nothing, [])
---            Just b  -> do
---                ty <- lift [t| ReqBody '[JSON] $(pure b) |]
---                pure (Just ty, [])
     then do
-        -- bodyTag <- askBodyTag name
         bodyName <- askBodyName
         decs <- lift $ mkRecord bodyName args
         pure (ConT bodyName, decs)
-        --case args of
-        --    [] -> pure (Nothing, [])
-        --    (fmap (view $ field @"constructorType") -> ts) -> do
-        --        let n           = length ts
-        --            constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-        --                               (LitT bodyTag)
-        --            body = foldl AppT constructor ts
-        --        ty <- lift [t| ReqBody '[JSON] $(pure body) |]
-        --        pure (Just ty, [])
     else case args of
             ca :| []  -> do
                 let b = ca ^. field @"constructorType"
@@ -725,8 +715,9 @@ mkRecord name (NE.toList -> cArgs) = do
 
     deriv :: [DerivClause]
     deriv =
-        [ DerivClause (Just StockStrategy)    [ConT ''Show, ConT ''Generic]
-        , DerivClause (Just AnyclassStrategy) [ConT ''FromJSON, ConT ''ToJSON]
+        [ DerivClause (Just StockStrategy) [ConT ''Show, ConT ''Generic]
+        , DerivClause (Just AnyclassStrategy)
+                      [ConT ''FromJSON, ConT ''ToJSON, ConT ''ToSchema]
         ]
 
 hasJsonContentType :: HandlerSettings -> Bool

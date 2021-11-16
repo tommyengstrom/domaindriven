@@ -31,4 +31,4 @@ main = do
     run 8888 $ serve (Proxy @CounterCmdApi) (counterCmdServer $ runAction dm handleCmd)
 
 
-$(mkRecord "Olle" (ConstructorArg (mkName "apa") (ConT ''Int) :| []))
+$(mkRecord (mkName "Olle") (ConstructorArg (mkName "apa") (ConT ''Int) :| []))

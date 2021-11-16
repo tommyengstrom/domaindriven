@@ -22,13 +22,13 @@ import           Test.Hspec.Core.Hooks
 
 $(mkServer storeActionConfig ''StoreAction)
 
-buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
+buyItem :: StoreAction_BuyItemBody -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
-restock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
-addItem :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
-removeItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
+restock :: AdminAction_RestockBody -> ClientM NoContent
+addItem :: AdminAction_AddItemBody -> ClientM ItemKey
+removeItem :: AdminAction_RemoveItemBody -> ClientM NoContent
 
 buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (restock :<|> addItem :<|> removeItem)
     = client $ Proxy @StoreActionApi
