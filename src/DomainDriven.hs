@@ -17,7 +17,6 @@ module DomainDriven
     , Query
     , ReadModel(..)
     , RequestType
-    , Return(..)
     , runAction
     , ServerConfig(..)
     , Stored(..)

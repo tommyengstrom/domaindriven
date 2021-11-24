@@ -15,7 +15,7 @@ data TestAction method a where
 
 handleTestAction :: ActionHandler () () TestAction
 handleTestAction = \case
-    ReverseText t -> Cmd $ \() -> pure (Return $ T.reverse t, [])
+    ReverseText t -> Cmd $ \() -> pure (const $ T.reverse t, [])
 
 
 $(mkServerConfig "testActionConfig")

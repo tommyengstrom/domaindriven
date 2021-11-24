@@ -38,12 +38,10 @@ instance ReadModel (ForgetfulInMemory model e) where
 instance WriteModel (ForgetfulInMemory model e)  where
     transactionalUpdate ff evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
-            model     <- readIORef $ stateRef ff
-            (r, evs)  <- evalCmd
-            storedEvs <- traverse toStored evs
+            model            <- readIORef $ stateRef ff
+            (returnFun, evs) <- evalCmd
+            storedEvs        <- traverse toStored evs
             let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
-            pure $ case r of
-                Return            x  -> x
-                ReturnAfterUpdate fm -> fm newModel
+            pure $ returnFun newModel

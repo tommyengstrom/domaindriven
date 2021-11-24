@@ -254,15 +254,13 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             _ <- execute_
                 conn
                 ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            (ret, evs) <- cmd
-            m          <- getModel pg
-            storedEvs  <- traverse toStored evs
+            (returnFun, evs) <- cmd
+            m                <- getModel pg
+            storedEvs        <- traverse toStored evs
             let newM = foldl' (app pg) m storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs
             _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
-            pure $ case ret of
-                Return            a -> a
-                ReturnAfterUpdate f -> f newM
+            pure $ returnFun newM
 
 migrateValue1to1
     :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()

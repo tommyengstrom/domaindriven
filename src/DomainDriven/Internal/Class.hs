@@ -28,13 +28,10 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
     CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
 
-data Return model a
-    = Return a
-    | ReturnAfterUpdate (model -> a)
 
 data HandlerType method model event a where
     Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
-    Cmd ::CanMutate method ~ 'True => (model -> IO (Return model a, [event])) -> HandlerType method model event a
+    Cmd ::CanMutate method ~ 'True => (model -> IO (model -> a, [event])) -> HandlerType method model event a
 
 mapModel
     :: (model0 -> model1)
@@ -43,10 +40,8 @@ mapModel
 mapModel f = \case
     Query h -> Query (h . f)
     Cmd   h -> Cmd $ \m -> do
-        ret <- h $ f m
-        pure $ case ret of
-            (Return a, ev) -> (Return a, ev)
-            (ReturnAfterUpdate fa, ev) -> (ReturnAfterUpdate (fa . f), ev)
+        (fm, evs) <- h $ f m
+        pure (fm . f, evs)
 
 mapEvent
     :: (e0 -> e1)
@@ -58,6 +53,17 @@ mapEvent f = \case
         (ret, evs) <- h m
         pure (ret, fmap f evs)
 
+bindEvent
+    :: (e0 -> IO e1)
+    -> HandlerType method model e0 a
+    -> HandlerType method model e1 a
+bindEvent f = \case
+    Query h -> Query h
+    Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        evs' <- mapM f evs
+        pure (ret, evs')
+
 mapResult
     :: (r0 -> r1)
     -> HandlerType method model e r0
@@ -66,9 +72,7 @@ mapResult f = \case
     Query h -> Query $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
-        case ret of
-            Return a ->  pure (Return $ f a, evs)
-            ReturnAfterUpdate fa ->  pure (ReturnAfterUpdate (f . fa) , evs)
+        pure (f . ret, evs)
 
 class ReadModel p where
     type Model p :: Type
@@ -78,7 +82,7 @@ class ReadModel p where
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
 class ReadModel p  => WriteModel p where
-    transactionalUpdate :: p -> IO (Return (Model p) a, [Event p]) -> IO a
+    transactionalUpdate :: p -> IO (Model p -> a, [Event p]) -> IO a
 
 
 runAction
