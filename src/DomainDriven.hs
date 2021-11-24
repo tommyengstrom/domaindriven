@@ -2,9 +2,6 @@ module DomainDriven
     ( ActionHandler
     , ActionRunner
     , ApiOptions(..)
-    , bindEvent
-    , bindModel
-    , bindResult
     , CanMutate
     , Cmd
     , defaultApiOptions
@@ -20,6 +17,7 @@ module DomainDriven
     , Query
     , ReadModel(..)
     , RequestType
+    , Return(..)
     , runAction
     , ServerConfig(..)
     , Stored(..)

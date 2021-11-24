@@ -1,9 +1,9 @@
 module DomainDriven.Persistance.ForgetfulInMemory where
 
-import           DomainDriven.Internal.Class
-import           Prelude
-import           GHC.Generics                   ( Generic )
 import           Data.List                      ( foldl' )
+import           DomainDriven.Internal.Class
+import           GHC.Generics                   ( Generic )
+import           Prelude
 import           UnliftIO
 
 
@@ -44,4 +44,6 @@ instance WriteModel (ForgetfulInMemory model e)  where
             let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
-            pure r
+            pure $ case r of
+                Return            x  -> x
+                ReturnAfterUpdate fm -> fm newModel

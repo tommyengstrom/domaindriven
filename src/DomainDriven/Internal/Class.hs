@@ -29,8 +29,8 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
 
 data Return model a
-    = Direct a
-    | AfterUpdate (model -> a)
+    = Return a
+    | ReturnAfterUpdate (model -> a)
 
 data HandlerType method model event a where
     Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
@@ -42,21 +42,12 @@ mapModel
     -> HandlerType method model0 event a
 mapModel f = \case
     Query h -> Query (h . f)
-    --Cmd   h -> Cmd (h . f)
     Cmd   h -> Cmd $ \m -> do
         ret <- h $ f m
         pure $ case ret of
-            (Direct a, ev) -> (Direct a, ev)
-            (AfterUpdate fa, ev) -> (AfterUpdate (fa . f), ev)
---
--- bindModel
---     :: (model0 -> IO model1)
---     -> HandlerType method model1 event a
---     -> HandlerType method model0 event a
--- bindModel f = \case
---     Query h -> Query (h <=< f)
---     Cmd   h -> Cmd (h <=< f)
---
+            (Return a, ev) -> (Return a, ev)
+            (ReturnAfterUpdate fa, ev) -> (ReturnAfterUpdate (fa . f), ev)
+
 mapEvent
     :: (e0 -> e1)
     -> HandlerType method model e0 a
@@ -66,17 +57,6 @@ mapEvent f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (ret, fmap f evs)
---
--- bindEvent
---     :: (e0 -> IO e1)
---     -> HandlerType method model e0 a
---     -> HandlerType method model e1 a
--- bindEvent f = \case
---     Query h -> Query h
---     Cmd   h -> Cmd $ \m -> do
---         (ret, evs) <- h m
---         evs' <- mapM f evs
---         pure (ret, evs')
 
 mapResult
     :: (r0 -> r1)
@@ -87,19 +67,8 @@ mapResult f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         case ret of
-            Direct a ->  pure (Direct $ f a, evs)
-            AfterUpdate fa ->  pure (AfterUpdate (f . fa) , evs)
-
--- bindResult
---     :: (r0 -> IO r1)
---     -> HandlerType method model e r0
---     -> HandlerType method model e r1
--- bindResult f = \case
---     Query h -> Query $ f <=< h
---     Cmd   h -> Cmd $ \m -> do
---         (ret, evs) <- h m
---         ret' <- f ret
---         pure (ret', evs)
+            Return a ->  pure (Return $ f a, evs)
+            ReturnAfterUpdate fa ->  pure (ReturnAfterUpdate (f . fa) , evs)
 
 class ReadModel p where
     type Model p :: Type
