@@ -94,7 +94,7 @@ handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
-        pure ((), [BoughtItem iKey quantity'])
+        pure (const (), [BoughtItem iKey quantity'])
     ListItems -> Query $ pure . M.elems
     Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
@@ -107,13 +107,13 @@ handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
-        pure ((), [Restocked iKey q])
+        pure (const (), [Restocked iKey q])
     AddItem name' quantity' price -> Cmd $ \_ -> do
         iKey <- ItemKey <$> mkId
-        pure (iKey, [AddedItem iKey name' price, Restocked iKey quantity'])
+        pure (const iKey, [AddedItem iKey name' price, Restocked iKey quantity'])
     RemoveItem iKey -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
-        pure ((), [RemovedItem iKey])
+        pure (const (), [RemovedItem iKey])
 
 handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
 handleItemAction iKey = \case

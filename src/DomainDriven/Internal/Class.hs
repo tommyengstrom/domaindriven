@@ -28,9 +28,10 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
     CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
 
+
 data HandlerType method model event a where
     Query ::CanMutate method ~ 'False => (model -> IO a) -> HandlerType method model event a
-    Cmd ::CanMutate method ~ 'True => (model -> IO (a, [event])) -> HandlerType method model event a
+    Cmd ::CanMutate method ~ 'True => (model -> IO (model -> a, [event])) -> HandlerType method model event a
 
 mapModel
     :: (model0 -> model1)
@@ -38,15 +39,9 @@ mapModel
     -> HandlerType method model0 event a
 mapModel f = \case
     Query h -> Query (h . f)
-    Cmd   h -> Cmd (h . f)
-
-bindModel
-    :: (model0 -> IO model1)
-    -> HandlerType method model1 event a
-    -> HandlerType method model0 event a
-bindModel f = \case
-    Query h -> Query (h <=< f)
-    Cmd   h -> Cmd (h <=< f)
+    Cmd   h -> Cmd $ \m -> do
+        (fm, evs) <- h $ f m
+        pure (fm . f, evs)
 
 mapEvent
     :: (e0 -> e1)
@@ -77,18 +72,7 @@ mapResult f = \case
     Query h -> Query $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
-        pure (f ret, evs)
-
-bindResult
-    :: (r0 -> IO r1)
-    -> HandlerType method model e r0
-    -> HandlerType method model e r1
-bindResult f = \case
-    Query h -> Query $ f <=< h
-    Cmd   h -> Cmd $ \m -> do
-        (ret, evs) <- h m
-        ret' <- f ret
-        pure (ret', evs)
+        pure (f . ret, evs)
 
 class ReadModel p where
     type Model p :: Type
@@ -98,7 +82,7 @@ class ReadModel p where
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
 class ReadModel p  => WriteModel p where
-    transactionalUpdate :: p -> IO (a, [Event p]) -> IO a
+    transactionalUpdate :: p -> IO (Model p -> a, [Event p]) -> IO a
 
 
 runAction
