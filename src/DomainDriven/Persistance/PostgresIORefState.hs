@@ -30,6 +30,15 @@ data PersistanceError
 type PreviosEventTableName = String
 type EventTableName = String
 
+data EventTable = EventTable
+    { tableName    :: String
+    , tableVersion :: Int
+    }
+    deriving (Eq, Generic)
+
+instance Show EventTable where
+    show et = tableName et <> "_v" <> show (tableVersion et)
+
 newtype CommitNumber = CommitNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
     deriving newtype (Eq, Ord, Num)
