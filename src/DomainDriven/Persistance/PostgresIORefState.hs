@@ -7,6 +7,9 @@ import           Data.Aeson
 import           Data.IORef
 import           Data.Int
 import           Data.List                      ( foldl' )
+import qualified Data.List                                    as L
+import           Data.Map                       ( Map )
+import qualified Data.Map                                     as M
 import           Data.String
 import           Data.Text                      ( Text )
 import           Data.Time
@@ -17,6 +20,7 @@ import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
+import           GHC.TypeLits
 import           Prelude
 
 
@@ -26,18 +30,31 @@ data PersistanceError
     | ValueError String
     deriving (Show, Eq, Typeable, Exception)
 
-
-type PreviosEventTableName = String
+type EventTableBaseName = String
+type EventVersion = Int
 type EventTableName = String
+type PreviousEventTableName = String
 
 data EventTable = EventTable
-    { tableName    :: String
-    , tableVersion :: Int
+    { tableName :: String
+    , upgrades  :: Upgrades
     }
-    deriving (Eq, Generic)
+    deriving Generic
+
+data Upgrades
+    = UpgradeFrom EventMigration Upgrades
+    | FirstVersion EventVersion EventTableBaseName
+type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
+
+instance Show Upgrades where
+    show = go 0      where
+        go :: Int -> Upgrades -> String
+        go i = \case
+            UpgradeFrom  _ u -> go (i + 1) u
+            FirstVersion v n -> n <> "_v" <> show (i + v)
 
 instance Show EventTable where
-    show et = tableName et <> "_v" <> show (tableVersion et)
+    show et = tableName et <> "_v" -- <>  show (L.maximum $ 1 : M.keys (upgrades et))
 
 newtype CommitNumber = CommitNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
@@ -122,6 +139,29 @@ simplePostgres getConn eventTable app' seed' = do
     runner <- createPostgresPersistance getConn eventTable app' seed'
     createEventTable runner
     pure runner
+
+
+-- | Setup the persistance model and verify that the tables exist.
+somethingPostgres
+    :: (FromJSON e, Typeable e, ToJSON e)
+    => IO Connection
+    -> EventTable
+    -> (m -> Stored e -> m)
+    -> m
+    -> IO (PostgresEvent m e)
+somethingPostgres getConn eventTable app' seed' = do
+    runner <- createPostgresPersistance getConn (show eventTable) app' seed'
+    createEventTable runner
+    pure runner
+
+--runMigrations :: Map Int EventMigration -> IO ()
+--runMigrations migs = do
+--    let migrations :: [(Int, EventMigration)
+--        migrations = L.sortOn (Down . fst) $ M.keys migs
+--    -- * Ensure all keys are > 1. First version is always implicit
+--    latestAvailableVersion <-
+--        undefined -- check what the last version of the table in the database is
+--    undefined
 
 createPostgresPersistance
     :: forall event model
@@ -272,14 +312,14 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             pure $ returnFun newM
 
 migrateValue1to1
-    :: Connection -> PreviosEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
 migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
 
 migrate1to1
     :: forall a b
      . (Typeable a, FromJSON a, ToJSON b)
     => Connection
-    -> PreviosEventTableName
+    -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
@@ -292,7 +332,7 @@ migrate1toMany
     :: forall a b
      . (Typeable a, FromJSON a, ToJSON b)
     => Connection
-    -> PreviosEventTableName
+    -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> [Stored b])
     -> IO CommitNumber
