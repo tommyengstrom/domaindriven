@@ -15,7 +15,7 @@ import           Data.Text                      ( Text )
 import           Data.Time
 import           Data.Typeable
 import           Data.UUID                      ( UUID )
-import           Database.PostgreSQL.Simple
+import           Database.PostgreSQL.Simple                   as PG
 import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
@@ -35,26 +35,19 @@ type EventVersion = Int
 type EventTableName = String
 type PreviousEventTableName = String
 
-data EventTable = EventTable
-    { tableName :: String
-    , upgrades  :: Upgrades
-    }
-    deriving Generic
 
-data Upgrades
-    = UpgradeFrom EventMigration Upgrades
-    | FirstVersion EventVersion EventTableBaseName
+data EventTable
+    = UpgradeFrom EventMigration EventTable
+    | InitialVersion EventTableBaseName
+
 type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
 
-instance Show Upgrades where
-    show = go 0      where
-        go :: Int -> Upgrades -> String
-        go i = \case
-            UpgradeFrom  _ u -> go (i + 1) u
-            FirstVersion v n -> n <> "_v" <> show (i + v)
-
 instance Show EventTable where
-    show et = tableName et <> "_v" -- <>  show (L.maximum $ 1 : M.keys (upgrades et))
+    show = go 0      where
+        go :: Int -> EventTable -> String
+        go i = \case
+            UpgradeFrom _ u  -> go (i + 1) u
+            InitialVersion n -> n <> "_v" <> show i
 
 newtype CommitNumber = CommitNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
@@ -73,7 +66,7 @@ data EventRowOut = EventRowOut
 
 fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, CommitNumber)
 fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
-    Success a -> pure $ (Stored a ts k, no)
+    Success a -> pure (Stored a ts k, no)
     Error err ->
         throwM
             .  EncodingError
@@ -121,11 +114,11 @@ createEventTable' conn eventTable =
         $ "create table if not exists \""
         <> fromString eventTable
         <> "\" \
-                            \( id uuid primary key\
-                            \, commit_number bigserial\
-                            \, timestamp timestamptz not null default now()\
-                            \, event jsonb not null\
-                            \);"
+           \( id uuid primary key\
+           \, commit_number bigserial\
+           \, timestamp timestamptz not null default now()\
+           \, event jsonb not null\
+           \);"
 
 -- | Setup the persistance model and verify that the tables exist.
 simplePostgres
@@ -150,9 +143,32 @@ somethingPostgres
     -> m
     -> IO (PostgresEvent m e)
 somethingPostgres getConn eventTable app' seed' = do
-    runner <- createPostgresPersistance getConn (show eventTable) app' seed'
-    createEventTable runner
-    pure runner
+    conn <- getConn
+    runMigrations conn eventTable
+    createPostgresPersistance getConn (show eventTable) app' seed'
+
+newtype Exists = Exists
+    { exists :: Bool
+    }
+    deriving (Show, Eq, Generic)
+    deriving anyclass (FromRow)
+
+runMigrations :: Connection -> EventTable -> IO ()
+runMigrations conn et = case et of
+    InitialVersion{}       -> void $ createEventTable' conn (show et)
+    UpgradeFrom mig prevEt -> do
+        let etName = show et
+        -- FIXME: Specify the schema we're looking in!
+        r <- query
+            conn
+            "select exists (select * from information_schema.tables where table_name=?)"
+            (Only etName)
+        case r of
+            [Exists True ] -> pure () -- Table exists. Nothing needs to be done
+            [Exists False] -> do
+                runMigrations conn prevEt
+                mig (show prevEt) (show et) conn
+            l -> fail $ "runMigrations unexpected answer: " <> show l
 
 --runMigrations :: Map Int EventMigration -> IO ()
 --runMigrations migs = do
@@ -239,10 +255,9 @@ writeEvents conn eventTable storedEvents = do
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
               storedEvents
         )
-    commitNumber <- foldl' max 0 . fmap fromOnly <$> query_
+    foldl' max 0 . fmap fromOnly <$> query_
         conn
         ("select max(commit_number) from \"" <> fromString eventTable <> "\"")
-    pure $ commitNumber
 
 -- | Keep the events and state in postgres!
 data PostgresEvent model event = PostgresEvent
@@ -271,7 +286,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-refreshModel :: (Typeable e, FromJSON e) => (PostgresEvent m e) -> IO (m, CommitNumber)
+refreshModel :: (Typeable e, FromJSON e) => PostgresEvent m e -> IO (m, CommitNumber)
 refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     withExclusiveLock pg $ \conn -> do
