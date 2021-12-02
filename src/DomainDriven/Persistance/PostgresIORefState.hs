@@ -7,9 +7,6 @@ import           Data.Aeson
 import           Data.IORef
 import           Data.Int
 import           Data.List                      ( foldl' )
-import qualified Data.List                                    as L
-import           Data.Map                       ( Map )
-import qualified Data.Map                                     as M
 import           Data.String
 import           Data.Text                      ( Text )
 import           Data.Time
@@ -20,7 +17,6 @@ import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
-import           GHC.TypeLits
 import           Prelude
 
 
@@ -37,19 +33,22 @@ type PreviousEventTableName = String
 
 
 data EventTable
-    = UpgradeFrom EventMigration EventTable
+    = MigrateUsing EventMigration EventTable
     | InitialVersion EventTableBaseName
 
 type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
 
-instance Show EventTable where
-    show = go 0      where
-        go :: Int -> EventTable -> String
-        go i = \case
-            UpgradeFrom _ u  -> go (i + 1) u
-            InitialVersion n -> n <> "_v" <> show i
 
-newtype CommitNumber = CommitNumber {unEventNumber :: Int64}
+getEventTableName :: EventTable -> EventTableName
+getEventTableName = go 0
+  where
+    go :: Int -> EventTable -> String
+    go i = \case
+        MigrateUsing _ u -> go (i + 1) u
+        InitialVersion n -> n <> "_v" <> show i
+
+
+newtype EventNumber = EventNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
     deriving newtype (Eq, Ord, Num)
 
@@ -58,13 +57,13 @@ decodeEventRow (k, ts, e) = Stored e ts k
 
 data EventRowOut = EventRowOut
     { key          :: UUID
-    , commitNumber :: CommitNumber
+    , commitNumber :: EventNumber
     , timestamp    :: UTCTime
     , event        :: Value
     }
     deriving (Show, Eq, Generic, FromRow)
 
-fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, CommitNumber)
+fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
 fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
     Success a -> pure (Stored a ts k, no)
     Error err ->
@@ -83,8 +82,8 @@ fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
 --instance FromRow EventRowOut where
 --    fromRow = EventRowOut <$> field <*> field <*> field <*> fieldWith fromJSONField
 
-instance FromField CommitNumber where
-    fromField f bs = CommitNumber <$> fromField f bs
+instance FromField EventNumber where
+    fromField f bs = EventNumber <$> fromField f bs
 
 data StateRow m = StateRow
     { modelName :: Text
@@ -115,7 +114,7 @@ createEventTable' conn eventTable =
         <> fromString eventTable
         <> "\" \
            \( id uuid primary key\
-           \, commit_number bigserial\
+           \, commit_number bigint not null generated always as identity\
            \, timestamp timestamptz not null default now()\
            \, event jsonb not null\
            \);"
@@ -135,17 +134,17 @@ simplePostgres getConn eventTable app' seed' = do
 
 
 -- | Setup the persistance model and verify that the tables exist.
-somethingPostgres
+postgresWriteModel
     :: (FromJSON e, Typeable e, ToJSON e)
     => IO Connection
     -> EventTable
     -> (m -> Stored e -> m)
     -> m
     -> IO (PostgresEvent m e)
-somethingPostgres getConn eventTable app' seed' = do
+postgresWriteModel getConn eventTable app' seed' = do
     conn <- getConn
     runMigrations conn eventTable
-    createPostgresPersistance getConn (show eventTable) app' seed'
+    createPostgresPersistance getConn (getEventTableName eventTable) app' seed'
 
 newtype Exists = Exists
     { exists :: Bool
@@ -155,19 +154,19 @@ newtype Exists = Exists
 
 runMigrations :: Connection -> EventTable -> IO ()
 runMigrations conn et = case et of
-    InitialVersion{}       -> void $ createEventTable' conn (show et)
-    UpgradeFrom mig prevEt -> do
-        let etName = show et
+    InitialVersion n ->
+        void $ createEventTable' conn (getEventTableName $ InitialVersion n)
+    MigrateUsing mig prevEt -> do
         -- FIXME: Specify the schema we're looking in!
         r <- query
             conn
             "select exists (select * from information_schema.tables where table_name=?)"
-            (Only etName)
+            (Only $ getEventTableName et)
         case r of
             [Exists True ] -> pure () -- Table exists. Nothing needs to be done
             [Exists False] -> do
                 runMigrations conn prevEt
-                mig (show prevEt) (show et) conn
+                mig (getEventTableName prevEt) (getEventTableName et) conn
             l -> fail $ "runMigrations unexpected answer: " <> show l
 
 --runMigrations :: Map Int EventMigration -> IO ()
@@ -202,7 +201,7 @@ queryEvents
     :: (Typeable a, FromJSON a)
     => Connection
     -> EventTableName
-    -> IO [(Stored a, CommitNumber)]
+    -> IO [(Stored a, EventNumber)]
 queryEvents conn eventTable = traverse fromEventRow =<< query_
     conn
     (  "select id, commit_number,timestamp,event from \""
@@ -215,9 +214,9 @@ queryEventsAfter
     :: (Typeable a, FromJSON a)
     => Connection
     -> EventTableName
-    -> CommitNumber
-    -> IO [(Stored a, CommitNumber)]
-queryEventsAfter conn eventTable (CommitNumber lastEvent) =
+    -> EventNumber
+    -> IO [(Stored a, EventNumber)]
+queryEventsAfter conn eventTable (EventNumber lastEvent) =
     traverse fromEventRow =<< query_
         conn
         (  "select id, commit_number,timestamp,event from \""
@@ -243,7 +242,7 @@ writeEvents
     => Connection
     -> EventTableName
     -> [Stored a]
-    -> IO CommitNumber
+    -> IO EventNumber
 writeEvents conn eventTable storedEvents = do
     _ <- executeMany
         conn
@@ -263,7 +262,7 @@ writeEvents conn eventTable storedEvents = do
 data PostgresEvent model event = PostgresEvent
     { getConnection  :: IO Connection
     , eventTableName :: EventTableName
-    , modelIORef     :: IORef (model, CommitNumber)
+    , modelIORef     :: IORef (model, EventNumber)
     , app            :: model -> Stored event -> model
     , seed           :: model
     }
@@ -286,7 +285,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-refreshModel :: (Typeable e, FromJSON e) => PostgresEvent m e -> IO (m, CommitNumber)
+refreshModel :: (Typeable e, FromJSON e) => PostgresEvent m e -> IO (m, EventNumber)
 refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     withExclusiveLock pg $ \conn -> do
@@ -332,15 +331,19 @@ migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap
 
 migrate1to1
     :: forall a b
-     . (Typeable a, FromJSON a, ToJSON b)
+     . (Typeable a, FromJSON a, ToJSON b, Show a)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
 migrate1to1 conn prevTName tName f = do
-    _             <- createEventTable' conn tName
+    putStrLn "Creating even table"
+    _ <- createEventTable' conn tName
+    putStrLn "Reading current events"
     currentEvents <- queryEvents @a conn prevTName
+    print currentEvents
+    putStrLn "Writing migrated events"
     void $ writeEvents conn tName $ fmap (f . fst) currentEvents
 
 migrate1toMany
@@ -350,10 +353,10 @@ migrate1toMany
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> [Stored b])
-    -> IO CommitNumber
+    -> IO EventNumber
 migrate1toMany conn prevTName tName f = do
     _             <- createEventTable' conn tName
     currentEvents <- queryEvents @a conn prevTName
-    let mkNewEvents :: [(Stored a, CommitNumber)] -> [Stored b]
-        mkNewEvents = join . fmap (f . fst)
+    let mkNewEvents :: [(Stored a, EventNumber)] -> [Stored b]
+        mkNewEvents = ((f . fst) =<<)
     writeEvents conn tName $ mkNewEvents currentEvents

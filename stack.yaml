@@ -64,5 +64,5 @@ packages:
 # compiler-check: newer-minor
 ghc-options:
   "$locals": -fwrite-ide-info
+  '$everything': -haddock
     -hiedir=.hie
-    -haddock
