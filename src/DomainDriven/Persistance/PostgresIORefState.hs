@@ -143,7 +143,7 @@ postgresWriteModel
     -> IO (PostgresEvent m e)
 postgresWriteModel getConn eventTable app' seed' = do
     conn <- getConn
-    runMigrations conn eventTable
+    withTransaction conn $ runMigrations conn eventTable
     createPostgresPersistance getConn (getEventTableName eventTable) app' seed'
 
 newtype Exists = Exists
@@ -160,7 +160,7 @@ runMigrations conn et = case et of
         -- FIXME: Specify the schema we're looking in!
         r <- query
             conn
-            "select exists (select * from information_schema.tables where table_name=?)"
+            "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
             (Only $ getEventTableName et)
         case r of
             [Exists True ] -> pure () -- Table exists. Nothing needs to be done
@@ -169,14 +169,16 @@ runMigrations conn et = case et of
                 mig (getEventTableName prevEt) (getEventTableName et) conn
             l -> fail $ "runMigrations unexpected answer: " <> show l
 
---runMigrations :: Map Int EventMigration -> IO ()
---runMigrations migs = do
---    let migrations :: [(Int, EventMigration)
---        migrations = L.sortOn (Down . fst) $ M.keys migs
---    -- * Ensure all keys are > 1. First version is always implicit
---    latestAvailableVersion <-
---        undefined -- check what the last version of the table in the database is
---    undefined
+nextEventTableVersionExists :: Connection -> EventTable -> IO Bool
+nextEventTableVersionExists conn et = do
+    r <- query
+        conn
+        "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
+        (Only $ getEventTableName $ MigrateUsing (\_ _ _ -> pure ()) et)
+    case r of
+        [Exists v] -> pure v
+        l          -> fail $ "nextEventTableVersionExists unexpected answer: " <> show l
+
 
 createPostgresPersistance
     :: forall event model
