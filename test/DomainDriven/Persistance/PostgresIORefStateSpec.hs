@@ -1,22 +1,35 @@
 {-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE TypeApplications #-}
 module DomainDriven.Persistance.PostgresIORefStateSpec where
 
-import           Prelude
-import           DomainDriven
-import qualified Data.Text                                    as T
-import           DomainDriven.Persistance.PostgresIORefState
-import           Test.Hspec
-import           Test.Hspec.Core.Hooks
-import           Database.PostgreSQL.Simple
-import qualified StoreModel                                   as Store
-import           Control.Monad
-import           Data.UUID                      ( nil )
-import           Data.Time
-import           Data.String                    ( fromString )
-import qualified Data.Map                                     as M
-import           Safe                           ( headNote )
 import           Control.Concurrent.Async
+import           Control.Monad
+import           Data.Aeson                     ( Value )
+import qualified Data.Map                                     as M
+import           Data.String                    ( fromString )
+import qualified Data.Text                                    as T
+import           Data.Time
+import           Data.Traversable
+import           Data.UUID                      ( nil )
+import qualified Data.UUID.V4                                 as V4
+import           Database.PostgreSQL.Simple
+import           DomainDriven
+import           DomainDriven.Persistance.PostgresIORefState
+import           Prelude
+import           Safe                           ( headNote )
+import qualified StoreModel                                   as Store
+import           Test.Hspec
 
+eventTable :: EventTable
+eventTable =
+    MigrateUsing (\_ _ _ -> pure ()) . MigrateUsing (\_ _ _ -> pure ()) $ InitialVersion
+        "test_events"
+
+eventTable2 :: EventTable
+eventTable2 = MigrateUsing mig eventTable
+  where
+    mig :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
+    mig prevName name conn = migrate1to1 @Value conn prevName name id
 
 spec :: Spec
 spec = do
@@ -24,14 +37,14 @@ spec = do
     aroundAll setupPersistance $ do
         writeEventsSpec
         queryEventsSpec
-  where
-    setupPersistance
-        :: (PostgresEvent Store.StoreModel Store.StoreEvent -> IO ()) -> IO ()
-    setupPersistance test = do
-        dropEventTable =<< mkTestConn
-        p <- simplePostgres mkTestConn eventTable Store.applyStoreEvent mempty
-        createEventTable p
-        test p
+        migrationSpec
+
+setupPersistance :: (PostgresEvent Store.StoreModel Store.StoreEvent -> IO ()) -> IO ()
+setupPersistance test = do
+    dropEventTables =<< mkTestConn
+    p <- postgresWriteModel mkTestConn eventTable Store.applyStoreEvent mempty
+    test p
+
 
 mkTestConn :: IO Connection
 mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
@@ -42,12 +55,14 @@ mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
                                    }
 
 
-eventTable :: EventTableName
-eventTable = "test_events"
-
-dropEventTable :: Connection -> IO ()
-dropEventTable conn =
-    void $ execute_ conn ("drop table if exists \"" <> fromString eventTable <> "\"")
+dropEventTables :: Connection -> IO ()
+dropEventTables conn = void . for (tableNames eventTable2) $ \n ->
+    void $ execute_ conn ("drop table if exists \"" <> fromString n <> "\"")
+  where
+    tableNames :: EventTable -> [EventTableName]
+    tableNames et = case et of
+        MigrateUsing _ next -> getEventTableName et : tableNames next
+        InitialVersion{}    -> [getEventTableName et]
 
 writeEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 writeEventsSpec = describe "queryEvents" $ do
@@ -56,7 +71,7 @@ writeEventsSpec = describe "queryEvents" $ do
                         (UTCTime (fromGregorian 2020 10 15) 0)
                         nil
         conn <- getConnection p
-        i    <- writeEvents conn eventTable [ev]
+        i    <- writeEvents conn (getEventTableName eventTable) [ev]
         i `shouldBe` 1
 
     it "Writing the same event again fails" $ \p -> do
@@ -64,7 +79,9 @@ writeEventsSpec = describe "queryEvents" $ do
                         (UTCTime (fromGregorian 2020 10 15) 0)
                         nil
         conn <- getConnection p
-        writeEvents conn eventTable [ev] `shouldThrow` (== FatalError) . sqlExecStatus
+        writeEvents conn (getEventTableName eventTable) [ev]
+            `shouldThrow` (== FatalError)
+            .             sqlExecStatus
     it "Writing multiple events at once works" $ \p -> do
         let evs =
                 [ Store.AddedItem (Store.ItemKey nil) "Test item" 220
@@ -74,7 +91,7 @@ writeEventsSpec = describe "queryEvents" $ do
             (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
             evs
         conn <- getConnection p
-        _    <- writeEvents conn eventTable storedEvs
+        _    <- writeEvents conn (getEventTableName eventTable) storedEvs
         evs' <- getEvents p
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
@@ -84,7 +101,7 @@ queryEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 queryEventsSpec = describe "queryEvents" $ do
     it "Can query events" $ \p -> do
         conn <- getConnection p
-        evs  <- queryEvents @Store.StoreEvent conn eventTable
+        evs  <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (>= 1) . length
     it "Events come out in the right order" $ \p -> do
         -- write few more events before
@@ -94,21 +111,48 @@ queryEventsSpec = describe "queryEvents" $ do
             id1 <- mkId
             let ev1 = Store.Restocked (Store.ItemKey nil) 4
             _ <- writeEvents conn
-                             eventTable
+                             (getEventTableName eventTable)
                              [Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
 
             id2 <- mkId
             let ev2 = Store.Restocked (Store.ItemKey nil) 10
             writeEvents conn
-                        eventTable
+                        (getEventTableName eventTable)
                         [Stored ev2 (UTCTime (fromGregorian 2020 10 18) 1) id2]
 
-        evs <- queryEvents @Store.StoreEvent conn eventTable
+        evs <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (> 1) . length
         let event_numbers = fmap snd evs
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
 
+migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+migrationSpec = describe "migrate1to1" $ do
+    it "Keeps all events when using `id` to update" $ \p -> do
+        conn <- getConnection p
+        evs  <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
+        evs `shouldSatisfy` (>= 1) . length
+
+        _    <- postgresWriteModel mkTestConn eventTable2 Store.applyStoreEvent mempty
+        evs' <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
+
+        fmap fst evs' `shouldBe` fmap fst evs
+    it "Can no longer write new events to old table after migration" $ \p -> do
+        uuid <- V4.nextRandom
+        let ev = Stored (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
+                        (UTCTime (fromGregorian 2020 10 15) 0)
+                        uuid
+        conn <- getConnection p
+        writeEvents conn (getEventTableName eventTable) [ev]
+            `shouldThrow` (== FatalError)
+            .             sqlExecStatus
+    it "But can write to the new table" $ \p -> do
+        uuid <- V4.nextRandom
+        let ev = Stored (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
+                        (UTCTime (fromGregorian 2020 10 15) 0)
+                        uuid
+        conn <- getConnection p
+        void $ writeEvents conn (getEventTableName eventTable2) [ev]
 
 
 storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
