@@ -45,7 +45,7 @@ getEventTableName = go 0
     go :: Int -> EventTable -> String
     go i = \case
         MigrateUsing _ u -> go (i + 1) u
-        InitialVersion n -> n <> "_v" <> show i
+        InitialVersion n -> n <> "_v" <> show (i + 1)
 
 
 newtype EventNumber = EventNumber {unEventNumber :: Int64}
@@ -119,15 +119,37 @@ createEventTable' conn eventTable =
            \, event jsonb not null\
            \);"
 
+retireTable :: Connection -> EventTableName -> IO ()
+retireTable conn tableName = do
+    putStrLn $ "Retiering: " <> show tableName
+    createRetireFunction conn
+    --void $ execute
+    --    conn
+    --    "create trigger retired before insert on ? execute procedure retired_table()"
+    --    (Only $ show tableName)
+    void
+        $  execute_ conn
+        $  "create trigger retired before insert on \""
+        <> fromString tableName
+        <> "\" execute procedure retired_table()"
+
+createRetireFunction :: Connection -> IO ()
+createRetireFunction conn =
+    void
+        . execute_ conn
+        $ "create or replace function retired_table() returns trigger as \
+                    \$$ begin raise exception 'Event table has been retired.'; end; $$ \
+                    \language plpgsql;"
+
 -- | Setup the persistance model and verify that the tables exist.
-simplePostgres
+postgresWriteModelNoMigration
     :: (FromJSON e, Typeable e, Typeable m, ToJSON e, FromJSON m, ToJSON m)
     => IO Connection
     -> EventTableName
     -> (m -> Stored e -> m)
     -> m
     -> IO (PostgresEvent m e)
-simplePostgres getConn eventTable app' seed' = do
+postgresWriteModelNoMigration getConn eventTable app' seed' = do
     runner <- createPostgresPersistance getConn eventTable app' seed'
     createEventTable runner
     pure runner
@@ -154,10 +176,8 @@ newtype Exists = Exists
 
 runMigrations :: Connection -> EventTable -> IO ()
 runMigrations conn et = case et of
-    InitialVersion n ->
-        void $ createEventTable' conn (getEventTableName $ InitialVersion n)
+    InitialVersion _        -> createTable
     MigrateUsing mig prevEt -> do
-        -- FIXME: Specify the schema we're looking in!
         r <- query
             conn
             "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
@@ -166,8 +186,18 @@ runMigrations conn et = case et of
             [Exists True ] -> pure () -- Table exists. Nothing needs to be done
             [Exists False] -> do
                 runMigrations conn prevEt
+                createTable
                 mig (getEventTableName prevEt) (getEventTableName et) conn
+                retireTable conn (getEventTableName prevEt)
+
             l -> fail $ "runMigrations unexpected answer: " <> show l
+  where
+    createTable :: IO ()
+    createTable = do
+        let tableName = getEventTableName et
+        putStrLn $ "runMigrations: Creating table: " <> show tableName
+        void $ createEventTable' conn tableName
+
 
 nextEventTableVersionExists :: Connection -> EventTable -> IO Bool
 nextEventTableVersionExists conn et = do
@@ -340,12 +370,8 @@ migrate1to1
     -> (Stored a -> Stored b)
     -> IO ()
 migrate1to1 conn prevTName tName f = do
-    putStrLn "Creating even table"
-    _ <- createEventTable' conn tName
-    putStrLn "Reading current events"
+    _             <- createEventTable' conn tName
     currentEvents <- queryEvents @a conn prevTName
-    print currentEvents
-    putStrLn "Writing migrated events"
     void $ writeEvents conn tName $ fmap (f . fst) currentEvents
 
 migrate1toMany

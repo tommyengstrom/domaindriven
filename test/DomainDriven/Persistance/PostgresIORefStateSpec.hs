@@ -11,6 +11,7 @@ import qualified Data.Text                                    as T
 import           Data.Time
 import           Data.Traversable
 import           Data.UUID                      ( nil )
+import qualified Data.UUID.V4                                 as V4
 import           Database.PostgreSQL.Simple
 import           DomainDriven
 import           DomainDriven.Persistance.PostgresIORefState
@@ -42,8 +43,8 @@ setupPersistance :: (PostgresEvent Store.StoreModel Store.StoreEvent -> IO ()) -
 setupPersistance test = do
     dropEventTables =<< mkTestConn
     p <- postgresWriteModel mkTestConn eventTable Store.applyStoreEvent mempty
-    createEventTable p
     test p
+
 
 mkTestConn :: IO Connection
 mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
@@ -127,7 +128,7 @@ queryEventsSpec = describe "queryEvents" $ do
 
 migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 migrationSpec = describe "migrate1to1" $ do
-    it "keeps all events when using `id` to update" $ \p -> do
+    it "Keeps all events when using `id` to update" $ \p -> do
         conn <- getConnection p
         evs  <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (>= 1) . length
@@ -136,6 +137,23 @@ migrationSpec = describe "migrate1to1" $ do
         evs' <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
 
         fmap fst evs' `shouldBe` fmap fst evs
+    it "Can no longer write new events to old table after migration" $ \p -> do
+        uuid <- V4.nextRandom
+        let ev = Stored (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
+                        (UTCTime (fromGregorian 2020 10 15) 0)
+                        uuid
+        conn <- getConnection p
+        writeEvents conn (getEventTableName eventTable) [ev]
+            `shouldThrow` (== FatalError)
+            .             sqlExecStatus
+    it "But can write to the new table" $ \p -> do
+        uuid <- V4.nextRandom
+        let ev = Stored (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
+                        (UTCTime (fromGregorian 2020 10 15) 0)
+                        uuid
+        conn <- getConnection p
+        void $ writeEvents conn (getEventTableName eventTable2) [ev]
+
 
 storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 storeModelSpec = describe "Test basic functionality" $ do
