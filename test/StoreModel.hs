@@ -4,7 +4,10 @@ module StoreModel where
 
 
 import           Control.Monad                  ( when )
-import           Control.Monad.Catch            ( throwM )
+import           Control.Monad.Catch            ( MonadThrow
+                                                , throwM
+                                                )
+import           Control.Monad.IO.Class
 import           Data.Aeson                     ( FromJSON
                                                 , FromJSONKey
                                                 , ToJSON
@@ -89,7 +92,8 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction
+handleStoreAction
+    :: MonadIO m => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -103,7 +107,8 @@ handleStoreAction = \case
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
+handleAdminAction
+    :: MonadThrow m => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -115,13 +120,17 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure (const (), [RemovedItem iKey])
 
-handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
+handleItemAction
+    :: forall m
+     . MonadThrow m
+    => ItemKey
+    -> ActionHandler StoreModel StoreEvent m ItemAction
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
   where
-    getItem :: StoreModel -> IO ItemInfo
+    getItem :: StoreModel -> m ItemInfo
     getItem = maybe (throwM err404) pure . M.lookup iKey
 ------------------------------------------------------------------------------------------
 -- Event handler                                                                        --

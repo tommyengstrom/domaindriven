@@ -18,6 +18,7 @@ import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
 import           Prelude
+import           UnliftIO                       ( MonadUnliftIO(..) )
 
 
 
@@ -351,14 +352,16 @@ exclusiveLock conn etName =
     () <$ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
-    transactionalUpdate pg cmd = do
-        let eventTable = eventTableName pg
-        withExclusiveLock pg $ \conn -> do
-            m                <- getModel' conn pg
-            (returnFun, evs) <- cmd m
-            -- We hold the lock so model must be up to date, thus we can just grab it
-            -- from the state
-            m'               <- fst <$> readIORef (modelIORef pg)
+    transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
+        conn <- getConnection pg
+        withTransaction conn $ do
+            let eventTable = eventTableName pg
+            _ <- execute_
+                conn
+                ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
+            m                <- getModel pg
+            (returnFun, evs) <- runInIO $ cmd m
+            m'               <- getModel pg
             storedEvs        <- traverse toStored evs
             let newM = foldl' (app pg) m' storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs
