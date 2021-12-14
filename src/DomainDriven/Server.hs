@@ -28,6 +28,8 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Prelude
 import           Servant
+import           Control.Monad.Catch            ( MonadThrow(..) )
+import           UnliftIO                       ( MonadUnliftIO(..) )
 
 data ApiSpec = ApiSpec
     { gadtName   :: GadtName -- ^ Name of the GADT representing the command
@@ -445,7 +447,7 @@ mkQueryParams (ConstructorArgs args) = do
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
 -- | Declare then handlers for the API
---
+
 mkServerDec :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkServerDec spec = do
     apiTypeName <- askApiTypeName
@@ -453,9 +455,16 @@ mkServerDec spec = do
 
     runner      <- lift $ mkRunner spec
     let runnerName = mkName "runner"
-    ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
+
+
+    let actionType :: Q Type
+        actionType = pure $ spec ^. field @"gadtName" . typed @Name . to ConT
+    serverType <- lift
+        [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $actionType -> ServerT m $(pure $ ConT apiTypeName) |]
+
+    -- ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
     let serverSigDec :: Dec
-        serverSigDec = SigD serverName $ AppT (AppT ArrowT $ runner ^. typed) ret
+        serverSigDec = SigD serverName serverType
 
         mkHandlerExp :: ApiPiece -> ReaderT ServerInfo Q Exp
         mkHandlerExp p = enterApiPiece p $ do
@@ -469,21 +478,31 @@ mkServerDec spec = do
     let serverFunDec :: Dec
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <- mconcat
-        <$> traverse (mkApiPieceHandler runner) (spec ^. typed @[ApiPiece])
+        <$> traverse (mkApiPieceHandler actionType) (spec ^. typed @[ApiPiece])
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
 mkRunner :: ApiSpec -> Q Runner
 mkRunner spec = do
-    Runner <$> [t| ActionRunner $(pure cmdType)  |]
+    Runner
+        <$> [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $(pure actionType)  |]
   where
-    cmdType :: Type
-    cmdType = spec ^. field @"gadtName" . typed @Name . to ConT
+    actionType :: Type
+    actionType = spec ^. field @"gadtName" . typed @Name . to ConT
+
+--mkServerDec' :: ApiSpec -> Q Type
+--mkServerDec' spec = do
+--    Runner <$> [t| forall m. ActionRunner m $(pure actionType)  |]
+--  where
+--    actionType :: Type
+--    actionType = spec ^. field @"gadtName" . typed @Name . to ConT
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
-mkApiPieceHandler :: Runner -> ApiPiece -> ReaderT ServerInfo Q [Dec]
-mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
+mkApiPieceHandler :: Q Type -> ApiPiece -> ReaderT ServerInfo Q [Dec]
+mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
+    runnerType <- lift
+                 [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $(actionType)  |]
     case apiPiece of
         Endpoint _ cArgs _ Immutable ty -> do
             let nrArgs :: Int
@@ -492,6 +511,7 @@ mkApiPieceHandler (Runner runnerType) apiPiece = enterApiPiece apiPiece $ do
             handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
+
             let funSig :: Dec
                 funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
                     ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
