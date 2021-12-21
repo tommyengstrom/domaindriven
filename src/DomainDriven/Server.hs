@@ -4,13 +4,13 @@
 
 module DomainDriven.Server
     ( module DomainDriven.Server
-    , liftIO
     , module DomainDriven.Internal.NamedFields
     , HasFieldName(..)
     ) where
 
 import           Control.Lens
 import           Control.Monad
+import           Control.Monad.Catch            ( MonadThrow(..) )
 import           Control.Monad.Reader
 import           Data.Char
 import           Data.Generics.Product
@@ -28,7 +28,6 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Prelude
 import           Servant
-import           Control.Monad.Catch            ( MonadThrow(..) )
 import           UnliftIO                       ( MonadUnliftIO(..) )
 
 data ApiSpec = ApiSpec
@@ -453,14 +452,13 @@ mkServerDec spec = do
     apiTypeName <- askApiTypeName
     serverName  <- askServerName
 
-    runner      <- lift $ mkRunner spec
     let runnerName = mkName "runner"
 
 
     let actionType :: Q Type
         actionType = pure $ spec ^. field @"gadtName" . typed @Name . to ConT
     serverType <- lift
-        [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $actionType -> ServerT m $(pure $ ConT apiTypeName) |]
+        [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $actionType -> ServerT $(pure $ ConT apiTypeName) m |]
 
     -- ret <- lift [t| Server $(pure $ ConT apiTypeName) |]
     let serverSigDec :: Dec
@@ -497,24 +495,88 @@ mkRunner spec = do
 --    actionType :: Type
 --    actionType = spec ^. field @"gadtName" . typed @Name . to ConT
 
+kuken :: Type -> ConstructorArgs -> Type -> Type
+kuken actionType (ConstructorArgs args) retType = ForallT [PlainTV m] [] -- [AppT (ConT Control.Monad.IO.Class.MonadIO) (VarT m_0)]
+                                                                         $ case args of
+    [] -> mkFunction [actionRunner, ret]
+    _  -> mkFunction [actionRunner, nfArgs, ret]
+  where
+    m :: Name
+    m = mkName "m"
+
+    ret :: Type
+    ret = AppT (VarT m) retType
+
+
+    nfName :: Name
+    nfName = mkName $ "NamedFields" <> show (length args)
+
+    nfArgs :: Type
+    nfArgs = foldr AppT (ConT nfName) args
+
+    actionRunner :: Type
+    actionRunner = ConT ''ActionRunner `AppT` VarT m `AppT` actionType
+
+mkNamedFieldsType
+    :: ConstructorName -> ConstructorArgs -> ReaderT ServerInfo Q (Maybe Type)
+mkNamedFieldsType cName = \case
+    ConstructorArgs []   -> pure Nothing
+    ConstructorArgs args -> do
+        bodyTag <- askBodyTag cName
+
+        let nfType :: Type
+            nfType = AppT (ConT nfName) (LitT bodyTag)
+
+            nfName :: Name
+            nfName = mkName $ "NamedFields" <> show (length args)
+        pure . Just $ foldl AppT nfType args
+
+-- | Makes command handler, e.g.
+--  counterCmd_AddToCounterHandler ::
+--    ActionRunner m CounterCmd -> NamedFields1 "CounterCmd_AddToCounter" Int -> m Int
+mkCmdHandlerSignature
+    :: Type -> ConstructorName -> ConstructorArgs -> Type -> ReaderT ServerInfo Q Type
+mkCmdHandlerSignature actionType cName cArgs retType =
+    mkNamedFieldsType cName cArgs >>= \case
+        Just nfArgs -> pure $ mkFunction [actionRunner, nfArgs, ret]
+        Nothing     -> pure $ mkFunction [actionRunner, ret]
+  where
+    m :: Name
+    m = mkName "m"
+
+    ret :: Type
+    ret = AppT (VarT m) retType
+
+    actionRunner :: Type
+    actionRunner = ConT ''ActionRunner `AppT` VarT m `AppT` actionType
+
+mkFunction :: [Type] -> Type
+mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
+ -- let funSig :: Dec
+ --     funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+ --        ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
 mkApiPieceHandler :: Q Type -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
     runnerType <- lift
-                 [t| forall m. (MonadThrow m, MonadUnliftIO m) => ActionRunner m $(actionType)  |]
+                 [t| forall m. (MonadThrow m, MonadUnliftIO m)
+                            => ActionRunner m $(actionType)
+                    |]
     case apiPiece of
         Endpoint _ cArgs _ Immutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
+            actionType' <- lift actionType
 
             let funSig :: Dec
-                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
+                funSig = SigD handlerName
+                 $ kuken actionType' cArgs ty
+                 -- . AppT (AppT ArrowT runnerType) $ case cArgs of
+                 --    ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
 
                 funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
@@ -526,32 +588,32 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (fmap (pure . VarP) (runnerName:varNames ))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [|  $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
-            bodyTag        <- askBodyTag cName
             runnerName     <- lift $ newName "runner"
+            actionType' <- lift actionType
             let varPat :: Pat
                 varPat = ConP nfName (fmap VarP varNames)
 
                 nfName :: Name
                 nfName = mkName $ "NamedFields" <> show nrArgs
 
-                funSig :: Dec
-                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs as ->
-                        let nfType :: Type
-                            nfType = AppT (ConT nfName) (LitT bodyTag)
-                        in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
+            funSig <- SigD handlerName <$> mkCmdHandlerSignature actionType' cName cArgs ty
+                -- funSig :: Dec
+                -- funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+                --     ConstructorArgs [] -> handlerRetType
+                --     ConstructorArgs as ->
+                --         let nfType :: Type
+                --             nfType = AppT (ConT nfName) (LitT bodyTag)
+                --         in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
-                funBodyBase = AppE (VarE runnerName) $ foldl
+            let funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
                     (ConE $ apiPiece ^. typed @ConstructorName . typed)
                     (fmap VarE varNames)
@@ -561,7 +623,7 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [|  $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         Endpoint _cName cArgs _hs Mutable ty -> do
@@ -573,16 +635,18 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
                 nrArgs = length $ cArgs ^. typed @[Type]
             unless (nrArgs < 2) (fail "Only one argument is supported for non-JSON request bodies")
             varName       <- lift $ newName "arg"
-            handlerRetType <- lift [t| Handler $(mkReturnType ty) |]
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
+            actionType' <- lift actionType
             let varPat :: Pat
                 varPat = VarP varName
 
-                funSig :: Dec
-                funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                    ConstructorArgs [] -> handlerRetType
-                    ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
+            let funSig :: Dec
+                funSig = SigD handlerName $ kuken actionType' cArgs ty
+              --  funSig :: Dec
+              --  funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
+              --      ConstructorArgs [] -> handlerRetType
+              --      ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
@@ -594,7 +658,7 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
                     _        -> pure $ funBodyBase
             funClause <- lift $ clause
                 (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                (normalB [| liftIO $ $(funBody)  |])
+                (normalB [|  $(funBody)  |])
                 []
             pure [funSig, FunD handlerName [funClause]]
         SubApi cName cArgs spec -> do
