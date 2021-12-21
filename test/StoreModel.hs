@@ -26,6 +26,7 @@ import           DomainDriven.Config
 import           GHC.Generics                   ( Generic )
 import           Prelude
 import           Servant
+import           UnliftIO                       ( MonadUnliftIO )
 
 ------------------------------------------------------------------------------------------
 -- Defining the types we need                                                           --
@@ -93,7 +94,8 @@ type StoreModel = M.Map ItemKey ItemInfo
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
 handleStoreAction
-    :: MonadIO m => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
+    :: (MonadUnliftIO m, MonadThrow m)
+    => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -108,7 +110,8 @@ handleStoreAction = \case
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
 handleAdminAction
-    :: MonadThrow m => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
+    :: (MonadUnliftIO m, MonadThrow m)
+    => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -122,7 +125,7 @@ handleAdminAction = \case
 
 handleItemAction
     :: forall m
-     . MonadThrow m
+     . (MonadUnliftIO m, MonadThrow m)
     => ItemKey
     -> ActionHandler StoreModel StoreEvent m ItemAction
 handleItemAction iKey = \case

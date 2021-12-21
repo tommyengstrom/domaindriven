@@ -454,7 +454,6 @@ mkServerDec spec = do
 
     let runnerName = mkName "runner"
 
-
     let actionType :: Q Type
         actionType = pure $ spec ^. field @"gadtName" . typed @Name . to ConT
     serverType <- lift
@@ -496,23 +495,14 @@ mkRunner spec = do
 --    actionType = spec ^. field @"gadtName" . typed @Name . to ConT
 
 kuken :: Type -> ConstructorArgs -> Type -> Type
-kuken actionType (ConstructorArgs args) retType = ForallT [PlainTV m] [] -- [AppT (ConT Control.Monad.IO.Class.MonadIO) (VarT m_0)]
-                                                                         $ case args of
-    [] -> mkFunction [actionRunner, ret]
-    _  -> mkFunction [actionRunner, nfArgs, ret]
+kuken actionType (ConstructorArgs args) retType =
+    ForallT [PlainTV m] [] $ mkFunction $ actionRunner : args <> [ret]
   where
     m :: Name
     m = mkName "m"
 
     ret :: Type
     ret = AppT (VarT m) retType
-
-
-    nfName :: Name
-    nfName = mkName $ "NamedFields" <> show (length args)
-
-    nfArgs :: Type
-    nfArgs = foldr AppT (ConT nfName) args
 
     actionRunner :: Type
     actionRunner = ConT ''ActionRunner `AppT` VarT m `AppT` actionType
@@ -538,6 +528,29 @@ mkCmdHandlerSignature
     :: Type -> ConstructorName -> ConstructorArgs -> Type -> ReaderT ServerInfo Q Type
 mkCmdHandlerSignature actionType cName cArgs retType =
     mkNamedFieldsType cName cArgs >>= \case
+        Just nfArgs -> pure $ anus $ mkFunction [actionRunner, nfArgs, ret]
+        Nothing     -> pure $ anus $ mkFunction [actionRunner, ret]
+  where
+    m :: Name
+    m = mkName "m"
+
+    anus :: Type -> Type
+    anus = ForallT
+        [PlainTV m]
+        [ConT ''MonadUnliftIO `AppT` VarT m, ConT ''MonadThrow `AppT` VarT m]
+
+    ret :: Type
+    ret = AppT (VarT m) $ case retType of
+        TupleT 0 -> ConT ''NoContent
+        ty       -> ty
+
+    actionRunner :: Type
+    actionRunner = ConT ''ActionRunner `AppT` VarT m `AppT` actionType
+
+mkSubServerSignature
+    :: Type -> ConstructorName -> ConstructorArgs -> Type -> ReaderT ServerInfo Q Type
+mkSubServerSignature actionType cName cArgs retType =
+    mkNamedFieldsType cName cArgs >>= \case
         Just nfArgs -> pure $ mkFunction [actionRunner, nfArgs, ret]
         Nothing     -> pure $ mkFunction [actionRunner, ret]
   where
@@ -545,7 +558,9 @@ mkCmdHandlerSignature actionType cName cArgs retType =
     m = mkName "m"
 
     ret :: Type
-    ret = AppT (VarT m) retType
+    ret = AppT (VarT m) $ case retType of
+        TupleT 0 -> ConT ''NoContent
+        ty       -> ty
 
     actionRunner :: Type
     actionRunner = ConT ''ActionRunner `AppT` VarT m `AppT` actionType
@@ -559,10 +574,6 @@ mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
 -- parameters applied
 mkApiPieceHandler :: Q Type -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
-    runnerType <- lift
-                 [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                            => ActionRunner m $(actionType)
-                    |]
     case apiPiece of
         Endpoint _ cArgs _ Immutable ty -> do
             let nrArgs :: Int
@@ -575,8 +586,6 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
             let funSig :: Dec
                 funSig = SigD handlerName
                  $ kuken actionType' cArgs ty
-                 -- . AppT (AppT ArrowT runnerType) $ case cArgs of
-                 --    ConstructorArgs args -> foldr1 (\a b -> AppT (AppT ArrowT a) b) (args <> [handlerRetType])
 
                 funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
@@ -605,13 +614,6 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
                 nfName = mkName $ "NamedFields" <> show nrArgs
 
             funSig <- SigD handlerName <$> mkCmdHandlerSignature actionType' cName cArgs ty
-                -- funSig :: Dec
-                -- funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-                --     ConstructorArgs [] -> handlerRetType
-                --     ConstructorArgs as ->
-                --         let nfType :: Type
-                --             nfType = AppT (ConT nfName) (LitT bodyTag)
-                --         in  AppT (AppT ArrowT (foldl AppT nfType as)) handlerRetType
 
             let funBodyBase = AppE (VarE runnerName) $ foldl
                     AppE
@@ -643,10 +645,6 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
 
             let funSig :: Dec
                 funSig = SigD handlerName $ kuken actionType' cArgs ty
-              --  funSig :: Dec
-              --  funSig = SigD handlerName . AppT (AppT ArrowT runnerType) $ case cArgs of
-              --      ConstructorArgs [] -> handlerRetType
-              --      ConstructorArgs (ty':_) -> AppT (AppT ArrowT ty') handlerRetType
 
                 funBodyBase = AppE (VarE runnerName) $
                     AppE
@@ -670,11 +668,34 @@ mkApiPieceHandler actionType apiPiece = enterApiPiece apiPiece $  do
             runnerName     <- lift $ newName "runner"
 
             funSig <- lift $ do
-                returnSig <- [t| Server $(pure $ ConT targetApiTypeName) |]
+                returnSig <- [t| forall m. (MonadUnliftIO m, MonadThrow m)
+                                 =>  ServerT $(pure $ ConT targetApiTypeName) m |]
+                runnerType <-
+                             [t| forall m. (MonadThrow m, MonadUnliftIO m)
+                                        => ActionRunner m $(actionType)
+                                        -> ServerT $(pure $ ConT targetApiTypeName) m
+                               |]
                 params <- case cArgs ^. typed  of
-                    [] -> [t| $(pure runnerType) -> $(pure returnSig) |]
-                    ts -> pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
-                                (runnerType : ts <> [returnSig])
+                    [] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
+                                        => ActionRunner m $(actionType)
+                                        -> ServerT $(pure $ ConT targetApiTypeName) m
+                               |]
+                    -- FIXME: This sucks, obviously!
+                    [t] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
+                                        => ActionRunner m $(actionType)
+                                        -> $(pure t)
+                                        -> ServerT $(pure $ ConT targetApiTypeName) m
+                               |]
+                    [t1,t2] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
+                                        => ActionRunner m $(actionType)
+                                        -> $(pure t1)
+                                        -> $(pure t2)
+                                        -> ServerT $(pure $ ConT targetApiTypeName) m
+                               |]
+                    ts -> [t| () |]
+
+                               -- pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
+                               -- (runnerType : ts <> [returnSig])
                 SigD handlerName <$> pure params
 
 
