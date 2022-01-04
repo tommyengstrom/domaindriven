@@ -15,6 +15,7 @@ import qualified Data.Map                                     as M
 import qualified Data.Text                                    as T
 import           DomainDriven.Config            ( ServerConfig(..) )
 import           DomainDriven.Internal.Class
+import           DomainDriven.Server.Helpers
 import           DomainDriven.Server.Types
 import           Language.Haskell.TH
 import           Prelude
