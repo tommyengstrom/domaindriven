@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 664abedfdd2bab8c4f46102cd76fd0cd513715c904ce23079eca2a28f1b151d7
+-- hash: e63d2f1e7d979e94f4a6a81c12440f713120048c4f2d15bf28daa90d79225fe2
 
 name:           domain-driven
 version:        0.1.0.0
@@ -36,6 +36,8 @@ library
       DomainDriven.Persistance.ForgetfulInMemory
       DomainDriven.Persistance.PostgresIORefState
       DomainDriven.Server
+      DomainDriven.Server.TH
+      DomainDriven.Server.Types
   other-modules:
       Paths_domain_driven
   hs-source-dirs:
