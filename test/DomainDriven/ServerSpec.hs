@@ -26,7 +26,7 @@ $(mkServer storeActionConfig ''StoreAction)
 
 buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
-search :: Text -> ClientM [ItemInfo]
+search :: Text -> Maybe Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
 restock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
 addItem :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey

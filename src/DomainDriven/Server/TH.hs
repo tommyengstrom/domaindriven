@@ -306,7 +306,7 @@ mkQueryParams (ConstructorArgs args) = do
     let mkTyName :: Name -> Q Type
         mkTyName n = pure . LitT . StrTyLit $ n ^. unqualifiedString
     flip traverse args $ \case
-        ty@(AppT may'  (ConT n)) | may' == may ->
+        (AppT may'  ty@(ConT n)) | may' == may ->
             lift
                 [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]
         ty@(ConT n) ->
@@ -515,34 +515,12 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             runnerName     <- lift $ newName "runner"
 
             funSig <- lift $ do
-                returnSig <- [t| forall m. (MonadUnliftIO m, MonadThrow m)
-                                 =>  ServerT $(pure $ ConT targetApiTypeName) m |]
-                runnerType <-
-                             [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                                        => ActionRunner m $(pure actionType')
-                                        -> ServerT $(pure $ ConT targetApiTypeName) m
-                               |]
-                params <- case cArgs ^. typed  of
-                    [] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                                        => ActionRunner m $(pure actionType')
-                                        -> ServerT $(pure $ ConT targetApiTypeName) m
-                               |]
-                    -- FIXME: This sucks, obviously!
-                    [t] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                                        => ActionRunner m $(pure actionType')
-                                        -> $(pure t)
-                                        -> ServerT $(pure $ ConT targetApiTypeName) m
-                               |]
-                    [t1,t2] ->  [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                                        => ActionRunner m $(pure actionType')
-                                        -> $(pure t1)
-                                        -> $(pure t2)
-                                        -> ServerT $(pure $ ConT targetApiTypeName) m
-                               |]
-                    ts -> [t| () |]
-
-                               -- pure $ foldr1 (\b a -> AppT (AppT ArrowT b) a)
-                               -- (runnerType : ts <> [returnSig])
+                let params = withForall $ mkFunction $
+                        [ actionRunner actionType']
+                        <> cArgs ^. typed @[Type]
+                        <> [ConT ''ServerT
+                            `AppT` (ConT targetApiTypeName)
+                            `AppT` (VarT runnerMonadName)]
                 SigD handlerName <$> pure params
 
 
