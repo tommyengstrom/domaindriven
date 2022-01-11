@@ -308,7 +308,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     applyEvent pg = app pg
     getModel pg = do
         conn <- getConnection pg
-        getModel' conn pg
+        withTransaction conn $ getModel' conn pg
 
     getEvents pg = do
         conn <- getConnection pg
