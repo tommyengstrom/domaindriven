@@ -317,6 +317,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
+
 refreshModel :: (Typeable e, FromJSON e) => PostgresEvent m e -> IO (m, EventNumber)
 refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
@@ -350,7 +351,9 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
                 conn
                 ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
             (returnFun, evs) <- cmd
-            m                <- getModel pg
+            -- We hold the lock so model must be up to date, thus we can just grab it
+            -- from the state
+            m                <- fst <$> readIORef (modelIORef pg)
             storedEvs        <- traverse toStored evs
             let newM = foldl' (app pg) m storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs
