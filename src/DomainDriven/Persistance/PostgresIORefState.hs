@@ -101,10 +101,9 @@ fromStateRow = state
 -- | Create the table required for storing state and events, if they do not yet exist.
 createEventTable :: (FromJSON e, Typeable e) => PostgresEvent m e -> IO ()
 createEventTable runner = do
-    -- withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
     conn <- getConnection runner
     void (getModel runner)
-        `catch` (const @_ @SqlError $ withTransaction conn $ do
+        `catch` (const @_ @SqlError $ do
                     let etName = eventTableName runner
                     _ <- createEventTable' conn etName
                     void $ refreshModel conn runner
@@ -308,18 +307,21 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     type Event (PostgresEvent m e) = e
     applyEvent pg = app pg
     getModel pg = do
-        (model, lastEventNo) <- readIORef (modelIORef pg)
-        conn                 <- getConnection pg
-        withTransaction conn $ do
-            newEvents <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
-            case newEvents of
-                [] -> pure model
-                _  -> fst <$> refreshModel conn pg -- The model must be updated within a transaction
+        conn <- getConnection pg
+        getModel' conn pg
 
     getEvents pg = do
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
+getModel'
+    :: forall e m . (FromJSON e, Typeable e) => Connection -> PostgresEvent m e -> IO m
+getModel' conn pg = do
+    (model, lastEventNo) <- readIORef (modelIORef pg)
+    newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
+    case newEvents of
+        [] -> pure model
+        _  -> fst <$> refreshModel conn pg -- The model must be updated within a transaction
 
 refreshModel
     :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)
@@ -350,16 +352,15 @@ exclusiveLock conn etName =
 
 instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
     transactionalUpdate pg cmd = do
-        conn <- getConnection pg
-        withTransaction conn $ do
-            let eventTable = eventTableName pg
-            exclusiveLock conn eventTable
-            (returnFun, evs) <- cmd
+        let eventTable = eventTableName pg
+        withExclusiveLock pg $ \conn -> do
+            m                <- getModel' conn pg
+            (returnFun, evs) <- cmd m
             -- We hold the lock so model must be up to date, thus we can just grab it
             -- from the state
-            m                <- fst <$> readIORef (modelIORef pg)
+            m'               <- fst <$> readIORef (modelIORef pg)
             storedEvs        <- traverse toStored evs
-            let newM = foldl' (app pg) m storedEvs
+            let newM = foldl' (app pg) m' storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs
             _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
             pure $ returnFun newM

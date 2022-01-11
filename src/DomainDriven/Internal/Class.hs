@@ -82,7 +82,7 @@ class ReadModel p where
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
 
 class ReadModel p  => WriteModel p where
-    transactionalUpdate :: p -> IO (Model p -> a, [Event p]) -> IO a
+    transactionalUpdate :: p -> (Model p -> IO (Model p -> a, [Event p])) -> IO a
 
 
 runAction
@@ -93,7 +93,7 @@ runAction
     -> IO ret
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< getModel p
-    Cmd   m -> transactionalUpdate p $ m =<< getModel p
+    Cmd   m -> transactionalUpdate p m
 
 
 
