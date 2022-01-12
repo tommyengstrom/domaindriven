@@ -104,8 +104,9 @@ createEventTable runner = do
     conn <- getConnection runner
     void (getModel runner)
         `catch` (const @_ @SqlError $ do
-                    _ <- createEventTable' conn (eventTableName runner)
-                    void $ refreshModel runner
+                    let etName = eventTableName runner
+                    _ <- createEventTable' conn etName
+                    void $ refreshModel conn runner
                 )
 createEventTable' :: Connection -> EventTableName -> IO Int64
 createEventTable' conn eventTable =
@@ -306,53 +307,60 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     type Event (PostgresEvent m e) = e
     applyEvent pg = app pg
     getModel pg = do
-        (model, lastEventNo) <- readIORef (modelIORef pg)
-        conn                 <- getConnection pg
-        newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
-        case newEvents of
-            [] -> pure model
-            _  -> fst <$> refreshModel pg -- The model must be updated within a transaction
+        conn <- getConnection pg
+        withTransaction conn $ getModel' conn pg
 
     getEvents pg = do
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-refreshModel :: (Typeable e, FromJSON e) => PostgresEvent m e -> IO (m, EventNumber)
-refreshModel pg = do
+getModel'
+    :: forall e m . (FromJSON e, Typeable e) => Connection -> PostgresEvent m e -> IO m
+getModel' conn pg = do
+    (model, lastEventNo) <- readIORef (modelIORef pg)
+    newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
+    case newEvents of
+        [] -> pure model
+        _  -> fst <$> refreshModel conn pg -- The model must be updated within a transaction
+
+refreshModel
+    :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)
+refreshModel conn pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
-    withExclusiveLock pg $ \conn -> do
-        (model    , lastEventNo   ) <- readIORef (modelIORef pg)
-        (newEvents, lastNewEventNo) <- do
-            (evs, nos) <- unzip <$> queryEventsAfter conn (eventTableName pg) lastEventNo
-            pure (evs, foldl' max 0 nos)
-        case newEvents of
-            [] -> pure (model, lastEventNo)
-            _  -> do
-                let newModel = foldl' (app pg) model newEvents
-                _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
-                pure (newModel, lastNewEventNo)
+    exclusiveLock conn (eventTableName pg)
+    (model    , lastEventNo   ) <- readIORef (modelIORef pg)
+    (newEvents, lastNewEventNo) <- do
+        (evs, nos) <- unzip <$> queryEventsAfter conn (eventTableName pg) lastEventNo
+        pure (evs, foldl' max 0 nos)
+    case newEvents of
+        [] -> pure (model, lastEventNo)
+        _  -> do
+            let newModel = foldl' (app pg) model newEvents
+            _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
+            pure (newModel, lastNewEventNo)
 
 withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
 withExclusiveLock pg f = do
     conn <- getConnection pg
     withTransaction conn $ do
-        _ <- execute_
-            conn
-            ("lock \"" <> fromString (eventTableName pg) <> "\" in exclusive mode")
+        exclusiveLock conn (eventTableName pg)
         f conn
+
+exclusiveLock :: Connection -> EventTableName -> IO ()
+exclusiveLock conn etName =
+    () <$ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
     transactionalUpdate pg cmd = do
-        conn <- getConnection pg
-        withTransaction conn $ do
-            let eventTable = eventTableName pg
-            _ <- execute_
-                conn
-                ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            (returnFun, evs) <- cmd
-            m                <- getModel pg
+        let eventTable = eventTableName pg
+        withExclusiveLock pg $ \conn -> do
+            m                <- getModel' conn pg
+            (returnFun, evs) <- cmd m
+            -- We hold the lock so model must be up to date, thus we can just grab it
+            -- from the state
+            m'               <- fst <$> readIORef (modelIORef pg)
             storedEvs        <- traverse toStored evs
-            let newM = foldl' (app pg) m storedEvs
+            let newM = foldl' (app pg) m' storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs
             _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
             pure $ returnFun newM
