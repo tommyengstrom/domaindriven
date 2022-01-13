@@ -424,84 +424,159 @@ mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
 mkApiPieceHandler :: GadtType -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPiece $  do
     case apiPiece of
-        Endpoint cName cArgs hs mut ty -> do
+        Endpoint cName cArgs hs Immutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
 
-            (funType, funClause) <- case mut of
-                Immutable -> do
-                    let funBodyBase = AppE (VarE runnerName) $ foldl
-                            AppE
-                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                            (fmap VarE varNames)
+            let funSig :: Dec
+                funSig = SigD handlerName
+                 $ mkQueryHandlerSignature gadtType cArgs ty
 
-                        funBody = case ty ^. typed of
-                            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
-                            _        -> pure $ funBodyBase
-                    funClause <- lift $ clause
-                        (fmap (pure . VarP) (runnerName:varNames ))
-                        (normalB [|  $(funBody)  |])
-                        []
-                    pure (mkQueryHandlerSignature gadtType cArgs ty, funClause)
-                Mutable -> do
-                    (funType, varPat, varExp, funBody) <-
-                        if hasJsonContentType hs then do
-                            let nfName :: Name
-                                nfName = mkName $ "NamedFields" <> show nrArgs
-                            let varPat :: Pat
-                                varPat = ConP nfName (fmap VarP varNames)
+                funBodyBase = AppE (VarE runnerName) $ foldl
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (fmap VarE varNames)
 
+                funBody = case ty ^. typed of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (fmap (pure . VarP) (runnerName:varNames ))
+                (normalB [|  $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            varNames       <- lift $ replicateM nrArgs (newName "arg")
+            handlerName    <- askHandlerName
+            runnerName     <- lift $ newName "runner"
+            let varPat :: Pat
+                varPat = ConP nfName (fmap VarP varNames)
 
+                nfName :: Name
+                nfName = mkName $ "NamedFields" <> show nrArgs
 
-                            funType <- mkCmdHandlerSignature actionType' cName cArgs ty
+            funSig <- SigD handlerName <$> mkCmdHandlerSignature actionType' cName cArgs ty
 
-                            let funBodyBase = AppE (VarE runnerName) $ foldl
-                                    AppE
-                                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                                    (fmap VarE varNames)
+            let funBodyBase = AppE (VarE runnerName) $ foldl
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (fmap VarE varNames)
 
-                                funBody = case ty ^. typed of
-                                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
-                                    _        -> pure $ funBodyBase
-                            pure ( funType
-                                 , varPat
-                                 , fmap VarE varNames
-                                 , funBody
-                                 )
-                        else do
-                            unless (nrArgs < 2) $
-                                fail "Only one argument is supported for non-JSON request bodies"
-                            varName       <- lift $ newName "arg"
+                funBody = case ty ^. typed of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                (normalB [|  $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+        Endpoint _cName cArgs _hs Mutable ty -> do
+            -- FIXME: For non-JSON request bodies we support only one argument.
+            -- Combining JSON with other content types do not work properly at this point.
+            -- It could probably be fixed by adding MimeRender instances to NamedField1
+            -- that just uses the underlying MimeRender.
+            let nrArgs :: Int
+                nrArgs = length $ cArgs ^. typed @[Type]
+            unless (nrArgs < 2) $
+                fail "Only one argument is supported for non-JSON request bodies"
+            varName       <- lift $ newName "arg"
+            handlerName    <- askHandlerName
+            runnerName     <- lift $ newName "runner"
+            let varPat :: Pat
+                varPat = VarP varName
 
-                            let varPat :: Pat
-                                varPat = VarP varName
+            let funSig :: Dec
+                funSig = SigD handlerName $ mkQueryHandlerSignature gadtType cArgs ty
 
-                                funBodyBase = AppE (VarE runnerName) $
-                                    AppE
-                                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                                    (VarE varName)
+                funBodyBase = AppE (VarE runnerName) $
+                    AppE
+                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                    (VarE varName)
 
-                                funBody = case ty ^. typed of
-                                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
-                                    _        -> pure $ funBodyBase
-                            pure ( mkQueryHandlerSignature gadtType cArgs ty
-                                 , varPat
-                                 , [VarE varName]
-                                 , funBody
-                                 )
-                    let funBodyBase = AppE (VarE runnerName) $ foldl
-                            AppE
-                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                            varExp
-                    funClause <- lift $ clause
-                        (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                        (normalB [|  $(funBody)  |])
-                        []
-                    pure (mkQueryHandlerSignature gadtType cArgs ty, funClause)
-            pure [SigD handlerName funType, FunD handlerName [funClause]]
+                funBody = case ty ^. typed of
+                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+                    _        -> pure $ funBodyBase
+            funClause <- lift $ clause
+                (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                (normalB [|  $(funBody)  |])
+                []
+            pure [funSig, FunD handlerName [funClause]]
+--            (funType, funClause) <- case mut of
+--                Immutable -> do
+--                    let funBodyBase = AppE (VarE runnerName) $ foldl
+--                            AppE
+--                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
+--                            (fmap VarE varNames)
+--
+--                        funBody = case ty ^. typed of
+--                            TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+--                            _        -> pure $ funBodyBase
+--                    funClause <- lift $ clause
+--                        (fmap (pure . VarP) (runnerName:varNames ))
+--                        (normalB [|  $(funBody)  |])
+--                        []
+--                    pure (mkQueryHandlerSignature gadtType cArgs ty, funClause)
+--                Mutable -> do
+--                    (funType, varPat, varExp, funBody) <-
+--                        if hasJsonContentType hs then do
+--                            let nfName :: Name
+--                                nfName = mkName $ "NamedFields" <> show nrArgs
+--                            let varPat :: Pat
+--                                varPat = ConP nfName (fmap VarP varNames)
+--
+--
+--
+--                            funType <- mkCmdHandlerSignature actionType' cName cArgs ty
+--
+--                            let funBodyBase = AppE (VarE runnerName) $ foldl
+--                                    AppE
+--                                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+--                                    (fmap VarE varNames)
+--
+--                                funBody = case ty ^. typed of
+--                                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+--                                    _        -> pure $ funBodyBase
+--                            pure ( funType
+--                                 , varPat
+--                                 , fmap VarE varNames
+--                                 , funBody
+--                                 )
+--                        else do
+--                            unless (nrArgs < 2) $
+--                                fail "Only one argument is supported for non-JSON request bodies"
+--                            varName       <- lift $ newName "arg"
+--
+--                            let varPat :: Pat
+--                                varPat = VarP varName
+--
+--                                funBodyBase = AppE (VarE runnerName) $
+--                                    AppE
+--                                    (ConE $ apiPiece ^. typed @ConstructorName . typed)
+--                                    (VarE varName)
+--
+--                                funBody = case ty ^. typed of
+--                                    TupleT 0 -> [| fmap (const NoContent) $(pure funBodyBase) |]
+--                                    _        -> pure $ funBodyBase
+--                            pure ( mkQueryHandlerSignature gadtType cArgs ty
+--                                 , varPat
+--                                 , [VarE varName]
+--                                 , funBody
+--                                 )
+--                    let funBodyBase = AppE (VarE runnerName) $ foldl
+--                            AppE
+--                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
+--                            varExp
+--                    funClause <- lift $ clause
+--                        (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+--                        (normalB [|  $(funBody)  |])
+--                        []
+--                    pure (mkQueryHandlerSignature gadtType cArgs ty, funClause)
+--            pure [SigD handlerName funType, FunD handlerName [funClause]]
         SubApi cName cArgs spec -> do
             -- Apply the arguments to the constructor before referencing the subserver
             varNames  <- lift $ replicateM (length (cArgs ^. typed @[Type])) (newName "arg")

@@ -359,9 +359,9 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             _ <- execute_
                 conn
                 ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            m                <- getModel pg
+            m                <- getModel' conn pg
             (returnFun, evs) <- runInIO $ cmd m
-            m'               <- getModel pg
+            m'               <- fst <$> readIORef (modelIORef pg)
             storedEvs        <- traverse toStored evs
             let newM = foldl' (app pg) m' storedEvs
             lastEventNo <- writeEvents conn eventTable storedEvs

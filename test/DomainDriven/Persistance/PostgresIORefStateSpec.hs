@@ -210,18 +210,22 @@ storeModelSpec = describe "Test basic functionality" $ do
             `shouldSatisfy` (\(after', before') -> after' - before' == n)
     it "Running a command where there are unevaliated events" $ \p -> do
         conn <- getConnection p
-        key  <- mkId
+        key1 <- mkId
+        key2 <- mkId
         let iKey = Store.ItemKey nil
         now <- getCurrentTime
-        _   <- execute
+        _   <- executeMany
             conn
             (  "insert into \""
             <> fromString (eventTableName p)
             <> "\" (id, timestamp, event) \
                 \values (?, ?, ?)"
             )
-            ( key
-            , now
-            , encode $ Store.AddedItem iKey (Store.ItemName "test item") (Store.Price 10)
-            )
+            [ ( key1
+              , now
+              , encode
+                  $ Store.AddedItem iKey (Store.ItemName "test item") (Store.Price 10)
+              )
+            , (key2, now, encode $ Store.Restocked iKey (Store.Quantity 10))
+            ]
         runAction p Store.handleStoreAction $ Store.BuyItem iKey (Store.Quantity 1)
