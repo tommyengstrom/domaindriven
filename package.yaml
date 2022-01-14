@@ -96,6 +96,7 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -ddump-splices
     dependencies:
     - domain-driven
     - hspec
@@ -124,3 +125,4 @@ executables:
     - -with-rtsopts=-N
     - -Werror
     - -Wall
+    - -ddump-splices

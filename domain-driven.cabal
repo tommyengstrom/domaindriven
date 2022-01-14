@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 431781d85a82b21d7b1d9578b2373549d7be1e7110cf1a448489fbf0057e2caf
+-- hash: 8298f37e20515a887b2ed1c276ad538681fa0521181277637d01a260dc3b3db6
 
 name:           domain-driven
 version:        0.1.0.0
@@ -36,6 +36,9 @@ library
       DomainDriven.Persistance.ForgetfulInMemory
       DomainDriven.Persistance.PostgresIORefState
       DomainDriven.Server
+      DomainDriven.Server.Helpers
+      DomainDriven.Server.TH
+      DomainDriven.Server.Types
   other-modules:
       Paths_domain_driven
   hs-source-dirs:
@@ -108,6 +111,7 @@ library
 executable simple
   main-is: Main.hs
   other-modules:
+      Action
       Paths_domain_driven
   hs-source-dirs:
       examples/simple
@@ -143,7 +147,7 @@ executable simple
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
   build-depends:
       aeson
     , aeson-pretty
@@ -224,7 +228,7 @@ test-suite domain-driven-test
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -ddump-splices
   build-depends:
       QuickCheck
     , aeson

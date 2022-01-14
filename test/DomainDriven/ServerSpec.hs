@@ -4,6 +4,8 @@ module DomainDriven.ServerSpec where
 
 import           Control.Concurrent
 import           Control.Concurrent.Async
+import           Control.Monad.Catch            ( try )
+import           Control.Monad.Except
 import           Data.Text                      ( Text )
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
@@ -24,7 +26,7 @@ $(mkServer storeActionConfig ''StoreAction)
 
 buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
-search :: Text -> ClientM [ItemInfo]
+search :: Text -> Maybe Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
 restock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
 addItem :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
@@ -46,8 +48,9 @@ withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
-    server <- async . run 9898 $ serve
+    server <- async . run 9898 $ serve (Proxy @StoreActionApi) $ hoistServer
         (Proxy @StoreActionApi)
+        (Handler . ExceptT . try)
         (storeActionServer $ runAction p handleStoreAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
@@ -57,8 +60,9 @@ withTestServer :: IO () -> IO ()
 withTestServer runTests = do
     p      <- createForgetful (\m _ -> m) ()
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
-    server <- async . run 9898 $ serve
+    server <- async . run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
         (Proxy @TestActionApi)
+        (Handler . ExceptT . try)
         (testActionServer $ runAction p handleTestAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests

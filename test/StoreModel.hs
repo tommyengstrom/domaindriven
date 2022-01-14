@@ -4,7 +4,10 @@ module StoreModel where
 
 
 import           Control.Monad                  ( when )
-import           Control.Monad.Catch            ( throwM )
+import           Control.Monad.Catch            ( MonadThrow
+                                                , throwM
+                                                )
+import           Control.Monad.IO.Class
 import           Data.Aeson                     ( FromJSON
                                                 , FromJSONKey
                                                 , ToJSON
@@ -23,6 +26,7 @@ import           DomainDriven.Config
 import           GHC.Generics                   ( Generic )
 import           Prelude
 import           Servant
+import           UnliftIO                       ( MonadUnliftIO )
 
 ------------------------------------------------------------------------------------------
 -- Defining the types we need                                                           --
@@ -52,12 +56,13 @@ data ItemInfo = ItemInfo
     , price    :: Price
     }
     deriving (Show, Eq, Generic, ToJSON, FromJSON, ToSchema)
+
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
     ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> StoreAction Query [ItemInfo]
+    Search ::Text -> Maybe Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
     deriving HasApiOptions
@@ -89,21 +94,25 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 -- Action handlers                                                                      --
 ------------------------------------------------------------------------------------------
-handleStoreAction :: ActionHandler StoreModel StoreEvent StoreAction
+handleStoreAction
+    :: (MonadUnliftIO m, MonadThrow m)
+    => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
         pure (const (), [BoughtItem iKey quantity'])
-    ListItems -> Query $ pure . M.elems
-    Search t  -> Query $ \m -> do
+    ListItems  -> Query $ pure . M.elems
+    Search t _ -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
             matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
         pure . filter matches $ M.elems m
     AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
 
-handleAdminAction :: ActionHandler StoreModel StoreEvent AdminAction
+handleAdminAction
+    :: (MonadUnliftIO m, MonadThrow m)
+    => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
 handleAdminAction = \case
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
@@ -115,13 +124,17 @@ handleAdminAction = \case
         when (M.notMember iKey m) $ throwM err404
         pure (const (), [RemovedItem iKey])
 
-handleItemAction :: ItemKey -> ActionHandler StoreModel StoreEvent ItemAction
+handleItemAction
+    :: forall m
+     . (MonadUnliftIO m, MonadThrow m)
+    => ItemKey
+    -> ActionHandler StoreModel StoreEvent m ItemAction
 handleItemAction iKey = \case
     StockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
   where
-    getItem :: StoreModel -> IO ItemInfo
+    getItem :: StoreModel -> m ItemInfo
     getItem = maybe (throwM err404) pure . M.lookup iKey
 ------------------------------------------------------------------------------------------
 -- Event handler                                                                        --

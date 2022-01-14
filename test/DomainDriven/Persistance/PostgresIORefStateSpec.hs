@@ -4,7 +4,9 @@ module DomainDriven.Persistance.PostgresIORefStateSpec where
 
 import           Control.Concurrent.Async
 import           Control.Monad
-import           Data.Aeson                     ( Value )
+import           Data.Aeson                     ( Value
+                                                , encode
+                                                )
 import qualified Data.Map                                     as M
 import           Data.String                    ( fromString )
 import qualified Data.Text                                    as T
@@ -206,3 +208,24 @@ storeModelSpec = describe "Test basic functionality" $ do
         c1 <- runAction p Store.handleStoreAction Store.ListItems
         (length c1, length c0)
             `shouldSatisfy` (\(after', before') -> after' - before' == n)
+    it "Running a command where there are unevaliated events" $ \p -> do
+        conn <- getConnection p
+        key1 <- mkId
+        key2 <- mkId
+        let iKey = Store.ItemKey nil
+        now <- getCurrentTime
+        _   <- executeMany
+            conn
+            (  "insert into \""
+            <> fromString (eventTableName p)
+            <> "\" (id, timestamp, event) \
+                \values (?, ?, ?)"
+            )
+            [ ( key1
+              , now
+              , encode
+                  $ Store.AddedItem iKey (Store.ItemName "test item") (Store.Price 10)
+              )
+            , (key2, now, encode $ Store.Restocked iKey (Store.Quantity 10))
+            ]
+        runAction p Store.handleStoreAction $ Store.BuyItem iKey (Store.Quantity 1)
