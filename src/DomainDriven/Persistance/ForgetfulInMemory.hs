@@ -45,3 +45,11 @@ instance WriteModel (ForgetfulInMemory model e)  where
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
             pure $ returnFun newModel
+    unsafeUpdate ff evalCmd = do
+        model            <- readIORef $ stateRef ff
+        (returnFun, evs) <- evalCmd model
+        storedEvs        <- traverse toStored evs
+        let newModel = foldl' (apply ff) model storedEvs
+        modifyIORef (events ff) (<> storedEvs)
+        writeIORef (stateRef ff) newModel
+        pure $ returnFun newModel

@@ -367,6 +367,18 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             lastEventNo <- writeEvents conn eventTable storedEvs
             _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
             pure $ returnFun newM
+    unsafeUpdate pg cmd = withRunInIO $ \runInIO -> do
+        conn <- getConnection pg
+        let eventTable = eventTableName pg
+        m                <- getModel' conn pg
+        (returnFun, evs) <- runInIO $ cmd m
+        m'               <- fst <$> readIORef (modelIORef pg)
+        storedEvs        <- traverse toStored evs
+        let newM = foldl' (app pg) m' storedEvs
+        lastEventNo <- writeEvents conn eventTable storedEvs
+        _           <- writeIORef (modelIORef pg) (newM, lastEventNo)
+        pure $ returnFun newM
+
 
 migrateValue1to1
     :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()

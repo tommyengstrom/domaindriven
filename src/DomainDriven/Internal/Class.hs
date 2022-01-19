@@ -20,6 +20,7 @@ import UnliftIO
 
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
 type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
+type UnsafeCmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType '[JSON] (Verb 'GET 200 '[JSON])
 
 type family CanMutate method :: Bool where
@@ -37,6 +38,9 @@ data HandlerType method model event m a where
     Cmd :: CanMutate method ~ 'True
         => (model -> m (model -> a, [event]))
         -> HandlerType method model event m a
+    UnsafeCmd :: CanMutate method ~ 'True
+        => (model -> m (model -> a, [event]))
+        -> HandlerType method model event m a
 
 mapModel
     :: Monad m
@@ -46,6 +50,9 @@ mapModel
 mapModel f = \case
     Query h -> Query (h . f)
     Cmd   h -> Cmd $ \m -> do
+        (fm, evs) <- h $ f m
+        pure (fm . f, evs)
+    UnsafeCmd   h -> UnsafeCmd $ \m -> do
         (fm, evs) <- h $ f m
         pure (fm . f, evs)
 
@@ -59,6 +66,9 @@ mapEvent f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (ret, fmap f evs)
+    UnsafeCmd   h -> UnsafeCmd $ \m -> do
+        (ret, evs) <- h m
+        pure (ret, fmap f evs)
 
 mapResult
     :: Monad m
@@ -68,6 +78,9 @@ mapResult
 mapResult f = \case
     Query h -> Query $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
+        (ret, evs) <- h m
+        pure (f . ret, evs)
+    UnsafeCmd   h -> UnsafeCmd $ \m -> do
         (ret, evs) <- h m
         pure (f . ret, evs)
 
@@ -83,6 +96,11 @@ class ReadModel p  => WriteModel p where
                         => p
                         -> (Model p -> m (Model p -> a, [Event p]))
                         -> m a
+    unsafeUpdate :: forall m a. MonadUnliftIO m
+                        => p
+                        -> (Model p -> m (Model p -> a, [Event p]))
+                        -> m a
+
 
 
 runAction
@@ -94,6 +112,7 @@ runAction
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
     Cmd   m -> transactionalUpdate p m
+    UnsafeCmd   m -> unsafeUpdate p m
 
 
 
