@@ -290,7 +290,7 @@ writeEvents conn eventTable storedEvents = do
         )
     foldl' max 0 . fmap fromOnly <$> query_
         conn
-        ("select max(commit_number) from \"" <> fromString eventTable <> "\"")
+        ("select coalesce(max(commit_number),1) from \"" <> fromString eventTable <> "\"")
 
 -- | Keep the events and state in postgres!
 data PostgresEvent model event = PostgresEvent
