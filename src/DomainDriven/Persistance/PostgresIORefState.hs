@@ -3,6 +3,7 @@ module DomainDriven.Persistance.PostgresIORefState where
 
 import           Control.Monad
 import           Control.Monad.Catch
+import           Control.Monad.IO.Class
 import           Data.Aeson
 import           Data.IORef
 import           Data.Int
@@ -13,13 +14,14 @@ import           Data.Time
 import           Data.Typeable
 import           Data.UUID                      ( UUID )
 import           Database.PostgreSQL.Simple                   as PG
+import qualified Database.PostgreSQL.Simple.Cursor            as Cursor
 import           Database.PostgreSQL.Simple.FromField         as FF
 import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
 import           Prelude
+import qualified Streamly.Prelude                             as S
 import           UnliftIO                       ( MonadUnliftIO(..) )
-
 
 
 data PersistanceError
@@ -243,6 +245,12 @@ queryEvents conn eventTable = traverse fromEventRow =<< query_
     <> "\" order by commit_number"
     )
 
+eventQuery :: EventTableName -> PG.Query
+eventQuery eventTable =
+    "select id, commit_number,timestamp,event from \""
+        <> fromString eventTable
+        <> "\" order by commit_number"
+
 
 queryEventsAfter
     :: (Typeable a, FromJSON a)
@@ -314,6 +322,22 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     getEvents pg = do
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
+
+    eventStream pg = do
+        conn   <- liftIO $ getConnection pg
+        cursor <- liftIO $ Cursor.declareCursor conn (eventQuery (eventTableName pg))
+        undefined cursor
+
+unfoldCursor :: forall r . FromRow r => Cursor.Cursor -> S.SerialT IO [r]
+unfoldCursor = S.unfoldrM kuken
+  where
+    kuken :: Cursor.Cursor -> IO (Maybe ([r], Cursor.Cursor))
+    kuken cursor = do
+        r <- Cursor.foldForward cursor 1 (\a r -> pure (r : a)) []
+        case r of
+            Left  [] -> pure Nothing
+            Left  a  -> pure $ Just (a, cursor)
+            Right a  -> pure $ Just (a, cursor)
 
 getModel'
     :: forall e m . (FromJSON e, Typeable e) => Connection -> PostgresEvent m e -> IO m

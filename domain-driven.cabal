@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8298f37e20515a887b2ed1c276ad538681fa0521181277637d01a260dc3b3db6
+-- hash: 88d23d4fd21efc1df4e1ea79f6ad928a96e542de2edadb9611c4484f5c3891d4
 
 name:           domain-driven
 version:        0.1.0.0
@@ -98,6 +98,7 @@ library
     , servant-server
     , stm
     , streaming
+    , streamly
     , template-haskell
     , text
     , time
@@ -172,6 +173,7 @@ executable simple
     , servant-server
     , stm
     , streaming
+    , streamly
     , template-haskell
     , text
     , time
@@ -260,6 +262,7 @@ test-suite domain-driven-test
     , servant-server
     , stm
     , streaming
+    , streamly
     , template-haskell
     , text
     , time

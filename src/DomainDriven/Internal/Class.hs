@@ -16,7 +16,7 @@ import           Servant
 import           Data.Kind
 import           Data.UUID                      ( UUID )
 import UnliftIO
-
+import Streamly.Prelude (SerialT)
 
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
 type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
@@ -77,6 +77,7 @@ class ReadModel p where
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: p -> IO (Model p)
     getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
+    eventStream :: p -> SerialT IO (Event p)
 
 class ReadModel p  => WriteModel p where
     transactionalUpdate :: forall m a. MonadUnliftIO m

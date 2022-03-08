@@ -46,6 +46,7 @@ dependencies:
 - time
 - transformers
 - vector
+- streamly
 - unordered-containers
 - uuid
 - unliftio

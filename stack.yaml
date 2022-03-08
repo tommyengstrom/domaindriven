@@ -37,7 +37,9 @@ packages:
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
-# extra-deps: []
+extra-deps:
+  - streamly-0.8.2
+  - unicode-data-0.3.0@sha256:0545e079705a5381d0893f8fe8daaa08fc9174baeab269b9cf651817d8eadbc6,5123
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
