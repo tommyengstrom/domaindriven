@@ -76,8 +76,8 @@ class ReadModel p where
     type Event p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: p -> IO (Model p)
-    getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
-    eventStream :: p -> SerialT IO (Event p)
+    getEventList :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
+    getEventStream :: p -> SerialT IO (Stored (Event p))
 
 class ReadModel p  => WriteModel p where
     transactionalUpdate :: forall m a. MonadUnliftIO m

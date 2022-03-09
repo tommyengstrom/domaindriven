@@ -20,6 +20,7 @@ import           DomainDriven.Persistance.PostgresIORefState
 import           Prelude
 import           Safe                           ( headNote )
 import qualified StoreModel                                   as Store
+import qualified Streamly.Prelude                             as S
 import           Test.Hspec
 
 eventTable :: EventTable
@@ -94,8 +95,13 @@ writeEventsSpec = describe "queryEvents" $ do
             evs
         conn <- getConnection p
         _    <- writeEvents conn (getEventTableName eventTable) storedEvs
-        evs' <- getEvents p
+        evs' <- getEventList p
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
+    it "getEventList and getEventStream yields the same result" $ \p -> do
+        evList   <- getEventList p
+        evStream <- S.toList $ getEventStream p
+        evList `shouldSatisfy` not . null
+        evList `shouldBe` evStream
 
 
 

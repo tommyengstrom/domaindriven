@@ -20,6 +20,7 @@ import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
 import           Prelude
+import qualified Streamly.Data.Unfold                         as Unfold
 import qualified Streamly.Prelude                             as S
 import           UnliftIO                       ( MonadUnliftIO(..) )
 
@@ -319,21 +320,25 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         withTransaction conn $ getModel' conn pg
 
-    getEvents pg = do
+    getEventList pg = do
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-    eventStream pg = do
+    getEventStream pg = do
         conn   <- liftIO $ getConnection pg
         cursor <- liftIO $ Cursor.declareCursor conn (eventQuery (eventTableName pg))
-        undefined cursor
+        parse $ S.unfoldMany Unfold.fromList $ streamCursor 100 cursor -- FIXME: Don't hardcode chunk size!
+      where
+        parse :: S.SerialT IO EventRowOut -> S.SerialT IO (Stored e)
+        parse = S.mapM (fmap fst . fromEventRow)
 
-unfoldCursor :: forall r . FromRow r => Cursor.Cursor -> S.SerialT IO [r]
-unfoldCursor = S.unfoldrM kuken
+
+streamCursor :: Int -> Cursor.Cursor -> S.SerialT IO [EventRowOut]
+streamCursor chunkSize = S.unfoldrM step
   where
-    kuken :: Cursor.Cursor -> IO (Maybe ([r], Cursor.Cursor))
-    kuken cursor = do
-        r <- Cursor.foldForward cursor 1 (\a r -> pure (r : a)) []
+    step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
+    step cursor = do
+        r <- Cursor.foldForward cursor chunkSize (\a r -> pure (r : a)) []
         case r of
             Left  [] -> pure Nothing
             Left  a  -> pure $ Just (a, cursor)

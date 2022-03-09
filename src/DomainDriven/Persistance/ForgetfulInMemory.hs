@@ -33,7 +33,7 @@ instance ReadModel (ForgetfulInMemory model e) where
     type Event (ForgetfulInMemory model e) = e
     applyEvent ff = apply ff
     getModel ff = readIORef $ stateRef ff
-    getEvents ff = readIORef $ events ff
+    getEventList ff = readIORef $ events ff
 
 instance WriteModel (ForgetfulInMemory model e)  where
     transactionalUpdate ff evalCmd =
