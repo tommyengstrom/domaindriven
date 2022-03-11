@@ -22,6 +22,7 @@ import           Safe                           ( headNote )
 import qualified StoreModel                                   as Store
 import qualified Streamly.Prelude                             as S
 import           Test.Hspec
+-- import           Text.Pretty.Simple
 
 eventTable :: EventTable
 eventTable =
@@ -100,7 +101,8 @@ writeEventsSpec = describe "queryEvents" $ do
     it "getEventList and getEventStream yields the same result" $ \p -> do
         evList   <- getEventList p
         evStream <- S.toList $ getEventStream p
-        evList `shouldSatisfy` not . null
+        -- pPrint evList
+        evList `shouldSatisfy` (> 1) . length -- must be at least two to verify order
         evList `shouldBe` evStream
 
 

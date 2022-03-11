@@ -246,12 +246,6 @@ queryEvents conn eventTable = traverse fromEventRow =<< query_
     <> "\" order by commit_number"
     )
 
-eventQuery :: EventTableName -> PG.Query
-eventQuery eventTable =
-    "select id, commit_number,timestamp,event from \""
-        <> fromString eventTable
-        <> "\" order by commit_number"
-
 
 queryEventsAfter
     :: (Typeable a, FromJSON a)
@@ -325,24 +319,37 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         fmap fst <$> queryEvents conn (eventTableName pg)
 
     getEventStream pg = do
-        conn   <- liftIO $ getConnection pg
-        cursor <- liftIO $ Cursor.declareCursor conn (eventQuery (eventTableName pg))
-        parse $ S.unfoldMany Unfold.fromList $ streamCursor 100 cursor -- FIXME: Don't hardcode chunk size!
-      where
-        parse :: S.SerialT IO EventRowOut -> S.SerialT IO (Stored e)
-        parse = S.mapM (fmap fst . fromEventRow)
+        S.mapM (fmap fst . fromEventRow) $ S.unfoldMany Unfold.fromList $ mkEventStream
+            100
+            (getConnection pg)
+            (eventTableName pg)
 
 
-streamCursor :: Int -> Cursor.Cursor -> S.SerialT IO [EventRowOut]
-streamCursor chunkSize = S.unfoldrM step
-  where
-    step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
-    step cursor = do
-        r <- Cursor.foldForward cursor chunkSize (\a r -> pure (r : a)) []
-        case r of
-            Left  [] -> pure Nothing
-            Left  a  -> pure $ Just (a, cursor)
-            Right a  -> pure $ Just (a, cursor)
+mkEventStream :: Int -> IO Connection -> EventTableName -> S.SerialT IO [EventRowOut]
+mkEventStream chunkSize getConn et = do
+    conn <- liftIO getConn
+    -- FIXME: My gut tells me I may have some issue here as I'm starting a transaction and
+    -- potentially this could fail and linger. Normally, if this was in IO, I could
+    -- just wrap it in a bracket but here I cannot.
+    -- Is this an issue? How do I fix it?
+    liftIO $ PG.begin conn
+    let step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
+        step cursor = do
+            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (r : a)) []
+            case r of
+                Left  [] -> Nothing <$ liftIO (PG.rollback conn)
+                Left  a  -> pure $ Just (a, cursor)
+                Right a  -> pure $ Just (a, cursor)
+        eventQuery :: EventTableName -> PG.Query
+        eventQuery eventTable =
+            "select id, commit_number,timestamp,event from \""
+                <> fromString eventTable
+                <> "\" order by commit_number desc"
+
+
+    cursor <- liftIO $ Cursor.declareCursor conn (eventQuery et)
+    S.unfoldrM step cursor
+
 
 getModel'
     :: forall e m . (FromJSON e, Typeable e) => Connection -> PostgresEvent m e -> IO m
