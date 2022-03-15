@@ -11,6 +11,7 @@ import           Control.Lens                   ( (^.) )
 import           Data.Generics.Product
 import           Data.Time
 import           System.Random
+import           Control.DeepSeq (NFData)
 import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Kind
@@ -150,7 +151,8 @@ data Stored a = Stored
     , storedTimestamp :: UTCTime
     , storedUUID      :: UUID
     }
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable)
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable
+              , NFData)
 
 mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO
