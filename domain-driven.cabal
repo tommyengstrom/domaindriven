@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 387859e500b1028681c3c15438870a43f822cd0f32252bb1f20fb289e145464e
+-- hash: 4cfaf048a9959b8a71cb51d52ba8eb4b53b9b35a446cbf60f41188da59990ff8
 
 name:           domain-driven
 version:        0.1.0.0
@@ -324,6 +324,7 @@ benchmark domain-driven-bench
     , bytestring
     , containers
     , criterion
+    , criterion-measurement
     , deepseq
     , directory
     , domain-driven
@@ -334,6 +335,7 @@ benchmark domain-driven-bench
     , mtl
     , openapi3
     , postgresql-simple
+    , pretty-simple
     , random
     , safe
     , servant

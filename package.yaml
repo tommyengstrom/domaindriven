@@ -122,6 +122,8 @@ benchmarks:
     dependencies:
     - domain-driven
     - criterion
+    - criterion-measurement
+    - pretty-simple
 
 executables:
   simple:
