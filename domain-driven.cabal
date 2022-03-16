@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 4cfaf048a9959b8a71cb51d52ba8eb4b53b9b35a446cbf60f41188da59990ff8
+-- hash: 2da1f1a40fe1e0fd9749a10cc29a094f5f9a5a64a4f2336d11a98753acb471bd
 
 name:           domain-driven
 version:        0.1.0.0
@@ -315,7 +315,7 @@ benchmark domain-driven-bench
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -threaded -rtsopts -with-rtsopts=-s
   build-depends:
       aeson
     , aeson-pretty

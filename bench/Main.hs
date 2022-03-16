@@ -4,16 +4,17 @@ module Main where
 import           Action
 import           Criterion
 import           Criterion.Main
-import           Criterion.Measurement
-import           Criterion.Measurement.Types    ( Measured(..) )
 import qualified Database.PostgreSQL.Simple                   as PG
 import           DomainDriven
 import           DomainDriven.Internal.Class    ( toStored )
 import           DomainDriven.Persistance.PostgresIORefState
 import           DomainDriven.Server
+import           GHC.Int                        ( Int64 )
 import           Prelude
 import qualified Streamly.Prelude                             as Stream
-import           Text.Pretty.Simple             ( pPrint )
+import           System.Environment             ( getArgs )
+import           System.Exit                    ( exitFailure )
+-- import           Text.Pretty.Simple             ( pPrint )
 
 getConn :: IO PG.Connection
 getConn = PG.connect $ PG.ConnectInfo { connectHost     = "localhost"
@@ -26,41 +27,73 @@ getConn = PG.connect $ PG.ConnectInfo { connectHost     = "localhost"
 eventTable :: EventTable
 eventTable = InitialVersion "benchmark_events"
 
-nrEvents :: Int
-nrEvents = 1000000
+setupDbCheat :: IO (PostgresEvent CounterModel CounterEvent)
+setupDbCheat = do
+    conn            <- getConn
+    [PG.Only count] <- PG.query_ conn "select count(*) from benchmark_events_v1"
+    putStrLn $ "Database contains: " <> show (count :: Int64) <> " events"
+    postgresWriteModel getConn eventTable applyCounterEvent 0
 
-setupDb :: IO (PostgresEvent CounterModel CounterEvent)
-setupDb = do
+setupDbFull :: Int -> IO (PostgresEvent CounterModel CounterEvent)
+setupDbFull nrEvents = do
     conn   <- getConn
-    _      <- PG.execute_ conn "drop table if exists benchmark_events"
-    p      <- postgresWriteModel getConn eventTable applyCounterEvent 0
-    events <- traverse toStored (take nrEvents $ repeat CounterIncreased)
-    _      <- writeEvents conn (getEventTableName eventTable) events
-    pure p
-
+    _      <- PG.execute_ conn "drop table if exists benchmark_events_v1"
+    _      <- postgresWriteModel getConn eventTable applyCounterEvent 0
+    events <- traverse toStored
+                       (take nrEvents $ cycle [CounterIncreased, CounterDecreased])
+    _ <- writeEvents conn (getEventTableName eventTable) events
+    setupDbCheat
 
 $(mkServer serverConfig ''CounterCmd)
 
 main' :: IO ()
 main' = do
-    pg <- setupDb
+    pg <- setupDbCheat
     defaultMain
-        [ bench ("getModel " <> show nrEvents <> " events")
-                (nfIO $ last <$> getEventList pg)
-        , bench ("getModel " <> show nrEvents <> " events")
-                (nfIO $ Stream.last $ getEventStream pg)
+        [ bench "getEventList"   (nfIO $ last <$> getEventList pg)
+        , bench "getEventStream" (nfIO $ Stream.last $ getEventStream pg)
         ]
 
 main :: IO ()
 main = do
-    pg <- setupDb
-    putStrLn $ "Using " <> show nrEvents <> " events"
-    putStrLn "getEventList"
-    (r1, _) <- measure (nfIO $ last <$> getEventList pg) 2
-    pPrint r1
+    args <- getArgs
+    case args of
+        [] -> do
+            mainList
+            mainStream
+        ["seed", i] -> do
+            _ <- setupDbFull (read i)
+            pure ()
+        ["list"  ] -> mainList'
+        ["stream"] -> mainStream'
+        _          -> do
+            putStrLn $ "Crappy argument: " <> show args
+            exitFailure
 
-    putStrLn "getEventStream"
-    (r2, _) <- measure (nfIO $ Stream.last $ getEventStream pg) 2
-    pPrint r2
+mainList :: IO ()
+mainList = do
+    pg <- setupDbCheat
+    defaultMain
+        [bench "read last event using getEventList" (nfIO $ last <$> getEventList pg)]
 
-    print $ measAllocated r1 - measAllocated r2
+mainList' :: IO ()
+mainList' = do
+    pg <- setupDbCheat
+    putStrLn "read last event using getEventList"
+    ev <- last <$> getEventList pg
+    print ev
+
+mainStream' :: IO ()
+mainStream' = do
+    pg <- setupDbCheat
+    putStrLn "read last event using getEventStream"
+    ev <- Stream.last $ getEventStream pg
+    print ev
+
+mainStream :: IO ()
+mainStream = do
+    pg <- setupDbCheat
+    defaultMain
+        [ bench "read last event using getEventStream"
+                (nfIO $ Stream.last $ getEventStream pg)
+        ]
