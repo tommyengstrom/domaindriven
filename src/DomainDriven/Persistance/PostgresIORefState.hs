@@ -335,13 +335,25 @@ mkEventStream chunkSize getConn et = do
     -- just wrap it in a bracket but here I cannot.
     -- Is this an issue? How do I fix it?
     liftIO $ PG.begin conn
-    let step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
-        step cursor = do
-            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a <> [r])) []
+    let stream :: S.SerialT IO EventRowOut
+        stream = S.nil
+    let step' :: Cursor.Cursor -> S.SerialT IO EventRowOut
+        step' cursor = do
+            res <- Cursor.foldForward cursor chunkSize (\a r -> S.cons r a)) S.nil
             case r of
-                Left  [] -> Nothing <$ liftIO (PG.rollback conn)
+                Left  [] -> do
+                    liftIO (PG.rollback conn)
+                    error "oh fuck, something went wrong!"
                 Left  a  -> pure $ Just (a, cursor)
                 Right a  -> pure $ Just (a, cursor)
+
+    -- let step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
+    --     step cursor = do
+    --         r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a <> [r])) []
+    --         case r of
+    --             Left  [] -> Nothing <$ liftIO (PG.rollback conn)
+    --             Left  a  -> pure $ Just (a, cursor)
+    --             Right a  -> pure $ Just (a, cursor)
         eventQuery :: EventTableName -> PG.Query
         eventQuery eventTable =
             "select id, commit_number,timestamp,event from \""
