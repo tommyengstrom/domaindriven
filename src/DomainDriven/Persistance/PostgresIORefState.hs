@@ -230,6 +230,7 @@ createPostgresPersistance getConn eventTable app' seed' = do
                          , modelIORef     = ref
                          , app            = app'
                          , seed           = seed'
+                         , chunkSize      = 500
                          }
 
 
@@ -302,6 +303,7 @@ data PostgresEvent model event = PostgresEvent
     , modelIORef     :: IORef (model, EventNumber)
     , app            :: model -> Stored event -> model
     , seed           :: model
+    , chunkSize      :: Int -- ^ Number of events read from pg per batch
     }
     deriving Generic
 
@@ -320,7 +322,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
 
     getEventStream pg = do
         S.mapM (fmap fst . fromEventRow) $ S.unfoldMany Unfold.fromList $ mkEventStream
-            100
+            (chunkSize pg)
             (getConnection pg)
             (eventTableName pg)
 
@@ -335,7 +337,7 @@ mkEventStream chunkSize getConn et = do
     liftIO $ PG.begin conn
     let step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
         step cursor = do
-            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (r : a)) []
+            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a <> [r])) []
             case r of
                 Left  [] -> Nothing <$ liftIO (PG.rollback conn)
                 Left  a  -> pure $ Just (a, cursor)
@@ -344,7 +346,7 @@ mkEventStream chunkSize getConn et = do
         eventQuery eventTable =
             "select id, commit_number,timestamp,event from \""
                 <> fromString eventTable
-                <> "\" order by commit_number desc"
+                <> "\" order by commit_number"
 
 
     cursor <- liftIO $ Cursor.declareCursor conn (eventQuery et)

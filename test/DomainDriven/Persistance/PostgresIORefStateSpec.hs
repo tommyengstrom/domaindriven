@@ -22,7 +22,7 @@ import           Safe                           ( headNote )
 import qualified StoreModel                                   as Store
 import qualified Streamly.Prelude                             as S
 import           Test.Hspec
--- import           Text.Pretty.Simple
+--import           Text.Pretty.Simple
 
 eventTable :: EventTable
 eventTable =
@@ -41,13 +41,18 @@ spec = do
     aroundAll setupPersistance $ do
         writeEventsSpec
         queryEventsSpec
+        -- make sure migrationSpec is run last!
         migrationSpec
+    aroundAll setupPersistance $ do
+        streaming
+
+
 
 setupPersistance :: (PostgresEvent Store.StoreModel Store.StoreEvent -> IO ()) -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
     p <- postgresWriteModel mkTestConn eventTable Store.applyStoreEvent mempty
-    test p
+    test p { chunkSize = 2 }
 
 
 mkTestConn :: IO Connection
@@ -98,12 +103,22 @@ writeEventsSpec = describe "queryEvents" $ do
         _    <- writeEvents conn (getEventTableName eventTable) storedEvs
         evs' <- getEventList p
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
+
+streaming :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+streaming = describe "steaming" $ do
     it "getEventList and getEventStream yields the same result" $ \p -> do
+        conn      <- getConnection p
+        storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
+            enKey <- mkId
+            let e = Store.BoughtItem (Store.ItemKey nil) (Store.Quantity i)
+            pure $ Stored e (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
+        _        <- writeEvents conn (getEventTableName eventTable) storedEvs
         evList   <- getEventList p
         evStream <- S.toList $ getEventStream p
         -- pPrint evList
-        evList `shouldSatisfy` (> 1) . length -- must be at least two to verify order
-        evList `shouldBe` evStream
+        evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
+        fmap storedEvent evStream `shouldBe` fmap storedEvent evList
+        evStream `shouldBe` evList
 
 
 
