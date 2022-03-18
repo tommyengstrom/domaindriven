@@ -5,9 +5,11 @@ import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Data.Aeson
+import           Data.Foldable
 import           Data.IORef
 import           Data.Int
-import           Data.List                      ( foldl' )
+import qualified Data.Sequence                                as Seq
+import           Data.Sequence                  ( Seq(..) )
 import           Data.String
 import           Data.Text                      ( Text )
 import           Data.Time
@@ -321,13 +323,13 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         fmap fst <$> queryEvents conn (eventTableName pg)
 
     getEventStream pg = do
-        S.mapM (fmap fst . fromEventRow) $ S.unfoldMany Unfold.fromList $ mkEventStream
-            (chunkSize pg)
-            (getConnection pg)
-            (eventTableName pg)
+        S.mapM (fmap fst . fromEventRow)
+            $ S.unfoldMany Unfold.fromList
+            . fmap toList
+            $ mkEventStream (chunkSize pg) (getConnection pg) (eventTableName pg)
 
 
-mkEventStream :: Int -> IO Connection -> EventTableName -> S.SerialT IO [EventRowOut]
+mkEventStream :: Int -> IO Connection -> EventTableName -> S.SerialT IO (Seq EventRowOut)
 mkEventStream chunkSize getConn et = do
     conn <- liftIO getConn
     -- FIXME: My gut tells me I may have some issue here as I'm starting a transaction and
@@ -335,25 +337,13 @@ mkEventStream chunkSize getConn et = do
     -- just wrap it in a bracket but here I cannot.
     -- Is this an issue? How do I fix it?
     liftIO $ PG.begin conn
-    let stream :: S.SerialT IO EventRowOut
-        stream = S.nil
-    let step' :: Cursor.Cursor -> S.SerialT IO EventRowOut
-        step' cursor = do
-            res <- Cursor.foldForward cursor chunkSize (\a r -> S.cons r a)) S.nil
+    let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
+        step cursor = do
+            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
             case r of
-                Left  [] -> do
-                    liftIO (PG.rollback conn)
-                    error "oh fuck, something went wrong!"
-                Left  a  -> pure $ Just (a, cursor)
-                Right a  -> pure $ Just (a, cursor)
-
-    -- let step :: Cursor.Cursor -> IO (Maybe ([EventRowOut], Cursor.Cursor))
-    --     step cursor = do
-    --         r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a <> [r])) []
-    --         case r of
-    --             Left  [] -> Nothing <$ liftIO (PG.rollback conn)
-    --             Left  a  -> pure $ Just (a, cursor)
-    --             Right a  -> pure $ Just (a, cursor)
+                Left  Seq.Empty -> Nothing <$ liftIO (PG.rollback conn)
+                Left  a         -> pure $ Just (a, cursor)
+                Right a         -> pure $ Just (a, cursor)
         eventQuery :: EventTableName -> PG.Query
         eventQuery eventTable =
             "select id, commit_number,timestamp,event from \""
