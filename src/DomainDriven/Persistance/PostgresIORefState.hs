@@ -232,7 +232,7 @@ createPostgresPersistance getConn eventTable app' seed' = do
                          , modelIORef     = ref
                          , app            = app'
                          , seed           = seed'
-                         , chunkSize      = 500
+                         , chunkSize      = 50
                          }
 
 
@@ -264,6 +264,40 @@ queryEventsAfter conn eventTable (EventNumber lastEvent) =
         <> "\" where commit_number > "
         <> fromString (show lastEvent)
         <> " order by commit_number"
+        )
+
+newtype EventQuery = EventQuery {getPgQuery:: PG.Query}
+    deriving (Show, Generic)
+
+mkEventsAfterQuery :: EventTableName -> EventNumber -> EventQuery
+mkEventsAfterQuery eventTable (EventNumber lastEvent) =
+    EventQuery
+        $  "select id, commit_number,timestamp,event from \""
+        <> fromString eventTable
+        <> "\" where commit_number > "
+        <> fromString (show lastEvent)
+        <> " order by commit_number"
+
+mkEventQuery :: EventTableName -> EventQuery
+mkEventQuery eventTable =
+    EventQuery
+        $  "select id, commit_number,timestamp,event from \""
+        <> fromString eventTable
+        <> "\" order by commit_number"
+
+headMay :: [a] -> Maybe a
+headMay = \case
+    a : _ -> Just a
+    []    -> Nothing
+
+queryHasEventsAfter :: Connection -> EventTableName -> EventNumber -> IO Bool
+queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
+    maybe True fromOnly . headMay <$> query_
+        conn
+        (  "select count(*) \""
+        <> fromString eventTable
+        <> "\" where commit_number > "
+        <> fromString (show lastEvent)
         )
 
 
@@ -322,15 +356,24 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (eventTableName pg)
 
-    getEventStream pg = do
-        S.mapM (fmap fst . fromEventRow)
-            $ S.unfoldMany Unfold.fromList
-            . fmap toList
-            $ mkEventStream (chunkSize pg) (getConnection pg) (eventTableName pg)
+    getEventStream pg = getEventStream' pg mkEventQuery
+
+getEventStream'
+    :: FromJSON event
+    => PostgresEvent model event
+    -> (EventTableName -> EventQuery)
+    -> S.SerialT IO (Stored event)
+getEventStream' pg toEventQuery = do
+    S.mapM (fmap fst . fromEventRow)
+        $ S.unfoldMany Unfold.fromList
+        . fmap toList
+        $ mkEventStream (chunkSize pg)
+                        (getConnection pg)
+                        (toEventQuery $ eventTableName pg)
 
 
-mkEventStream :: Int -> IO Connection -> EventTableName -> S.SerialT IO (Seq EventRowOut)
-mkEventStream chunkSize getConn et = do
+mkEventStream :: Int -> IO Connection -> EventQuery -> S.SerialT IO (Seq EventRowOut)
+mkEventStream chunkSize getConn q = do
     conn <- liftIO getConn
     -- FIXME: My gut tells me I may have some issue here as I'm starting a transaction and
     -- potentially this could fail and linger. Normally, if this was in IO, I could
@@ -344,14 +387,9 @@ mkEventStream chunkSize getConn et = do
                 Left  Seq.Empty -> Nothing <$ liftIO (PG.rollback conn)
                 Left  a         -> pure $ Just (a, cursor)
                 Right a         -> pure $ Just (a, cursor)
-        eventQuery :: EventTableName -> PG.Query
-        eventQuery eventTable =
-            "select id, commit_number,timestamp,event from \""
-                <> fromString eventTable
-                <> "\" order by commit_number"
 
 
-    cursor <- liftIO $ Cursor.declareCursor conn (eventQuery et)
+    cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
     S.unfoldrM step cursor
 
 
@@ -359,10 +397,10 @@ getModel'
     :: forall e m . (FromJSON e, Typeable e) => Connection -> PostgresEvent m e -> IO m
 getModel' conn pg = do
     (model, lastEventNo) <- readIORef (modelIORef pg)
-    newEvents            <- queryEventsAfter @e conn (eventTableName pg) lastEventNo
-    case newEvents of
-        [] -> pure model
-        _  -> fst <$> refreshModel conn pg -- The model must be updated within a transaction
+    hasNewEvents         <- queryHasEventsAfter conn (eventTableName pg) lastEventNo
+    if hasNewEvents
+        then fst <$> refreshModel conn pg -- The model must be updated within a transaction
+        else pure model
 
 refreshModel
     :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)

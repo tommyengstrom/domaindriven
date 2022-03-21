@@ -27,12 +27,15 @@ getConn = PG.connect $ PG.ConnectInfo { connectHost     = "localhost"
 eventTable :: EventTable
 eventTable = InitialVersion "benchmark_events"
 
-setupDbCheat :: IO (PostgresEvent CounterModel CounterEvent)
-setupDbCheat = do
+setupDbQuick :: Maybe Int -> IO (PostgresEvent CounterModel CounterEvent)
+setupDbQuick mChunkSize = do
     conn            <- getConn
     [PG.Only count] <- PG.query_ conn "select count(*) from benchmark_events_v1"
     putStrLn $ "Database contains: " <> show (count :: Int64) <> " events"
-    postgresWriteModel getConn eventTable applyCounterEvent 0
+    pg <- postgresWriteModel getConn eventTable applyCounterEvent 0
+    pure $ case mChunkSize of
+        Just chunkSize -> pg { chunkSize = chunkSize }
+        Nothing        -> pg
 
 setupDbFull :: Int -> IO (PostgresEvent CounterModel CounterEvent)
 setupDbFull nrEvents = do
@@ -42,13 +45,13 @@ setupDbFull nrEvents = do
     events <- traverse toStored
                        (take nrEvents $ cycle [CounterIncreased, CounterDecreased])
     _ <- writeEvents conn (getEventTableName eventTable) events
-    setupDbCheat
+    setupDbQuick Nothing
 
 $(mkServer serverConfig ''CounterCmd)
 
 main' :: IO ()
 main' = do
-    pg <- setupDbCheat
+    pg <- setupDbQuick Nothing
     defaultMain
         [ bench "getEventList"   (nfIO $ last <$> getEventList pg)
         , bench "getEventStream" (nfIO $ Stream.last $ getEventStream pg)
@@ -64,35 +67,44 @@ main = do
         ["seed", i] -> do
             _ <- setupDbFull (read i)
             pure ()
-        ["list"  ] -> mainList'
-        ["stream"] -> mainStream'
-        _          -> do
+        ["getLastEvent", "list"]      -> getLastEventListBench
+        ["getLastEvent", "stream", i] -> getLastEventStreamBench (read i)
+        ["getLastEvent", "stream"]    -> getLastEventStreamBench 50
+        ["getModel"]                  -> getModelBench
+        _                             -> do
             putStrLn $ "Crappy argument: " <> show args
             exitFailure
 
 mainList :: IO ()
 mainList = do
-    pg <- setupDbCheat
+    pg <- setupDbQuick Nothing
     defaultMain
         [bench "read last event using getEventList" (nfIO $ last <$> getEventList pg)]
 
-mainList' :: IO ()
-mainList' = do
-    pg <- setupDbCheat
+getModelBench :: IO ()
+getModelBench = do
+    pg <- setupDbQuick Nothing
+    putStrLn "getModel"
+    ev <- getModel pg
+    print ev
+
+getLastEventListBench :: IO ()
+getLastEventListBench = do
+    pg <- setupDbQuick Nothing
     putStrLn "read last event using getEventList"
     ev <- last <$> getEventList pg
     print ev
 
-mainStream' :: IO ()
-mainStream' = do
-    pg <- setupDbCheat
+getLastEventStreamBench :: Int -> IO ()
+getLastEventStreamBench chunkSize = do
+    pg <- setupDbQuick (Just chunkSize)
     putStrLn "read last event using getEventStream"
     ev <- Stream.last $ getEventStream pg
     print ev
 
 mainStream :: IO ()
 mainStream = do
-    pg <- setupDbCheat
+    pg <- setupDbQuick Nothing
     defaultMain
         [ bench "read last event using getEventStream"
                 (nfIO $ Stream.last $ getEventStream pg)
