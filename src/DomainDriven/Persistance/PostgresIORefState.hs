@@ -112,7 +112,7 @@ createEventTable runner = do
         `catch` (const @_ @SqlError $ do
                     let etName = eventTableName runner
                     _ <- createEventTable' conn etName
-                    void $ refreshModel conn runner
+                    void $ refreshModel' conn runner
                 )
 createEventTable' :: Connection -> EventTableName -> IO Int64
 createEventTable' conn eventTable =
@@ -242,12 +242,16 @@ queryEvents
     => Connection
     -> EventTableName
     -> IO [(Stored a, EventNumber)]
-queryEvents conn eventTable = traverse fromEventRow =<< query_
-    conn
-    (  "select id, commit_number,timestamp,event from \""
-    <> fromString eventTable
-    <> "\" order by commit_number"
-    )
+queryEvents conn eventTable = do
+    putStrLn "-------- Running queryEvents"
+    traverse fromEventRow =<< query_ conn q
+  where
+    q :: PG.Query
+    q =
+        "select id, commit_number,timestamp,event from \""
+            <> fromString eventTable
+            <> "\" order by commit_number"
+
 
 
 queryEventsAfter
@@ -351,7 +355,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     applyEvent pg = app pg
     getModel pg = do
         conn <- getConnection pg
-        withTransaction conn $ getModel' conn pg
+        getModel' conn pg
 
     getEventList pg = do
         conn <- getConnection pg
@@ -364,16 +368,18 @@ getEventStream'
     => PostgresEvent model event
     -> (EventTableName -> EventQuery)
     -> S.SerialT IO (Stored event)
-getEventStream' pg toEventQuery = do
-    S.mapM (fmap fst . fromEventRow)
-        $ S.unfoldMany Unfold.fromList
-        . fmap toList
-        $ mkEventStream (chunkSize pg)
-                        (getConnection pg)
-                        (toEventQuery $ eventTableName pg)
+getEventStream' pg toEventQuery = S.map fst $ mkEventStream
+    (chunkSize pg)
+    (getConnection pg)
+    (toEventQuery $ eventTableName pg)
 
 
-mkEventStream :: Int -> IO Connection -> EventQuery -> S.SerialT IO (Seq EventRowOut)
+mkEventStream
+    :: FromJSON event
+    => Int
+    -> IO Connection
+    -> EventQuery
+    -> S.SerialT IO (Stored event, EventNumber)
 mkEventStream chunkSize getConn q = do
     conn <- liftIO getConn
     -- FIXME: My gut tells me I may have some issue here as I'm starting a transaction and
@@ -391,7 +397,9 @@ mkEventStream chunkSize getConn q = do
 
 
     cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
-    S.unfoldrM step cursor
+    S.mapM fromEventRow $ S.unfoldMany Unfold.fromList . fmap toList $ S.unfoldrM
+        step
+        cursor
 
 
 getModel'
@@ -400,12 +408,12 @@ getModel' conn pg = do
     (model, lastEventNo) <- readIORef (modelIORef pg)
     hasNewEvents         <- queryHasEventsAfter conn (eventTableName pg) lastEventNo
     if hasNewEvents
-        then fst <$> refreshModel conn pg -- The model must be updated within a transaction
+        then fst <$> refreshModel' conn pg -- The model must be updated within a transaction
         else pure model
 
 refreshModel
     :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)
-refreshModel conn pg = do
+refreshModel conn pg = withTransaction conn $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     exclusiveLock conn (eventTableName pg)
     (model    , lastEventNo   ) <- readIORef (modelIORef pg)
@@ -418,6 +426,25 @@ refreshModel conn pg = do
             let newModel = foldl' (app pg) model newEvents
             _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
             pure (newModel, lastNewEventNo)
+
+refreshModel'
+    :: forall m e
+     . (Typeable e, FromJSON e)
+    => Connection
+    -> PostgresEvent m e
+    -> IO (m, EventNumber)
+refreshModel' conn pg = withTransaction conn $ do
+    -- refresh doesn't write any events but changes the state and thus needs a lock
+    exclusiveLock conn (eventTableName pg)
+    (model, lastEventNo) <- readIORef (modelIORef pg)
+    let eventStream = mkEventStream (chunkSize pg) (pure conn)
+            $ mkEventsAfterQuery (eventTableName pg) lastEventNo
+    (newModel, lastNewEventNo) <- S.foldl'
+        (\(m, _) (storedEv, evNumber) -> ((app pg) m storedEv, evNumber))
+        (model, lastEventNo)
+        eventStream
+    _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
+    pure (newModel, lastNewEventNo)
 
 withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
 withExclusiveLock pg f = do
