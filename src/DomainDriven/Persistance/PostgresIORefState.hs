@@ -292,13 +292,14 @@ headMay = \case
 
 queryHasEventsAfter :: Connection -> EventTableName -> EventNumber -> IO Bool
 queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
-    maybe True fromOnly . headMay <$> query_
-        conn
-        (  "select count(*) \""
-        <> fromString eventTable
-        <> "\" where commit_number > "
-        <> fromString (show lastEvent)
-        )
+    maybe True fromOnly . headMay <$> query_ conn q
+  where
+    q :: PG.Query
+    q =
+        "select count(*) > 0 from \""
+            <> fromString eventTable
+            <> "\" where commit_number > "
+            <> fromString (show lastEvent)
 
 
 -- queryState' :: (FromJSON a, Typeable a) => Connection -> StateTableName -> IO [a]
