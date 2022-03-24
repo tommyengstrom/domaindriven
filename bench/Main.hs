@@ -70,7 +70,8 @@ main = do
         ["getLastEvent", "list"]      -> getLastEventListBench
         ["getLastEvent", "stream", i] -> getLastEventStreamBench (read i)
         ["getLastEvent", "stream"]    -> getLastEventStreamBench 50
-        ["getModel"]                  -> getModelBench
+        ["refreshModel", "list"  ]    -> refreshModelList
+        ["refreshModel", "stream"]    -> refreshModelStream
         _                             -> do
             putStrLn $ "Crappy argument: " <> show args
             exitFailure
@@ -81,12 +82,22 @@ mainList = do
     defaultMain
         [bench "read last event using getEventList" (nfIO $ last <$> getEventList pg)]
 
-getModelBench :: IO ()
-getModelBench = do
+refreshModelList :: IO ()
+refreshModelList = do
     pg <- setupDbQuick Nothing
     putStrLn "getModel"
-    ev <- getModel pg
-    print ev
+    conn <- getConn
+    m    <- refreshModel conn pg
+    print m
+
+
+refreshModelStream :: IO ()
+refreshModelStream = do
+    pg <- setupDbQuick Nothing
+    putStrLn "getModel"
+    conn <- getConn
+    m    <- refreshModel' conn pg
+    print m
 
 getLastEventListBench :: IO ()
 getLastEventListBench = do

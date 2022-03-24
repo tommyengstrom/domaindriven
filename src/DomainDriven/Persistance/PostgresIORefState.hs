@@ -437,12 +437,21 @@ refreshModel' conn pg = withTransaction conn $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     exclusiveLock conn (eventTableName pg)
     (model, lastEventNo) <- readIORef (modelIORef pg)
-    let eventStream = mkEventStream (chunkSize pg) (pure conn)
+    let eventStream :: S.SerialT IO (Stored e, EventNumber)
+        eventStream = mkEventStream (chunkSize pg) (pure conn)
             $ mkEventsAfterQuery (eventTableName pg) lastEventNo
-    (newModel, lastNewEventNo) <- S.foldl'
-        (\(m, _) (storedEv, evNumber) -> ((app pg) m storedEv, evNumber))
-        (model, lastEventNo)
+
+        applyModel :: m -> Stored e -> m
+        applyModel = app pg
+    (newModel, lastNewEventNo) <- S.foldlM'
+        (\(m, _) (storedEv, evNumber) -> pure (applyModel m storedEv, evNumber))
+        (pure (model, lastEventNo))
         eventStream
+    -- (newModel, lastNewEventNo) <- S.foldl' (\(m, ) (, evNumber) -> (m, evNumber))
+    --                                        (model, lastEventNo)
+    --                                        eventStream
+
+
     _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
     pure (newModel, lastNewEventNo)
 

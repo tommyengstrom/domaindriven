@@ -111,19 +111,6 @@ tests:
     - warp
     - http-client
 
-benchmarks:
-  domain-driven-bench:
-    main:                Main.hs
-    source-dirs:         bench
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-s
-    dependencies:
-    - domain-driven
-    - criterion
-    - criterion-measurement
-    - pretty-simple
 
 executables:
   simple:
@@ -141,3 +128,16 @@ executables:
     - -Werror
     - -Wall
     - -ddump-splices
+  bench:
+    main:                Main.hs
+    source-dirs:         bench
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-s
+    dependencies:
+    - domain-driven
+    - aeson
+    - criterion
+    - criterion-measurement
+    - pretty-simple
