@@ -1,4 +1,5 @@
 -- | Postgres events with state as an IORef
+{-# LANGUAGE Strict #-}
 module DomainDriven.Persistance.PostgresIORefState where
 
 import           Control.Monad
@@ -427,6 +428,18 @@ refreshModel conn pg = withTransaction conn $ do
             _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)
             pure (newModel, lastNewEventNo)
 
+data ModelAsOf m = ModelAsOf
+    { model       :: !m
+    , eventNumber :: !EventNumber
+    }
+    deriving (Show, Generic)
+
+data NumberedEvent e = NumberedEvent
+    { event       :: !(Stored e)
+    , eventNumber :: EventNumber
+    }
+    deriving (Show, Generic)
+
 refreshModel'
     :: forall m e
      . (Typeable e, FromJSON e)
@@ -438,18 +451,17 @@ refreshModel' conn pg = withTransaction conn $ do
     exclusiveLock conn (eventTableName pg)
     (model, lastEventNo) <- readIORef (modelIORef pg)
     let eventStream :: S.SerialT IO (Stored e, EventNumber)
-        eventStream = mkEventStream (chunkSize pg) (pure conn)
-            $ mkEventsAfterQuery (eventTableName pg) lastEventNo
+        eventStream = mkEventStream
+            (chunkSize pg)
+            (pure conn)
+            (mkEventsAfterQuery (eventTableName pg) lastEventNo)
 
-        applyModel :: m -> Stored e -> m
-        applyModel = app pg
-    (newModel, lastNewEventNo) <- S.foldlM'
-        (\(m, _) (storedEv, evNumber) -> pure (applyModel m storedEv, evNumber))
-        (pure (model, lastEventNo))
-        eventStream
-    -- (newModel, lastNewEventNo) <- S.foldl' (\(m, ) (, evNumber) -> (m, evNumber))
-    --                                        (model, lastEventNo)
-    --                                        eventStream
+        applyModel :: ModelAsOf m -> (Stored e, EventNumber) -> ModelAsOf m
+        applyModel (ModelAsOf m _) (ev, evNumber) = ModelAsOf ((app pg) m ev) evNumber
+
+    ModelAsOf newModel lastNewEventNo <- S.foldl' applyModel
+                                                  (ModelAsOf model lastEventNo)
+                                                  eventStream
 
 
     _ <- writeIORef (modelIORef pg) (newModel, lastNewEventNo)

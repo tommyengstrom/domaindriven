@@ -42,9 +42,8 @@ setupDbFull nrEvents = do
     conn   <- getConn
     _      <- PG.execute_ conn "drop table if exists benchmark_events_v1"
     _      <- postgresWriteModel getConn eventTable applyCounterEvent 0
-    events <- traverse toStored
-                       (take nrEvents $ cycle [CounterIncreased, CounterDecreased])
-    _ <- writeEvents conn (getEventTableName eventTable) events
+    events <- traverse toStored (take nrEvents $ cycle [CounterIncreased])
+    _      <- writeEvents conn (getEventTableName eventTable) events
     setupDbQuick Nothing
 
 $(mkServer serverConfig ''CounterCmd)
@@ -72,6 +71,7 @@ main = do
         ["getLastEvent", "stream"]    -> getLastEventStreamBench 50
         ["refreshModel", "list"  ]    -> refreshModelList
         ["refreshModel", "stream"]    -> refreshModelStream
+        ["foldModel"   , "stream"]    -> foldModelStreamBench
         _                             -> do
             putStrLn $ "Crappy argument: " <> show args
             exitFailure
@@ -112,6 +112,18 @@ getLastEventStreamBench chunkSize = do
     putStrLn "read last event using getEventStream"
     ev <- Stream.last $ getEventStream pg
     print ev
+
+foldModelStreamBench :: IO ()
+foldModelStreamBench = do
+    pg <- setupDbQuick Nothing
+    putStrLn "read last event using getEventStream"
+    x <- Stream.foldl' Action.applyCounterEvent 0 $ getEventStream pg
+    --x <-
+    --    Stream.foldl' (\b (Stored _ ts _) -> max b ts)
+    --                  (UTCTime (fromGregorian 1900 1 1) 0)
+    --        $ getEventStream pg
+    print x
+
 
 mainStream :: IO ()
 mainStream = do
