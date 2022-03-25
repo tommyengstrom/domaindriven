@@ -2,7 +2,6 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE StrictData #-}
 
 module DomainDriven.Internal.Class where
 
