@@ -495,9 +495,33 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             _           <- writeIORef (modelIORef pg) $ NumberedModel newM lastEventNo
             pure $ returnFun newM
 
-migrateValue1to1
-    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
-migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+-- migrateValue1to1
+--     :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+-- migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+migrate1to1'
+    :: forall a b
+     . (Typeable a, FromJSON a, ToJSON b, Show a)
+    => Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Stored a -> Stored b)
+    -> IO ()
+migrate1to1' conn prevTName tName f = do
+    _ <- createEventTable' conn tName
+    S.mapM_ (liftIO . writeIt) $ S.map (f . fst) $ mkEventStream
+        1
+        (pure conn)
+        (mkEventQuery prevTName)
+  where
+    writeIt :: Stored b -> IO Int64
+    writeIt event = PG.executeMany
+        conn
+        (  "insert into \""
+        <> fromString tName
+        <> "\" (id, timestamp, event) \
+                \values (?, ?, ?)"
+        )
+        (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
 
 migrate1to1
     :: forall a b
