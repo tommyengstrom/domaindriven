@@ -1,11 +1,15 @@
 -- | Postgres events with state as an IORef
 module DomainDriven.Persistance.PostgresIORefState where
 
+import           Control.Lens                   ( (^.)
+                                                , to
+                                                )
 import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Data.Aeson
 import           Data.Foldable
+import           Data.Generics.Product
 import           Data.IORef
 import           Data.Int
 import qualified Data.Sequence                                as Seq
@@ -18,7 +22,6 @@ import           Data.UUID                      ( UUID )
 import           Database.PostgreSQL.Simple                   as PG
 import qualified Database.PostgreSQL.Simple.Cursor            as Cursor
 import           Database.PostgreSQL.Simple.FromField         as FF
-import           Database.PostgreSQL.Simple.FromRow           as FR
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
 import           Prelude
@@ -50,7 +53,17 @@ data PostgresEvent model event = PostgresEvent
     , modelIORef     :: IORef (NumberedModel model)
     , app            :: model -> Stored event -> model
     , seed           :: model
-    , chunkSize      :: Int -- ^ Number of events read from pg per batch
+    , chunkSize      :: Int -- ^ Number of events read from postgres per batch
+    }
+    deriving Generic
+
+data PostgresEventTrans model event = PostgresEventTrans
+    { transaction    :: OngoingTransaction
+    , eventTableName :: EventTableName
+    , modelIORef     :: IORef (NumberedModel model)
+    , app            :: model -> Stored event -> model
+    , seed           :: model
+    , chunkSize      :: Int -- ^ Number of events read from postgres per batch
     }
     deriving Generic
 
@@ -58,15 +71,14 @@ data PostgresEvent model event = PostgresEvent
 instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
     type Model (PostgresEvent m e) = m
     type Event (PostgresEvent m e) = e
-    applyEvent pg = app pg
-    getModel pg = withIOTrans pg $ \trans -> getModel' trans pg
+    applyEvent pg = pg ^. field @"app"
+    getModel pg = withIOTrans pg getModel'
 
     getEventList pg = do
         conn <- getConnection pg
-        fmap fst <$> queryEvents conn (eventTableName pg)
+        fmap fst <$> queryEvents conn (pg ^. field @"eventTableName")
 
-    getEventStream pg = withStreamTrans pg $ \trans ->
-        getEventStream' trans (eventTableName pg) (chunkSize pg) mkEventQuery
+    getEventStream pg = withStreamTrans pg getEventStream'
 
 getEventTableName :: EventTable -> EventTableName
 getEventTableName = go 0
@@ -105,12 +117,6 @@ fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
             <> "\nWhen trying to parse:\n"
             <> show ev
 
---toEventRow :: ToJSON e => Stored e -> EventRowIn
---toEventRow (Stored e ts k) = EventRow k ts (toJSON e)
-
---instance FromRow EventRowOut where
---    fromRow = EventRowOut <$> field <*> field <*> field <*> fieldWith fromJSONField
-
 instance FromField EventNumber where
     fromField f bs = EventNumber <$> fromField f bs
 
@@ -121,20 +127,20 @@ data StateRow m = StateRow
     }
     deriving (Show, Eq, Ord, Generic)
 
-instance (Typeable m, FromJSON m) => FromRow (StateRow m) where
-    fromRow = StateRow <$> field <*> field <*> fieldWith fromJSONField
-
-fromStateRow :: StateRow s -> s
-fromStateRow = state
 
 -- | Create the table required for storing state and events, if they do not yet exist.
-createEventTable :: (FromJSON e, Typeable e) => PostgresEvent m e -> IO ()
-createEventTable pg = do
-    void (getModel pg)
-        `catch` (const @_ @SqlError $ withIOTrans pg $ \trans -> do
-                    let etName = eventTableName pg
-                    _ <- createEventTable' (fromTrans trans) etName
-                    void $ refreshModel' trans pg
+createEventTable
+    :: (FromJSON e, Typeable e, WriteModel (PostgresEventTrans m e))
+    => PostgresEventTrans m e
+    -> IO ()
+createEventTable pgt = do
+    void (getModel pgt)
+        `catch` (const @_ @SqlError $ do
+                    let etName = pgt ^. field @"eventTableName"
+                    _ <- createEventTable'
+                        (pgt ^. field @"transaction" . to fromTrans)
+                        etName
+                    void $ refreshModel pgt
                 )
 createEventTable' :: Connection -> EventTableName -> IO Int64
 createEventTable' conn eventTable =
@@ -152,10 +158,6 @@ retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
     putStrLn $ "Retiering: " <> show tableName
     createRetireFunction conn
-    --void $ execute
-    --    conn
-    --    "create trigger retired before insert on ? execute procedure retired_table()"
-    --    (Only $ show tableName)
     void
         $  execute_ conn
         $  "create trigger retired before insert on \""
@@ -172,16 +174,16 @@ createRetireFunction conn =
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
-    :: (FromJSON e, Typeable e, Typeable m, ToJSON e, FromJSON m, ToJSON m)
+    :: (FromJSON e, ToJSON e, Typeable e, Typeable m, WriteModel (PostgresEventTrans m e))
     => IO Connection
     -> EventTableName
     -> (m -> Stored e -> m)
     -> m
     -> IO (PostgresEvent m e)
 postgresWriteModelNoMigration getConn eventTable app' seed' = do
-    runner <- createPostgresPersistance getConn eventTable app' seed'
-    createEventTable runner
-    pure runner
+    pg <- createPostgresPersistance getConn eventTable app' seed'
+    withIOTrans pg createEventTable
+    pure pg
 
 
 -- | Setup the persistance model and verify that the tables exist.
@@ -327,16 +329,6 @@ queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
             <> "\" where commit_number > "
             <> fromString (show lastEvent)
 
-
--- queryState' :: (FromJSON a, Typeable a) => Connection -> StateTableName -> IO [a]
--- queryState' conn stateTable = fmap fromStateRow
---     <$> query_ conn ("select * from \"" <> fromString stateTable <> "\"")
---
--- lockState' :: Connection -> StateTableName -> IO Int64
--- lockState' conn stateTable =
---     execute_ conn ("lock \"" <> fromString stateTable <> "\" in exclusive mode")
-
-
 writeEvents
     :: forall a
      . (ToJSON a)
@@ -361,14 +353,11 @@ writeEvents conn eventTable storedEvents = do
 
 
 getEventStream'
-    :: FromJSON event
-    => OngoingTransaction
-    -> EventTableName
-    -> Int
-    -> (EventTableName -> EventQuery)
-    -> S.SerialT IO (Stored event)
-getEventStream' conn etName chunk toEventQuery =
-    S.map fst $ mkEventStream' chunk conn (toEventQuery etName)
+    :: FromJSON event => PostgresEventTrans model event -> S.SerialT IO (Stored event)
+getEventStream' pgt = S.map fst $ mkEventStream'
+    (pgt ^. field @"chunkSize")
+    (pgt ^. field @"transaction")
+    (pgt ^. field @"eventTableName" . to mkEventQuery)
 
 
 data OngoingTransaction = OngoingTransaction
@@ -379,35 +368,51 @@ withStreamTrans
     :: forall t m a model event
      . (S.IsStream t, S.MonadAsync m, MonadCatch m)
     => PostgresEvent model event
-    -> (OngoingTransaction -> t m a)
+    -> (PostgresEventTrans model event -> t m a)
     -> t m a
 withStreamTrans pg f = S.bracket startTrans rollbackTrans f
   where
-    startTrans :: m OngoingTransaction
+    startTrans :: m (PostgresEventTrans model event)
     startTrans = liftIO $ do
         conn <- getConnection pg
         PG.begin conn
-        pure $ OngoingTransaction conn
+        pure $ PostgresEventTrans { transaction    = OngoingTransaction conn
+                                  , eventTableName = pg ^. field @"eventTableName"
+                                  , modelIORef     = pg ^. field @"modelIORef"
+                                  , app            = pg ^. field @"app"
+                                  , seed           = pg ^. field @"seed"
+                                  , chunkSize      = pg ^. field @"chunkSize"
+                                  }
 
-    rollbackTrans :: OngoingTransaction -> m ()
-    rollbackTrans (OngoingTransaction conn) = liftIO $ do
-        PG.rollback conn
-        undefined
+    rollbackTrans :: PostgresEventTrans model event -> m ()
+    rollbackTrans pgt = liftIO $ do
+        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
+        undefined -- throw something
 
 
-withIOTrans :: PostgresEvent model event -> (OngoingTransaction -> IO a) -> IO a
+withIOTrans
+    :: forall a model event
+     . PostgresEvent model event
+    -> (PostgresEventTrans model event -> IO a)
+    -> IO a
 withIOTrans pg f = bracket startTrans rollbackTrans f
   where
-    startTrans :: IO OngoingTransaction
+    startTrans :: IO (PostgresEventTrans model event)
     startTrans = do
         conn <- getConnection pg
         PG.begin conn
-        pure $ OngoingTransaction conn
+        pure $ PostgresEventTrans { transaction    = OngoingTransaction conn
+                                  , eventTableName = pg ^. field @"eventTableName"
+                                  , modelIORef     = pg ^. field @"modelIORef"
+                                  , app            = pg ^. field @"app"
+                                  , seed           = pg ^. field @"seed"
+                                  , chunkSize      = pg ^. field @"chunkSize"
+                                  }
 
-    rollbackTrans :: OngoingTransaction -> IO ()
-    rollbackTrans (OngoingTransaction conn) = do
-        PG.rollback conn
-        undefined
+    rollbackTrans :: PostgresEventTrans model event -> IO ()
+    rollbackTrans pgt = do
+        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
+        undefined -- throw something
 
 
 
@@ -461,18 +466,13 @@ mkEventStream chunkSize getConn q = do
         cursor
 
 
-getModel'
-    :: forall e m
-     . (FromJSON e, Typeable e)
-    => OngoingTransaction
-    -> PostgresEvent m e
-    -> IO m
-getModel' trans@(OngoingTransaction conn) pg = do
-    NumberedModel model lastEventNo <- readIORef (modelIORef pg)
-    hasNewEvents <- queryHasEventsAfter conn (eventTableName pg) lastEventNo
-    if hasNewEvents
-        then fst <$> refreshModel' trans pg -- The model must be updated within a transaction
-        else pure model
+getModel' :: forall e m . (FromJSON e, Typeable e) => PostgresEventTrans m e -> IO m
+getModel' pgt = do
+    NumberedModel model lastEventNo <- readIORef (pgt ^. field @"modelIORef")
+    hasNewEvents <- queryHasEventsAfter (pgt ^. field @"transaction" . to fromTrans)
+                                        (pgt ^. field @"eventTableName")
+                                        lastEventNo
+    if hasNewEvents then fst <$> refreshModel pgt else pure model
 
 --refreshModel
 --    :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)
@@ -502,25 +502,24 @@ data NumberedEvent e = NumberedEvent
     }
     deriving (Show, Generic)
 
-refreshModel'
+refreshModel
     :: forall m e
      . (Typeable e, FromJSON e)
-    => OngoingTransaction
-    -> PostgresEvent m e
+    => PostgresEventTrans m e
     -> IO (m, EventNumber)
-refreshModel' trans pg = do
+refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
-    exclusiveLock trans (eventTableName pg)
-    NumberedModel model lastEventNo <- readIORef (modelIORef pg)
+    exclusiveLock (pg ^. field @"transaction") (pg ^. field @"eventTableName")
+    NumberedModel model lastEventNo <- readIORef (pg ^. field @"modelIORef")
     let eventStream :: S.SerialT IO (Stored e, EventNumber)
         eventStream = mkEventStream'
-            (chunkSize pg)
-            trans
-            (mkEventsAfterQuery (eventTableName pg) lastEventNo)
+            (pg ^. field @"chunkSize")
+            (pg ^. field @"transaction")
+            (mkEventsAfterQuery (pg ^. field @"eventTableName") lastEventNo)
 
         applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
         applyModel (NumberedModel m _) (ev, evNumber) =
-            NumberedModel ((app pg) m ev) evNumber
+            NumberedModel ((pg ^. field @"app") m ev) evNumber
 
     NumberedModel newModel lastNewEventNo <- S.foldl'
         applyModel
@@ -528,7 +527,7 @@ refreshModel' trans pg = do
         eventStream
 
 
-    _ <- writeIORef (modelIORef pg) $ NumberedModel newModel lastNewEventNo
+    _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newModel lastNewEventNo
     pure (newModel, lastNewEventNo)
 
 refreshModel''
@@ -572,19 +571,18 @@ exclusiveLock (OngoingTransaction conn) etName =
 
 instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) where
     transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
-        conn <- getConnection pg
-        withTransaction conn $ do
-            let eventTable = eventTableName pg
-            _ <- execute_
-                conn
-                ("lock \"" <> fromString eventTable <> "\" in exclusive mode")
-            m                  <- getModel' (OngoingTransaction conn) pg
+        withIOTrans pg $ \pgt -> do
+            let eventTable = pg ^. field @"eventTableName"
+            exclusiveLock (pgt ^. field @"transaction") eventTable
+            m                  <- getModel' pgt
             (returnFun, evs)   <- runInIO $ cmd m
-            NumberedModel m' _ <- readIORef (modelIORef pg)
+            NumberedModel m' _ <- readIORef (pg ^. field @"modelIORef")
             storedEvs          <- traverse toStored evs
-            let newM = foldl' (app pg) m' storedEvs
-            lastEventNo <- writeEvents conn eventTable storedEvs
-            _           <- writeIORef (modelIORef pg) $ NumberedModel newM lastEventNo
+            let newM = foldl' (pg ^. field @"app") m' storedEvs
+            lastEventNo <- writeEvents (pgt ^. field @"transaction" . to fromTrans)
+                                       eventTable
+                                       storedEvs
+            _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newM lastEventNo
             pure $ returnFun newM
 
 -- migrateValue1to1

@@ -3,10 +3,12 @@
 module DomainDriven.Persistance.PostgresIORefStateSpec where
 
 import           Control.Concurrent.Async
+import           Control.Lens                   ( (^.) )
 import           Control.Monad
 import           Data.Aeson                     ( Value
                                                 , encode
                                                 )
+import           Data.Generics.Product
 import qualified Data.Map                                     as M
 import           Data.String                    ( fromString )
 import qualified Data.Text                                    as T
@@ -240,7 +242,7 @@ storeModelSpec = describe "Test basic functionality" $ do
         _   <- executeMany
             conn
             (  "insert into \""
-            <> fromString (eventTableName p)
+            <> fromString (p ^. field @"eventTableName")
             <> "\" (id, timestamp, event) \
                 \values (?, ?, ?)"
             )

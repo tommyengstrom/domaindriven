@@ -2,8 +2,13 @@
 module Main where
 
 import           Action
+import           Control.Lens                   ( (&)
+                                                , (.~)
+                                                , (^.)
+                                                )
 import           Criterion
 import           Criterion.Main
+import           Data.Generics.Product
 import qualified Database.PostgreSQL.Simple                   as PG
 import           DomainDriven
 import           DomainDriven.Internal.Class    ( toStored )
@@ -34,8 +39,8 @@ setupDbQuick mChunkSize = do
     putStrLn $ "Database contains: " <> show (count :: Int64) <> " events"
     pg <- postgresWriteModel getConn eventTable applyCounterEvent 0
     pure $ case mChunkSize of
-        Just chunkSize -> pg { chunkSize = chunkSize }
-        Nothing        -> pg
+        Just s  -> pg & field @"chunkSize" .~ s
+        Nothing -> pg
 
 setupDbFull :: Int -> IO (PostgresEvent CounterModel CounterEvent)
 setupDbFull nrEvents = do
@@ -86,8 +91,7 @@ refreshModelList :: IO ()
 refreshModelList = do
     pg <- setupDbQuick Nothing
     putStrLn "getModel"
-    conn <- getConn
-    m    <- refreshModel conn pg
+    (m, _) <- withIOTrans pg $ refreshModel
     print m
 
 
@@ -95,8 +99,7 @@ refreshModelStream :: IO ()
 refreshModelStream = do
     pg <- setupDbQuick Nothing
     putStrLn "getModel"
-    conn <- getConn
-    m    <- refreshModel' conn pg
+    (m, _) <- withIOTrans pg $ refreshModel
     print m
 
 getLastEventListBench :: IO ()
