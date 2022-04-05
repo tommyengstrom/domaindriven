@@ -15,7 +15,6 @@ import           Data.Int
 import qualified Data.Sequence                                as Seq
 import           Data.Sequence                  ( Seq(..) )
 import           Data.String
-import           Data.Text                      ( Text )
 import           Data.Time
 import           Data.Typeable
 import           Data.UUID                      ( UUID )
@@ -120,13 +119,6 @@ fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
 instance FromField EventNumber where
     fromField f bs = EventNumber <$> fromField f bs
 
-data StateRow m = StateRow
-    { modelName :: Text
-    , timestamp :: UTCTime
-    , state     :: m
-    }
-    deriving (Show, Eq, Ord, Generic)
-
 
 -- | Create the table required for storing state and events, if they do not yet exist.
 createEventTable
@@ -195,9 +187,9 @@ postgresWriteModel
     -> m
     -> IO (PostgresEvent m e)
 postgresWriteModel getConn eventTable app' seed' = do
-    conn <- getConn
-    withTransaction conn $ runMigrations conn eventTable
-    createPostgresPersistance getConn (getEventTableName eventTable) app' seed'
+    pg <- createPostgresPersistance getConn (getEventTableName eventTable) app' seed'
+    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
+    pure pg
 
 newtype Exists = Exists
     { exists :: Bool
@@ -205,8 +197,8 @@ newtype Exists = Exists
     deriving (Show, Eq, Generic)
     deriving anyclass (FromRow)
 
-runMigrations :: Connection -> EventTable -> IO ()
-runMigrations conn et = case et of
+runMigrations :: OngoingTransaction -> EventTable -> IO ()
+runMigrations trans et = case et of
     InitialVersion _        -> createTable
     MigrateUsing mig prevEt -> do
         r <- query
@@ -216,13 +208,15 @@ runMigrations conn et = case et of
         case r of
             [Exists True ] -> pure () -- Table exists. Nothing needs to be done
             [Exists False] -> do
-                runMigrations conn prevEt
+                runMigrations trans prevEt
                 createTable
                 mig (getEventTableName prevEt) (getEventTableName et) conn
                 retireTable conn (getEventTableName prevEt)
 
             l -> fail $ "runMigrations unexpected answer: " <> show l
   where
+    conn :: Connection
+    conn = fromTrans trans
     createTable :: IO ()
     createTable = do
         let tableName = getEventTableName et
@@ -588,7 +582,7 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
 -- migrateValue1to1
 --     :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
 -- migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
-migrate1to1'
+migrate1to1
     :: forall a b
      . (Typeable a, FromJSON a, ToJSON b, Show a)
     => Connection
@@ -596,7 +590,7 @@ migrate1to1'
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
-migrate1to1' conn prevTName tName f = do
+migrate1to1 conn prevTName tName f = do
     _ <- createEventTable' conn tName
     S.mapM_ (liftIO . writeIt) $ S.map (f . fst) $ mkEventStream
         1
@@ -613,18 +607,18 @@ migrate1to1' conn prevTName tName f = do
         )
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
 
-migrate1to1
-    :: forall a b
-     . (Typeable a, FromJSON a, ToJSON b, Show a)
-    => Connection
-    -> PreviousEventTableName
-    -> EventTableName
-    -> (Stored a -> Stored b)
-    -> IO ()
-migrate1to1 conn prevTName tName f = do
-    _             <- createEventTable' conn tName
-    currentEvents <- queryEvents @a conn prevTName
-    void $ writeEvents conn tName $ fmap (f . fst) currentEvents
+--migrate1to1
+--    :: forall a b
+--     . (Typeable a, FromJSON a, ToJSON b, Show a)
+--    => Connection
+--    -> PreviousEventTableName
+--    -> EventTableName
+--    -> (Stored a -> Stored b)
+--    -> IO ()
+--migrate1to1 conn prevTName tName f = do
+--    _             <- createEventTable' conn tName
+--    currentEvents <- queryEvents @a conn prevTName
+--    void $ writeEvents conn tName $ fmap (f . fst) currentEvents
 
 migrate1toMany
     :: forall a b
