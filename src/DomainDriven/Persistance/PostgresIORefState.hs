@@ -38,7 +38,7 @@ type EventTableBaseName = String
 type EventVersion = Int
 type EventTableName = String
 type PreviousEventTableName = String
-
+type ChunkSize = Int
 
 data EventTable
     = MigrateUsing EventMigration EventTable
@@ -46,13 +46,25 @@ data EventTable
 
 type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
 
+data NumberedModel m = NumberedModel
+    { model       :: !m
+    , eventNumber :: !EventNumber
+    }
+    deriving (Show, Generic)
+
+data NumberedEvent e = NumberedEvent
+    { event       :: !(Stored e)
+    , eventNumber :: !EventNumber
+    }
+    deriving (Show, Generic)
+
 data PostgresEvent model event = PostgresEvent
     { getConnection  :: IO Connection
     , eventTableName :: EventTableName
     , modelIORef     :: IORef (NumberedModel model)
     , app            :: model -> Stored event -> model
     , seed           :: model
-    , chunkSize      :: Int -- ^ Number of events read from postgres per batch
+    , chunkSize      :: ChunkSize -- ^ Number of events read from postgres per batch
     }
     deriving Generic
 
@@ -62,7 +74,7 @@ data PostgresEventTrans model event = PostgresEventTrans
     , modelIORef     :: IORef (NumberedModel model)
     , app            :: model -> Stored event -> model
     , seed           :: model
-    , chunkSize      :: Int -- ^ Number of events read from postgres per batch
+    , chunkSize      :: ChunkSize -- ^ Number of events read from postgres per batch
     }
     deriving Generic
 
@@ -104,13 +116,13 @@ data EventRowOut = EventRowOut
     deriving (Show, Eq, Generic, FromRow)
 
 fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
-fromEventRow (EventRowOut k no ts ev) = case fromJSON ev of
-    Success a -> pure (Stored a ts k, no)
+fromEventRow (EventRowOut evKey no ts ev) = case fromJSON ev of
+    Success a -> pure (Stored a ts evKey, no)
     Error err ->
         throwM
             .  EncodingError
             $  "Failed to parse event "
-            <> show k
+            <> show evKey
             <> ": "
             <> err
             <> "\nWhen trying to parse:\n"
@@ -348,7 +360,7 @@ writeEvents conn eventTable storedEvents = do
 
 getEventStream'
     :: FromJSON event => PostgresEventTrans model event -> S.SerialT IO (Stored event)
-getEventStream' pgt = S.map fst $ mkEventStream'
+getEventStream' pgt = S.map fst $ mkEventStream
     (pgt ^. field @"chunkSize")
     (pgt ^. field @"transaction")
     (pgt ^. field @"eventTableName" . to mkEventQuery)
@@ -357,6 +369,7 @@ getEventStream' pgt = S.map fst $ mkEventStream'
 data OngoingTransaction = OngoingTransaction
     { fromTrans :: Connection
     }
+
 
 withStreamTrans
     :: forall t m a model event
@@ -380,9 +393,7 @@ withStreamTrans pg f = S.bracket startTrans rollbackTrans f
 
     rollbackTrans :: PostgresEventTrans model event -> m ()
     rollbackTrans pgt = liftIO $ do
-        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
-        undefined -- throw something
-
+        PG.commit $ pgt ^. field @"transaction" . to fromTrans
 
 withIOTrans
     :: forall a model event
@@ -405,51 +416,22 @@ withIOTrans pg f = bracket startTrans rollbackTrans f
 
     rollbackTrans :: PostgresEventTrans model event -> IO ()
     rollbackTrans pgt = do
-        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
-        undefined -- throw something
+        PG.commit $ pgt ^. field @"transaction" . to fromTrans
 
-
-
-mkEventStream'
-    :: FromJSON event
-    => Int
-    -> OngoingTransaction
-    -> EventQuery
-    -> S.SerialT IO (Stored event, EventNumber)
-mkEventStream' chunkSize (OngoingTransaction conn) q = do
-    let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
-        step cursor = do
-            r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
-            case r of
-                Left  Seq.Empty -> Nothing <$ liftIO (PG.rollback conn)
-                Left  a         -> pure $ Just (a, cursor)
-                Right a         -> pure $ Just (a, cursor)
-
-
-    cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
-    S.mapM fromEventRow $ S.unfoldMany Unfold.fromList . fmap toList $ S.unfoldrM
-        step
-        cursor
 
 
 mkEventStream
     :: FromJSON event
-    => Int
-    -> IO Connection
+    => ChunkSize
+    -> OngoingTransaction
     -> EventQuery
     -> S.SerialT IO (Stored event, EventNumber)
-mkEventStream chunkSize getConn q = do
-    conn <- liftIO getConn
-    -- FIXME: My gut tells me I may have some issue here as I'm starting a transaction and
-    -- potentially this could fail and linger. Normally, if this was in IO, I could
-    -- just wrap it in a bracket but here I cannot.
-    -- Is this an issue? How do I fix it?
-    liftIO $ PG.begin conn
+mkEventStream chunkSize (OngoingTransaction conn) q = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
             r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
             case r of
-                Left  Seq.Empty -> Nothing <$ liftIO (PG.rollback conn)
+                Left  Seq.Empty -> pure Nothing
                 Left  a         -> pure $ Just (a, cursor)
                 Right a         -> pure $ Just (a, cursor)
 
@@ -458,6 +440,7 @@ mkEventStream chunkSize getConn q = do
     S.mapM fromEventRow $ S.unfoldMany Unfold.fromList . fmap toList $ S.unfoldrM
         step
         cursor
+
 
 
 getModel' :: forall e m . (FromJSON e, Typeable e) => PostgresEventTrans m e -> IO m
@@ -468,33 +451,6 @@ getModel' pgt = do
                                         lastEventNo
     if hasNewEvents then fst <$> refreshModel pgt else pure model
 
---refreshModel
---    :: (Typeable e, FromJSON e) => Connection -> PostgresEvent m e -> IO (m, EventNumber)
---refreshModel conn pg = withTransaction conn $ do
---    -- refresh doesn't write any events but changes the state and thus needs a lock
---    exclusiveLock conn (eventTableName pg)
---    NumberedModel model lastEventNo <- readIORef (modelIORef pg)
---    (newEvents, lastNewEventNo)     <- do
---        (evs, nos) <- unzip <$> queryEventsAfter conn (eventTableName pg) lastEventNo
---        pure (evs, foldl' max 0 nos)
---    case newEvents of
---        [] -> pure (model, lastEventNo)
---        _  -> do
---            let newModel = foldl' (app pg) model newEvents
---            _ <- writeIORef (modelIORef pg) $ NumberedModel newModel lastNewEventNo
---            pure (newModel, lastNewEventNo)
-
-data NumberedModel m = NumberedModel
-    { model       :: !m
-    , eventNumber :: !EventNumber
-    }
-    deriving (Show, Generic)
-
-data NumberedEvent e = NumberedEvent
-    { event       :: !(Stored e)
-    , eventNumber :: EventNumber
-    }
-    deriving (Show, Generic)
 
 refreshModel
     :: forall m e
@@ -506,7 +462,7 @@ refreshModel pg = do
     exclusiveLock (pg ^. field @"transaction") (pg ^. field @"eventTableName")
     NumberedModel model lastEventNo <- readIORef (pg ^. field @"modelIORef")
     let eventStream :: S.SerialT IO (Stored e, EventNumber)
-        eventStream = mkEventStream'
+        eventStream = mkEventStream
             (pg ^. field @"chunkSize")
             (pg ^. field @"transaction")
             (mkEventsAfterQuery (pg ^. field @"eventTableName") lastEventNo)
@@ -524,40 +480,6 @@ refreshModel pg = do
     _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newModel lastNewEventNo
     pure (newModel, lastNewEventNo)
 
-refreshModel''
-    :: forall m e
-     . (Typeable e, FromJSON e)
-    => OngoingTransaction
-    -> EventTableName
-    -> IORef (NumberedModel m)
-    -> (m -> Stored e -> m)
-    -> Int
-    -> IO (m, EventNumber)
-refreshModel'' trans etName modelRef applyEv chunk = do
-    -- refresh doesn't write any events but changes the state and thus needs a lock
-    exclusiveLock trans etName
-    NumberedModel model lastEventNo <- readIORef modelRef
-    let eventStream :: S.SerialT IO (Stored e, EventNumber)
-        eventStream = mkEventStream' chunk trans (mkEventsAfterQuery etName lastEventNo)
-
-        applyEvNumbered :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
-        applyEvNumbered (NumberedModel m _) (ev, evNumber) =
-            NumberedModel (applyEv m ev) evNumber
-
-    NumberedModel newModel lastNewEventNo <- S.foldl'
-        applyEvNumbered
-        (NumberedModel model lastEventNo)
-        eventStream
-
-    _ <- writeIORef modelRef $ NumberedModel newModel lastNewEventNo
-    pure (newModel, lastNewEventNo)
-
---withExclusiveLock :: PostgresEvent m e -> (Connection -> IO a) -> IO a
---withExclusiveLock pg f = do
---    conn <- getConnection pg
---    withTransaction conn $ do
---        exclusiveLock conn (eventTableName pg)
---        f conn
 
 exclusiveLock :: OngoingTransaction -> EventTableName -> IO ()
 exclusiveLock (OngoingTransaction conn) etName =
@@ -579,9 +501,10 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
             _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newM lastEventNo
             pure $ returnFun newM
 
--- migrateValue1to1
---     :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
--- migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+migrateValue1to1
+    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
+migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+
 migrate1to1
     :: forall a b
      . (Typeable a, FromJSON a, ToJSON b, Show a)
@@ -594,7 +517,7 @@ migrate1to1 conn prevTName tName f = do
     _ <- createEventTable' conn tName
     S.mapM_ (liftIO . writeIt) $ S.map (f . fst) $ mkEventStream
         1
-        (pure conn)
+        (OngoingTransaction conn)
         (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
@@ -606,19 +529,6 @@ migrate1to1 conn prevTName tName f = do
                 \values (?, ?, ?)"
         )
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
-
---migrate1to1
---    :: forall a b
---     . (Typeable a, FromJSON a, ToJSON b, Show a)
---    => Connection
---    -> PreviousEventTableName
---    -> EventTableName
---    -> (Stored a -> Stored b)
---    -> IO ()
---migrate1to1 conn prevTName tName f = do
---    _             <- createEventTable' conn tName
---    currentEvents <- queryEvents @a conn prevTName
---    void $ writeEvents conn tName $ fmap (f . fst) currentEvents
 
 migrate1toMany
     :: forall a b

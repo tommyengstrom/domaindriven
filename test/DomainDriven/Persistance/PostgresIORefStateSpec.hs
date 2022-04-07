@@ -35,7 +35,7 @@ eventTable2 :: EventTable
 eventTable2 = MigrateUsing mig eventTable
   where
     mig :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-    mig prevName name conn = migrate1to1' @Value conn prevName name id
+    mig prevName name conn = migrate1to1 @Value conn prevName name id
 
 spec :: Spec
 spec = do
