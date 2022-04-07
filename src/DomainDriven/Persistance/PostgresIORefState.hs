@@ -160,7 +160,6 @@ createEventTable' conn eventTable =
 
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
-    putStrLn $ "Retiering: " <> show tableName
     createRetireFunction conn
     void
         $  execute_ conn
@@ -232,7 +231,6 @@ runMigrations trans et = case et of
     createTable :: IO ()
     createTable = do
         let tableName = getEventTableName et
-        putStrLn $ "runMigrations: Creating table: " <> show tableName
         void $ createEventTable' conn tableName
 
 
@@ -273,7 +271,6 @@ queryEvents
     -> EventTableName
     -> IO [(Stored a, EventNumber)]
 queryEvents conn eventTable = do
-    putStrLn "-------- Running queryEvents"
     traverse fromEventRow =<< query_ conn q
   where
     q :: PG.Query
@@ -513,12 +510,22 @@ migrate1to1
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
-migrate1to1 conn prevTName tName f = do
+migrate1to1 conn prevTName tName f = migrate1toMany conn prevTName tName (pure . f)
+
+migrate1toMany
+    :: forall a b
+     . (Typeable a, FromJSON a, ToJSON b)
+    => Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Stored a -> [Stored b])
+    -> IO ()
+migrate1toMany conn prevTName tName f = do
     _ <- createEventTable' conn tName
-    S.mapM_ (liftIO . writeIt) $ S.map (f . fst) $ mkEventStream
-        1
-        (OngoingTransaction conn)
-        (mkEventQuery prevTName)
+    S.mapM_ (liftIO . writeIt)
+        . S.unfoldMany Unfold.fromList
+        $ S.map (f . fst)
+        $ mkEventStream 1 (OngoingTransaction conn) (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event = PG.executeMany
@@ -529,18 +536,3 @@ migrate1to1 conn prevTName tName f = do
                 \values (?, ?, ?)"
         )
         (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
-
-migrate1toMany
-    :: forall a b
-     . (Typeable a, FromJSON a, ToJSON b)
-    => Connection
-    -> PreviousEventTableName
-    -> EventTableName
-    -> (Stored a -> [Stored b])
-    -> IO EventNumber
-migrate1toMany conn prevTName tName f = do
-    _             <- createEventTable' conn tName
-    currentEvents <- queryEvents @a conn prevTName
-    let mkNewEvents :: [(Stored a, EventNumber)] -> [Stored b]
-        mkNewEvents = ((f . fst) =<<)
-    writeEvents conn tName $ mkNewEvents currentEvents
