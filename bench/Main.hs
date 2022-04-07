@@ -4,7 +4,6 @@ module Main where
 import           Action
 import           Control.Lens                   ( (&)
                                                 , (.~)
-                                                , (^.)
                                                 )
 import           Criterion
 import           Criterion.Main
@@ -12,7 +11,13 @@ import           Data.Generics.Product
 import qualified Database.PostgreSQL.Simple                   as PG
 import           DomainDriven
 import           DomainDriven.Internal.Class    ( toStored )
-import           DomainDriven.Persistance.PostgresIORefState
+import           DomainDriven.Persistance.Postgres
+import           DomainDriven.Persistance.Postgres.Internal
+                                                ( getEventTableName
+                                                , refreshModel
+                                                , withIOTrans
+                                                , writeEvents
+                                                )
 import           DomainDriven.Server
 import           GHC.Int                        ( Int64 )
 import           Prelude

@@ -18,7 +18,13 @@ import           Data.UUID                      ( nil )
 import qualified Data.UUID.V4                                 as V4
 import           Database.PostgreSQL.Simple
 import           DomainDriven
-import           DomainDriven.Persistance.PostgresIORefState
+import           DomainDriven.Persistance.Postgres
+import           DomainDriven.Persistance.Postgres.Internal
+                                                ( getEventTableName
+                                                , queryEvents
+                                                , writeEvents
+                                                )
+import           DomainDriven.Persistance.Postgres.Migration
 import           Prelude
 import           Safe                           ( headNote )
 import qualified StoreModel                                   as Store

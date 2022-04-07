@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: f1cfcb0c42344032f246da72c5ee87ba264539e120e3409f208ef072ebcf8567
+-- hash: 95e0997575ee6c6ad1f8f50c307bbd0bb9f40a825e8ecf8e35458ad1dfb6316a
 
 name:           domain-driven
 version:        0.1.0.0
@@ -34,7 +34,10 @@ library
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.ForgetfulInMemory
-      DomainDriven.Persistance.PostgresIORefState
+      DomainDriven.Persistance.Postgres
+      DomainDriven.Persistance.Postgres.Internal
+      DomainDriven.Persistance.Postgres.Migration
+      DomainDriven.Persistance.Postgres.Types
       DomainDriven.Server
       DomainDriven.Server.Helpers
       DomainDriven.Server.TH

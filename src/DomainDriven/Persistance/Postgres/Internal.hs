@@ -1,5 +1,5 @@
 -- | Postgres events with state as an IORef
-module DomainDriven.Persistance.PostgresIORefState where
+module DomainDriven.Persistance.Postgres.Internal where
 
 import           Control.Lens                   ( (^.)
                                                 , to
@@ -15,48 +15,16 @@ import           Data.Int
 import qualified Data.Sequence                                as Seq
 import           Data.Sequence                  ( Seq(..) )
 import           Data.String
-import           Data.Time
 import           Data.Typeable
-import           Data.UUID                      ( UUID )
 import           Database.PostgreSQL.Simple                   as PG
 import qualified Database.PostgreSQL.Simple.Cursor            as Cursor
-import           Database.PostgreSQL.Simple.FromField         as FF
 import           DomainDriven.Internal.Class
+import           DomainDriven.Persistance.Postgres.Types
 import           GHC.Generics                   ( Generic )
 import           Prelude
 import qualified Streamly.Data.Unfold                         as Unfold
 import qualified Streamly.Prelude                             as S
 import           UnliftIO                       ( MonadUnliftIO(..) )
-
-
-data PersistanceError
-    = EncodingError String
-    | ValueError String
-    deriving (Show, Eq, Typeable, Exception)
-
-type EventTableBaseName = String
-type EventVersion = Int
-type EventTableName = String
-type PreviousEventTableName = String
-type ChunkSize = Int
-
-data EventTable
-    = MigrateUsing EventMigration EventTable
-    | InitialVersion EventTableBaseName
-
-type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
-
-data NumberedModel m = NumberedModel
-    { model       :: !m
-    , eventNumber :: !EventNumber
-    }
-    deriving (Show, Generic)
-
-data NumberedEvent e = NumberedEvent
-    { event       :: !(Stored e)
-    , eventNumber :: !EventNumber
-    }
-    deriving (Show, Generic)
 
 data PostgresEvent model event = PostgresEvent
     { getConnection  :: IO Connection
@@ -100,36 +68,6 @@ getEventTableName = go 0
         InitialVersion n -> n <> "_v" <> show (i + 1)
 
 
-newtype EventNumber = EventNumber {unEventNumber :: Int64}
-    deriving (Show, Generic)
-    deriving newtype (Eq, Ord, Num)
-
-decodeEventRow :: (UUID, UTCTime, e) -> Stored e
-decodeEventRow (k, ts, e) = Stored e ts k
-
-data EventRowOut = EventRowOut
-    { key          :: UUID
-    , commitNumber :: EventNumber
-    , timestamp    :: UTCTime
-    , event        :: Value
-    }
-    deriving (Show, Eq, Generic, FromRow)
-
-fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
-fromEventRow (EventRowOut evKey no ts ev) = case fromJSON ev of
-    Success a -> pure (Stored a ts evKey, no)
-    Error err ->
-        throwM
-            .  EncodingError
-            $  "Failed to parse event "
-            <> show evKey
-            <> ": "
-            <> err
-            <> "\nWhen trying to parse:\n"
-            <> show ev
-
-instance FromField EventNumber where
-    fromField f bs = EventNumber <$> fromField f bs
 
 
 -- | Create the table required for storing state and events, if they do not yet exist.
@@ -228,6 +166,7 @@ runMigrations trans et = case et of
   where
     conn :: Connection
     conn = fromTrans trans
+
     createTable :: IO ()
     createTable = do
         let tableName = getEventTableName et
@@ -363,10 +302,6 @@ getEventStream' pgt = S.map fst $ mkEventStream
     (pgt ^. field @"eventTableName" . to mkEventQuery)
 
 
-data OngoingTransaction = OngoingTransaction
-    { fromTrans :: Connection
-    }
-
 
 withStreamTrans
     :: forall t m a model event
@@ -497,42 +432,3 @@ instance (ToJSON e, FromJSON e, Typeable e) => WriteModel (PostgresEvent m e) wh
                                        storedEvs
             _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newM lastEventNo
             pure $ returnFun newM
-
-migrateValue1to1
-    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
-migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
-
-migrate1to1
-    :: forall a b
-     . (Typeable a, FromJSON a, ToJSON b, Show a)
-    => Connection
-    -> PreviousEventTableName
-    -> EventTableName
-    -> (Stored a -> Stored b)
-    -> IO ()
-migrate1to1 conn prevTName tName f = migrate1toMany conn prevTName tName (pure . f)
-
-migrate1toMany
-    :: forall a b
-     . (Typeable a, FromJSON a, ToJSON b)
-    => Connection
-    -> PreviousEventTableName
-    -> EventTableName
-    -> (Stored a -> [Stored b])
-    -> IO ()
-migrate1toMany conn prevTName tName f = do
-    _ <- createEventTable' conn tName
-    S.mapM_ (liftIO . writeIt)
-        . S.unfoldMany Unfold.fromList
-        $ S.map (f . fst)
-        $ mkEventStream 1 (OngoingTransaction conn) (mkEventQuery prevTName)
-  where
-    writeIt :: Stored b -> IO Int64
-    writeIt event = PG.executeMany
-        conn
-        (  "insert into \""
-        <> fromString tName
-        <> "\" (id, timestamp, event) \
-                \values (?, ?, ?)"
-        )
-        (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
