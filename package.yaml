@@ -46,6 +46,7 @@ dependencies:
 - time
 - transformers
 - vector
+- streamly
 - unordered-containers
 - uuid
 - unliftio
@@ -110,6 +111,7 @@ tests:
     - warp
     - http-client
 
+
 executables:
   simple:
     main:                Main.hs
@@ -126,3 +128,16 @@ executables:
     - -Werror
     - -Wall
     - -ddump-splices
+  bench:
+    main:                Main.hs
+    source-dirs:         bench
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-s
+    dependencies:
+    - domain-driven
+    - aeson
+    - criterion
+    - criterion-measurement
+    - pretty-simple

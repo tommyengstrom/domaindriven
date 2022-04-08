@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
@@ -11,12 +12,13 @@ import           Control.Lens                   ( (^.) )
 import           Data.Generics.Product
 import           Data.Time
 import           System.Random
+import           Control.DeepSeq (NFData)
 import           GHC.Generics                   ( Generic )
 import           Servant
 import           Data.Kind
 import           Data.UUID                      ( UUID )
 import UnliftIO
-
+import Streamly.Prelude (SerialT)
 
 data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
 type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
@@ -76,7 +78,8 @@ class ReadModel p where
     type Event p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: p -> IO (Model p)
-    getEvents :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
+    getEventList :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
+    getEventStream :: p -> SerialT IO (Stored (Event p))
 
 class ReadModel p  => WriteModel p where
     transactionalUpdate :: forall m a. MonadUnliftIO m
@@ -149,7 +152,8 @@ data Stored a = Stored
     , storedTimestamp :: UTCTime
     , storedUUID      :: UUID
     }
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable)
+    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable
+              , NFData)
 
 mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO

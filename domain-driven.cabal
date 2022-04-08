@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8298f37e20515a887b2ed1c276ad538681fa0521181277637d01a260dc3b3db6
+-- hash: 95e0997575ee6c6ad1f8f50c307bbd0bb9f40a825e8ecf8e35458ad1dfb6316a
 
 name:           domain-driven
 version:        0.1.0.0
@@ -34,7 +34,10 @@ library
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
       DomainDriven.Persistance.ForgetfulInMemory
-      DomainDriven.Persistance.PostgresIORefState
+      DomainDriven.Persistance.Postgres
+      DomainDriven.Persistance.Postgres.Internal
+      DomainDriven.Persistance.Postgres.Migration
+      DomainDriven.Persistance.Postgres.Types
       DomainDriven.Server
       DomainDriven.Server.Helpers
       DomainDriven.Server.TH
@@ -98,6 +101,85 @@ library
     , servant-server
     , stm
     , streaming
+    , streamly
+    , template-haskell
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unordered-containers
+    , uuid
+    , vector
+  default-language: Haskell2010
+
+executable bench
+  main-is: Main.hs
+  other-modules:
+      Action
+      Benchmark.PostgresIORefState
+      Paths_domain_driven
+  hs-source-dirs:
+      bench
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -threaded -rtsopts -with-rtsopts=-s
+  build-depends:
+      aeson
+    , aeson-pretty
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , criterion
+    , criterion-measurement
+    , deepseq
+    , directory
+    , domain-driven
+    , exceptions
+    , generic-lens
+    , lens
+    , monad-loops
+    , mtl
+    , openapi3
+    , postgresql-simple
+    , pretty-simple
+    , random
+    , safe
+    , servant
+    , servant-server
+    , stm
+    , streaming
+    , streamly
     , template-haskell
     , text
     , time
@@ -172,6 +254,7 @@ executable simple
     , servant-server
     , stm
     , streaming
+    , streamly
     , template-haskell
     , text
     , time
@@ -260,6 +343,7 @@ test-suite domain-driven-test
     , servant-server
     , stm
     , streaming
+    , streamly
     , template-haskell
     , text
     , time

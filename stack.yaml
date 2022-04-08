@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-18.18
+resolver: lts-18.28
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -37,8 +37,12 @@ packages:
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
-# extra-deps: []
-
+extra-deps:
+  - streamly-0.8.2
+  - unicode-data-0.3.0@sha256:0545e079705a5381d0893f8fe8daaa08fc9174baeab269b9cf651817d8eadbc6,5123
+# build:
+#   library-profiling: true
+#   executable-profiling: true
 # Override default flag values for local packages and extra-deps
 # flags: {}
 

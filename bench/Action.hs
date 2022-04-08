@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+
 module Action where
 
 import           Control.DeepSeq                ( NFData )

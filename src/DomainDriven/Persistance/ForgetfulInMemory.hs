@@ -4,6 +4,7 @@ import           Data.List                      ( foldl' )
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
 import           Prelude
+import qualified Streamly.Prelude                             as S
 import           UnliftIO
 
 
@@ -33,7 +34,10 @@ instance ReadModel (ForgetfulInMemory model e) where
     type Event (ForgetfulInMemory model e) = e
     applyEvent ff = apply ff
     getModel ff = readIORef $ stateRef ff
-    getEvents ff = readIORef $ events ff
+    getEventList ff = readIORef $ events ff
+    getEventStream ff = do
+        l <- liftIO $ getEventList ff
+        S.fromList l
 
 instance WriteModel (ForgetfulInMemory model e)  where
     transactionalUpdate ff evalCmd =
