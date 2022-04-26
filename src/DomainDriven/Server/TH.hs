@@ -455,7 +455,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
             let varPat :: Pat
-                varPat = ConP nfName (fmap VarP varNames)
+                varPat = ConP nfName [] (fmap VarP varNames)
 
                 nfName :: Name
                 nfName = mkName $ "NamedFields" <> show nrArgs
