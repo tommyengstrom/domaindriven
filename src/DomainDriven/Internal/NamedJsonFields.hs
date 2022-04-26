@@ -10,13 +10,12 @@ import           Control.Lens            hiding ( from
                                                 )
 import           Control.Monad.State
 import           Data.Aeson
+import qualified Data.Aeson.Key                               as Key
+import qualified Data.Aeson.KeyMap                            as KM
 import           Data.Aeson.Types
 import           Data.Generics.Product
-import qualified Data.HashMap.Strict                          as HM
 import           Data.Kind                      ( Type )
-import           Data.OpenApi            hiding ( get
-                                                , put
-                                                )
+import qualified Data.OpenApi                                 as O
 import           Data.OpenApi.Declare
 import           Data.Proxy
 import           Data.Text                      ( Text )
@@ -35,12 +34,12 @@ instance (GNamedToJSON (Rep a), Generic a) => ToJSON (NamedJsonFields a) where
 instance (GNamedFromJSON (Rep a), Generic a) => FromJSON (NamedJsonFields a) where
     parseJSON = fmap NamedJsonFields . gNamedParseJson defaultNamedJsonOptions
 
-instance (Typeable a, GNamedToSchema (Rep a), Generic a) => ToSchema (NamedJsonFields a) where
+instance (Typeable a, GNamedToSchema (Rep a), Generic a) => O.ToSchema (NamedJsonFields a) where
     declareNamedSchema _ = gNamedDeclareNamedSchema defaultNamedJsonOptions (Proxy @a)
         -- evalStateT (gDeclareNamedSchema defaultNamedJsonOptions $ Proxy @(Rep a)) []
 
 gNamedToJson :: (GNamedToJSON (Rep a), Generic a) => NamedJsonOptions -> a -> Value
-gNamedToJson opts a = Object . HM.fromList $ evalState (gToTupleList opts $ from a) []
+gNamedToJson opts a = Object . KM.fromList $ evalState (gToTupleList opts $ from a) []
 
 gNamedParseJson
     :: (GNamedFromJSON (Rep a), Generic a) => NamedJsonOptions -> Value -> Parser a
@@ -51,7 +50,7 @@ gNamedDeclareNamedSchema
      . (GNamedToSchema (Rep a), Generic a)
     => NamedJsonOptions
     -> Proxy a
-    -> Declare (Definitions Schema) NamedSchema
+    -> Declare (O.Definitions O.Schema) O.NamedSchema
 gNamedDeclareNamedSchema opts _ =
     evalStateT (gDeclareNamedSchema opts (Proxy @(Rep a))) []
 -----------------------------------------Options------------------------------------------
@@ -70,30 +69,31 @@ defaultNamedJsonOptions = NamedJsonOptions { constructorTagModifier = id
                                            , skipTagField           = False
                                            , datatypeNameModifier   = id
                                            }
------------------------------------------ToSchema-----------------------------------------
+-----------------------------------------O.ToSchema-----------------------------------------
 data Proxy3 a b c = Proxy3
 
 class GNamedToSchema (f :: Type -> Type) where
     gDeclareNamedSchema :: NamedJsonOptions
                         -> Proxy f
-                        -> StateT [UsedName] (Declare (Definitions Schema)) NamedSchema
+                        -> StateT [UsedName] (Declare (O.Definitions O.Schema)) O.NamedSchema
 
 -- Grab the name of the datatype
 instance (Datatype d, GNamedToSchema f) => GNamedToSchema (D1 d f) where
     gDeclareNamedSchema opts _ = do
         let dtName :: String
             dtName = opts ^. field @"datatypeNameModifier" $ datatypeName (Proxy3 @d @f)
-        NamedSchema _ rest <- gDeclareNamedSchema opts (Proxy @f)
-        pure $ NamedSchema (Just $ T.pack dtName) rest
+        O.NamedSchema _ rest <- gDeclareNamedSchema opts (Proxy @f)
+        pure $ O.NamedSchema (Just $ T.pack dtName) rest
 
 -- Grab the name of the constructor to use for the `tag` field content.
 instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
     gDeclareNamedSchema opts _ = do
-        NamedSchema _ s <- gDeclareNamedSchema opts (Proxy @f)
+        O.NamedSchema _ s <- gDeclareNamedSchema opts (Proxy @f)
         if opts ^. field @"skipTagField"
-            then pure $ NamedSchema Nothing s
+            then pure $ O.NamedSchema Nothing s
             else do
-                let tagName = opts ^. field @"tagFieldName" . packed
+                let tagName :: Key
+                    tagName = Key.fromText $ opts ^. field @"tagFieldName" . packed
                 state $ \ss -> ((), tagName : ss)
                 let constructorName :: Text
                     constructorName =
@@ -102,76 +102,82 @@ instance (GNamedToSchema f, Constructor c) => GNamedToSchema (C1 c f) where
                             . conName
                             $ Proxy3 @c @f
 
-                    tagFieldSchema :: Schema
+                    tagFieldSchema :: O.Schema
                     tagFieldSchema =
                         mempty
-                            &   properties
-                            <>~ [ ( tagName
-                                  , Inline
+                            &   O.properties
+                            <>~ [ ( Key.toText tagName
+                                  , O.Inline
                                   $  mempty
-                                  &  type_
-                                  ?~ OpenApiString
-                                  &  enum_
+                                  &  O.type_
+                                  ?~ O.OpenApiString
+                                  &  O.enum_
                                   ?~ [String constructorName]
                                   )
                                 ]
-                            &   required
-                            <>~ [tagName]
-                pure $ NamedSchema Nothing $ tagFieldSchema <> s
+                            &   O.required
+                            <>~ [Key.toText tagName]
+                pure $ O.NamedSchema Nothing $ tagFieldSchema <> s
 
--- Grab the name of the field, but not not set it as required
-instance {-# OVERLAPPING #-} (ToSchema f, HasFieldName f, Selector s)
+-- Grab the name of the field, but not not set it as O.required
+instance {-# OVERLAPPING #-} (O.ToSchema f, HasFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 (Maybe f))) where
     gDeclareNamedSchema _opts _ = do
-        let fName = fieldName @(Maybe f)
+        let fName = Key.fromText $ fieldName @(Maybe f)
         usedNames <- state (\used -> (used, fName : used))
-        _         <- lift $ declareSchemaRef $ Proxy @f
+        _         <- lift $ O.declareSchemaRef $ Proxy @f
         pure
-            .   NamedSchema Nothing
+            .   O.NamedSchema Nothing
             $   mempty
-            &   properties
-            <>~ [(actualFieldName usedNames fName, Inline $ toSchema $ Proxy @f)]
+            &   O.properties
+            <>~ [ ( Key.toText $ actualFieldName usedNames fName
+                  , O.Inline $ O.toSchema $ Proxy @f
+                  )
+                ]
 
--- Grab the name of the field and set it as required
-instance {-# OVERLAPPABLE #-} (ToSchema f, HasFieldName f, Selector s)
+-- Grab the name of the field and set it as O.required
+instance {-# OVERLAPPABLE #-} (O.ToSchema f, HasFieldName f, Selector s)
         => GNamedToSchema (S1 s (Rec0 f)) where
     gDeclareNamedSchema _opts _ = do
-        let fName = fieldName @f
+        let fName = Key.fromText $ fieldName @f
         usedNames <- state (\used -> (used, fName : used))
-        _         <- lift $ declareSchemaRef $ Proxy @f
+        _         <- lift $ O.declareSchemaRef $ Proxy @f
         pure
-            .   NamedSchema Nothing
+            .   O.NamedSchema Nothing
             $   mempty
-            &   properties
-            <>~ [(actualFieldName usedNames fName, Inline $ toSchema $ Proxy @f)]
-            &   required
-            <>~ [actualFieldName usedNames fName]
+            &   O.properties
+            <>~ [ ( Key.toText $ actualFieldName usedNames fName
+                  , O.Inline $ O.toSchema $ Proxy @f
+                  )
+                ]
+            &   O.required
+            <>~ [Key.toText $ actualFieldName usedNames fName]
 
 instance GNamedToSchema U1 where
-    gDeclareNamedSchema _opts _ = pure $ NamedSchema Nothing mempty
+    gDeclareNamedSchema _opts _ = pure $ O.NamedSchema Nothing mempty
 
 instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :*: g) where
     gDeclareNamedSchema opts _ = do
-        NamedSchema _ a <- gDeclareNamedSchema opts (Proxy @f)
-        NamedSchema _ b <- gDeclareNamedSchema opts (Proxy @g)
-        pure (NamedSchema Nothing $ a <> b)
+        O.NamedSchema _ a <- gDeclareNamedSchema opts (Proxy @f)
+        O.NamedSchema _ b <- gDeclareNamedSchema opts (Proxy @g)
+        pure (O.NamedSchema Nothing $ a <> b)
 
 instance (GNamedToSchema f, GNamedToSchema g) => GNamedToSchema (f :+: g) where
     gDeclareNamedSchema opts _ = do
         -- Sum types do not share fields, thus we do not need to adjust the names
-        NamedSchema _ a <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @f)) []
-        NamedSchema _ b <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @g)) []
-        let unwrapOneOf :: Schema -> [Referenced Schema]
-            unwrapOneOf x = (maybe [Inline x] id $ x ^. oneOf)
-        pure $ NamedSchema Nothing $ mempty & oneOf .~ Just
+        O.NamedSchema _ a <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @f)) []
+        O.NamedSchema _ b <- lift $ evalStateT (gDeclareNamedSchema opts (Proxy @g)) []
+        let unwrapOneOf :: O.Schema -> [O.Referenced O.Schema]
+            unwrapOneOf x = (maybe [O.Inline x] id $ x ^. O.oneOf)
+        pure $ O.NamedSchema Nothing $ mempty & O.oneOf .~ Just
             (unwrapOneOf a <> unwrapOneOf b)
 
 
 ------------------------------------------ToJSON------------------------------------------
-type UsedName = Text
+type UsedName = Key
 
 class GNamedToJSON a where
-    gToTupleList :: NamedJsonOptions -> a x -> State [UsedName] [(Text, Value)]
+    gToTupleList :: NamedJsonOptions -> a x -> State [UsedName] [(Key, Value)]
 
 instance (GNamedToJSON f, Datatype d) => GNamedToJSON (M1 D d f) where
     gToTupleList opts = gToTupleList opts . unM1
@@ -182,9 +188,9 @@ instance (GNamedToJSON f, Constructor c) => GNamedToJSON (M1 C c f) where
             then pure []
             else do
                 usedNames <- get
-                put $ usedNames <> [opts ^. field @"tagFieldName" . packed]
+                put $ usedNames <> [Key.fromText $ opts ^. field @"tagFieldName" . packed]
                 pure
-                    [ ( (opts ^. field @"tagFieldName" . packed)
+                    [ ( (Key.fromText $ opts ^. field @"tagFieldName" . packed)
                       , String
                       . T.pack
                       . (opts ^. field @"constructorTagModifier")
@@ -197,7 +203,7 @@ instance (GNamedToJSON f, Constructor c) => GNamedToJSON (M1 C c f) where
 instance (ToJSON t, HasFieldName t) => GNamedToJSON (M1 S c (Rec0 t)) where
     gToTupleList _opts a = do
         usedNames <- get
-        let fName = fieldName @t
+        let fName = Key.fromText $ fieldName @t
         put $ usedNames <> [fName]
         pure [(actualFieldName usedNames fName, toJSON . unK1 $ unM1 a)]
 
@@ -216,19 +222,19 @@ instance (GNamedToJSON a, GNamedToJSON b) => GNamedToJSON (a :+: b) where
         R1 a -> gToTupleList opts a
 
 
-actualFieldName :: [UsedName] -> Text -> Text
+actualFieldName :: [UsedName] -> Key -> Key
 actualFieldName usedNames fName = fName <> case length (filter (== fName) usedNames) of
-    0 -> ""
-    i -> "_" <> (T.pack $ show (i + 1))
+    0 -> Key.fromText ""
+    i -> Key.fromText $ "_" <> (T.pack $ show (i + 1))
 
 -----------------------------------------FromJSON-----------------------------------------
 
-lookupKey :: Text -> Value -> StateT [UsedName] Parser Value
+lookupKey :: Key -> Value -> StateT [UsedName] Parser Value
 lookupKey k = \case
     Object o -> do
         usedNames <- get
         put $ usedNames <> [k]
-        maybe (fail $ "No key " <> show k) pure $ HM.lookup k o
+        maybe (fail $ "No key " <> show k) pure $ KM.lookup k o
     _ -> fail $ "Expected " <> show k <> " to be an object."
 
 class GNamedFromJSON a where
@@ -241,7 +247,7 @@ instance (Constructor f, GNamedFromJSON p) => GNamedFromJSON (M1 C f p) where
     gNamedFromJSON opts v = if opts ^. field @"skipTagField"
         then M1 <$> gNamedFromJSON opts v
         else do
-            tag <- lookupKey (opts ^. field @"tagFieldName" . packed) v
+            tag <- lookupKey (Key.fromText $ opts ^. field @"tagFieldName" . packed) v
             c   <- M1 <$> gNamedFromJSON opts v
             let constructorName =
                     T.pack . (opts ^. field @"constructorTagModifier") $ conName c
@@ -266,7 +272,7 @@ instance (GNamedFromJSON a, GNamedFromJSON b) => GNamedFromJSON (a :*: b) where
 instance (FromJSON t, HasFieldName t) => GNamedFromJSON (M1 S c (Rec0 t)) where
     gNamedFromJSON _opts vals = do
         usedNames <- get
-        let fName = fieldName @t
+        let fName = Key.fromText $ fieldName @t
         v <- lookupKey (actualFieldName usedNames fName) vals
         put $ usedNames <> [fName]
         lift $ M1 . K1 <$> (parseJSON @t) v
