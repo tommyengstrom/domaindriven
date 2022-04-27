@@ -39,10 +39,10 @@ getActionDec (GadtName n) = do
         TyVarI{}     -> errMsg
 
 
-guardMethodVar :: TyVarBndr -> Q ()
+guardMethodVar :: TyVarBndr flag -> Q ()
 guardMethodVar = \case
-    KindedTV _ k -> check k
-    PlainTV _    -> check StarT
+    KindedTV _ _ k -> check k
+    PlainTV _ _    -> check StarT
   where
     check :: Type -> Q ()
     check _ = pure ()
@@ -69,10 +69,10 @@ getActionType = \case
         "Network.HTTP.Types.Method.GET" -> pure Immutable
         _                               -> pure Mutable
 
-guardReturnVar :: TyVarBndr -> Q ()
+guardReturnVar :: Show flag => TyVarBndr flag -> Q ()
 guardReturnVar = \case
-    KindedTV _ StarT -> pure ()
-    ty               -> fail $ "Return type must be a concrete type. Got: " <> show ty
+    KindedTV _ _ StarT -> pure ()
+    ty                 -> fail $ "Return type must be a concrete type. Got: " <> show ty
 
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
@@ -111,7 +111,7 @@ mkApiPiece cfg = \case
                         actionType
                         (EpReturnType retType)
     -- When the constructor contain references to other domain models
-    ForallC [method@(KindedTV methodName _), ret@(KindedTV retName _)] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _))
+    ForallC [method@(KindedTV methodName _ _), ret@(KindedTV retName _ _)] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _))
         -> do
             guardMethodVar method
             guardReturnVar ret
@@ -358,7 +358,7 @@ mkServerDec spec = do
 
 withForall :: Type -> Type
 withForall = ForallT
-    [PlainTV runnerMonadName]
+    [PlainTV runnerMonadName SpecifiedSpec]
     [ ConT ''MonadUnliftIO `AppT` VarT runnerMonadName
     , ConT ''MonadThrow `AppT` VarT runnerMonadName
     ]
@@ -424,7 +424,7 @@ mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
 mkApiPieceHandler :: GadtType -> ApiPiece -> ReaderT ServerInfo Q [Dec]
 mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPiece $  do
     case apiPiece of
-        Endpoint cName cArgs hs Immutable ty -> do
+        Endpoint _cName cArgs _hs Immutable ty -> do
             let nrArgs :: Int
                 nrArgs = length $ cArgs ^. typed @[Type]
             varNames       <- lift $ replicateM nrArgs (newName "arg")
@@ -455,7 +455,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             handlerName    <- askHandlerName
             runnerName     <- lift $ newName "runner"
             let varPat :: Pat
-                varPat = ConP nfName (fmap VarP varNames)
+                varPat = ConP nfName [] (fmap VarP varNames)
 
                 nfName :: Name
                 nfName = mkName $ "NamedFields" <> show nrArgs
