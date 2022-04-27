@@ -91,7 +91,7 @@ createEventTable' conn eventTable =
         <> fromString eventTable
         <> "\" \
            \( id uuid primary key\
-           \, commit_number bigint not null generated always as identity\
+           \, event_number bigint not null generated always as identity\
            \, timestamp timestamptz not null default now()\
            \, event jsonb not null\
            \);"
@@ -214,9 +214,9 @@ queryEvents conn eventTable = do
   where
     q :: PG.Query
     q =
-        "select id, commit_number,timestamp,event from \""
+        "select id, event_number,timestamp,event from \""
             <> fromString eventTable
-            <> "\" order by commit_number"
+            <> "\" order by event_number"
 
 
 
@@ -229,11 +229,11 @@ queryEventsAfter
 queryEventsAfter conn eventTable (EventNumber lastEvent) =
     traverse fromEventRow =<< query_
         conn
-        (  "select id, commit_number,timestamp,event from \""
+        (  "select id, event_number,timestamp,event from \""
         <> fromString eventTable
-        <> "\" where commit_number > "
+        <> "\" where event_number > "
         <> fromString (show lastEvent)
-        <> " order by commit_number"
+        <> " order by event_number"
         )
 
 newtype EventQuery = EventQuery {getPgQuery:: PG.Query}
@@ -242,18 +242,18 @@ newtype EventQuery = EventQuery {getPgQuery:: PG.Query}
 mkEventsAfterQuery :: EventTableName -> EventNumber -> EventQuery
 mkEventsAfterQuery eventTable (EventNumber lastEvent) =
     EventQuery
-        $  "select id, commit_number,timestamp,event from \""
+        $  "select id, event_number,timestamp,event from \""
         <> fromString eventTable
-        <> "\" where commit_number > "
+        <> "\" where event_number > "
         <> fromString (show lastEvent)
-        <> " order by commit_number"
+        <> " order by event_number"
 
 mkEventQuery :: EventTableName -> EventQuery
 mkEventQuery eventTable =
     EventQuery
-        $  "select id, commit_number,timestamp,event from \""
+        $  "select id, event_number,timestamp,event from \""
         <> fromString eventTable
-        <> "\" order by commit_number"
+        <> "\" order by event_number"
 
 headMay :: [a] -> Maybe a
 headMay = \case
@@ -268,7 +268,7 @@ queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
     q =
         "select count(*) > 0 from \""
             <> fromString eventTable
-            <> "\" where commit_number > "
+            <> "\" where event_number > "
             <> fromString (show lastEvent)
 
 writeEvents
@@ -291,7 +291,7 @@ writeEvents conn eventTable storedEvents = do
         )
     foldl' max 0 . fmap fromOnly <$> query_
         conn
-        ("select coalesce(max(commit_number),1) from \"" <> fromString eventTable <> "\"")
+        ("select coalesce(max(event_number),1) from \"" <> fromString eventTable <> "\"")
 
 
 getEventStream'
