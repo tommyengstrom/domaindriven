@@ -213,8 +213,7 @@ getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) 
 mkApiTypeDecs :: ApiSpec -> ReaderT ServerInfo Q [Dec]
 mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
-    epTypes     <- traverse (mkEndpointApiType $ spec ^. typed @ApiOptions)
-                            (spec ^. typed @[ApiPiece])
+    epTypes     <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         []     -> fail "Server contains no endpoints"
         t : ts -> do
@@ -227,24 +226,24 @@ mkApiTypeDecs spec = do
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
 -- * For SubApi we apply the path parameters before referencing the SubApi
-mkEndpointApiType :: ApiOptions -> ApiPiece -> ReaderT ServerInfo Q Type
-mkEndpointApiType opts p = enterApiPiece p $ case p of
+mkEndpointApiType :: ApiPiece -> ReaderT ServerInfo Q Type
+mkEndpointApiType p = enterApiPiece p $ case p of
     Endpoint{}           -> ConT <$> askEndpointTypeName
     SubApi cName cArgs _ -> do
         urlSegments <- mkUrlSegments cName
         n           <- askApiTypeName
         fieldNames  <- asks allFieldNames'
-        let mkCapture :: Type -> Q Type
-            mkCapture ty =
-                let tyLit = pure $ mkLitType id ty in [t| Capture $tyLit $(pure ty) |]
+        let mkParams :: Type -> Q Type
+            mkParams ty =
+                let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
 
             useFieldname :: String -> String
             useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
 
-            mkLitType :: (String -> String) -> Type -> Type
-            mkLitType f = \case
-                VarT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
-                ConT n' -> LitT . StrTyLit . f . useFieldname $ n' ^. unqualifiedString
+            mkLitType :: Type -> Type
+            mkLitType = \case
+                VarT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
+                ConT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
                 _       -> LitT $ StrTyLit "unknown"
 
         finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
@@ -252,11 +251,8 @@ mkEndpointApiType opts p = enterApiPiece p $ case p of
         case cArgs of
             ConstructorArgs ts -> lift $ do
                 capturesWithTitles <- do
-                    captures <- traverse mkCapture ts
-                    pure . mconcat $ zipWith
-                        (\a b -> [mkLitType (opts ^. field @"renamePathParams") a, b])
-                        ts
-                        captures
+                    params <- traverse mkParams ts
+                    pure . mconcat $ zipWith (\a b -> [mkLitType a, b]) ts params
                 bird <- [t| (:>) |]
                 pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType capturesWithTitles
 
