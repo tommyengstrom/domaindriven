@@ -46,11 +46,6 @@ guardMethodVar = \case
   where
     check :: Type -> Q ()
     check _ = pure ()
---    check k =
---        unless (k == AppT (AppT ArrowT StarT) StarT)
---            .  fail
---            $  "Method must have be a `Verb` without the return type applied. Got: "
---            <> show k
 
 getActionType :: Type -> Q ActionType
 getActionType = \case
@@ -233,28 +228,11 @@ mkEndpointApiType p = enterApiPiece p $ case p of
         urlSegments <- mkUrlSegments cName
         n           <- askApiTypeName
         fieldNames  <- asks allFieldNames'
-        let mkParams :: Type -> Q Type
-            mkParams ty =
-                let tyLit = pure $ mkLitType ty in [t| Capture $tyLit $(pure ty) |]
+        finalType   <- lift $ prependServerEndpointName urlSegments (ConT n)
 
-            useFieldname :: String -> String
-            useFieldname n' = maybe n' T.unpack $ M.lookup n' fieldNames
-
-            mkLitType :: Type -> Type
-            mkLitType = \case
-                VarT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
-                ConT n' -> LitT . StrTyLit . useFieldname $ n' ^. unqualifiedString
-                _       -> LitT $ StrTyLit "unknown"
-
-        finalType <- lift $ prependServerEndpointName urlSegments (ConT n)
-
-        case cArgs of
-            ConstructorArgs ts -> lift $ do
-                capturesWithTitles <- do
-                    params <- traverse mkParams ts
-                    pure . mconcat $ zipWith (\a b -> [mkLitType a, b]) ts params
-                bird <- [t| (:>) |]
-                pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType capturesWithTitles
+        params      <- mkQueryParams cArgs
+        bird        <- lift [t| (:>) |]
+        pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType params
 
 -- | Defines the servant types for the endpoints
 -- For SubApi it will trigger the full creating of the sub server with types and all

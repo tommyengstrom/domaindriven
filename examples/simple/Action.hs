@@ -25,14 +25,26 @@ data CounterCmd method return where
    GetCounterPlus ::Int -> CounterCmd Query Int
    IncreaseCounter ::CounterCmd Cmd Int
    AddToCounter ::Int -> CounterCmd Cmd Int
+   AdvancedAction ::Int -> AdvancedAction m r -> CounterCmd m r
+   deriving HasApiOptions
+
+data AdvancedAction method return where
+    AdvancedIncrease ::AdvancedAction Cmd Int
+    AdvancedGet ::AdvancedAction Query Int
    deriving HasApiOptions
 
 handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
 handleCmd = \case
-    GetCounter       -> Query $ pure
-    GetCounterPlus i -> Query $ pure . (+ i)
-    IncreaseCounter  -> Cmd $ \_ -> pure (id, [CounterIncreased])
-    AddToCounter a   -> Cmd $ \_ -> pure (id, replicate a CounterIncreased)
+    GetCounter         -> Query $ pure
+    GetCounterPlus i   -> Query $ pure . (+ i)
+    IncreaseCounter    -> Cmd $ \_ -> pure (id, [CounterIncreased])
+    AddToCounter a     -> Cmd $ \_ -> pure (id, replicate a CounterIncreased)
+    AdvancedAction i a -> handleAdvancedAction i a
+
+handleAdvancedAction :: Int -> ActionHandler CounterModel CounterEvent IO AdvancedAction
+handleAdvancedAction i = \case
+    AdvancedIncrease -> Cmd $ \_ -> pure (id, replicate i CounterIncreased)
+    AdvancedGet      -> Query $ \m -> pure $ m * i
 
 data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)
