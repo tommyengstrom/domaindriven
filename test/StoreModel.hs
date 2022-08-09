@@ -64,7 +64,7 @@ data StoreAction method a where
     ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
     Search ::Text -> Maybe Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
-    AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
+    AdminAction ::String -> AdminAction method a -> StoreAction method a -- ^ Sub-actions
     deriving HasApiOptions
 
 data ItemAction method a where
@@ -107,8 +107,8 @@ handleStoreAction = \case
         let matches :: ItemInfo -> Bool
             matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
         pure . filter matches $ M.elems m
-    AdminAction cmd     -> handleAdminAction cmd
-    ItemAction iKey cmd -> handleItemAction iKey cmd
+    AdminAction _    cmd -> handleAdminAction cmd
+    ItemAction  iKey cmd -> handleItemAction iKey cmd
 
 handleAdminAction
     :: (MonadUnliftIO m, MonadThrow m)

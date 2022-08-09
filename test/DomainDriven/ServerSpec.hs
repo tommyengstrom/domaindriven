@@ -6,6 +6,8 @@ import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Monad.Catch            ( try )
 import           Control.Monad.Except
+import           Data.Aeson                     ( encode )
+import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.Text                      ( Text )
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
@@ -17,7 +19,9 @@ import           Network.HTTP.Client            ( defaultManagerSettings
 import           Network.Wai.Handler.Warp       ( run )
 import           Prelude
 import           Servant
+import           Servant.API.Flatten
 import           Servant.Client
+import           Servant.OpenApi                ( toOpenApi )
 import           StoreModel
 import           Test.Hspec
 import           Test.Hspec.Core.Hooks
@@ -28,12 +32,26 @@ buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoCont
 listItems :: ClientM [ItemInfo]
 search :: Text -> Maybe Text -> ClientM [ItemInfo]
 stockQuantity :: ItemKey -> ClientM Quantity
-restock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
-addItem :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
-removeItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
 
-buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (restock :<|> addItem :<|> removeItem)
-    = client $ Proxy @StoreActionApi
+adminRestock
+    :: [Char] -> NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
+adminAddItem
+    :: [Char]
+    -> NamedFields3 "AdminAction_AddItem" ItemName Quantity Price
+    -> ClientM ItemKey
+adminRemoveItem
+    :: [Char] -> NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
+
+
+
+--adminRestock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
+--adminAddItem
+--    :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
+--adminRemoveItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
+
+-- buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> (adminRestock :<|> adminAddItem :<|> adminRemoveItem)
+buyItem :<|> listItems :<|> search :<|> stockQuantity :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
+    = client (flatten $ Proxy @StoreActionApi)
 
 
 type ExpectedReverseText
@@ -44,10 +62,13 @@ $(mkServer testActionConfig ''TestAction)
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
+writeOpenApi :: IO ()
+writeOpenApi =
+    BL.writeFile "/tmp/store_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
+
 withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
-    -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
     server <- async . run 9898 $ serve (Proxy @StoreActionApi) $ hoistServer
         (Proxy @StoreActionApi)
         (Handler . ExceptT . try)
@@ -77,7 +98,8 @@ spec = do
 
         describe "Server endpoint renaming" $ do
             it "Can add item" $ do
-                r <- runClientM (addItem $ NamedFields3 "Test item" 10 99) clientEnv
+                r <- runClientM (adminAddItem "" $ NamedFields3 "Test item" 10 99)
+                                clientEnv
                 r `shouldSatisfy` not . null
             it "The new item shows up when listing items" $ do
                 r <- runClientM listItems clientEnv

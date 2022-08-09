@@ -12,6 +12,7 @@ import           Data.Char
 import           Data.Generics.Product
 import qualified Data.Map                                     as M
 import qualified Data.Text                                    as T
+import           Data.Traversable               ( for )
 import           DomainDriven.Config            ( ServerConfig(..) )
 import           DomainDriven.Internal.Class
 import           DomainDriven.Server.Helpers
@@ -291,7 +292,7 @@ mkQueryParams (ConstructorArgs args) = do
     let mkTyName :: Name -> Q Type
         mkTyName n = pure . LitT . StrTyLit $ n ^. unqualifiedString
 
-    flip traverse args $ \case
+    for args $ \case
         (AppT may'  ty@(ConT n)) | may' == may ->
             liftQ
                 [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]

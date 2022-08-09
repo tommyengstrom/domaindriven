@@ -39,6 +39,7 @@ dependencies:
 - safe
 - servant
 - servant-server
+- servant-flatten
 - stm
 - streaming
 - template-haskell

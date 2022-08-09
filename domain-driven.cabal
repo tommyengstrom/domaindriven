@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 95e0997575ee6c6ad1f8f50c307bbd0bb9f40a825e8ecf8e35458ad1dfb6316a
+-- hash: 568131ecd11d8d16e227762d9016f38a3375934230972a47e4247b573ef6893c
 
 name:           domain-driven
 version:        0.1.0.0
@@ -98,6 +98,7 @@ library
     , random
     , safe
     , servant
+    , servant-flatten
     , servant-server
     , stm
     , streaming
@@ -176,6 +177,7 @@ executable bench
     , random
     , safe
     , servant
+    , servant-flatten
     , servant-server
     , stm
     , streaming
@@ -250,6 +252,7 @@ executable simple
     , random
     , safe
     , servant
+    , servant-flatten
     , servant-openapi3
     , servant-server
     , stm
@@ -339,6 +342,7 @@ test-suite domain-driven-test
     , safe
     , servant
     , servant-client
+    , servant-flatten
     , servant-openapi3
     , servant-server
     , stm
