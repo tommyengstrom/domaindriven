@@ -8,6 +8,7 @@ import           Action
 import           Control.Monad.Catch     hiding ( Handler )
 import           Control.Monad.Except
 import           Data.Aeson
+import           Data.Bifunctor                 ( first )
 import qualified Data.ByteString.Lazy.Char8                   as BL
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
@@ -28,5 +29,14 @@ main = do
     -- Servant server.
     run 8888 $ serve (Proxy @CounterCmdApi) $ hoistServer
         (Proxy @CounterCmdApi)
-        (Handler . ExceptT . try)
+        (Handler . ExceptT . fmap (first translateErrors) . try)
         (counterCmdServer $ runAction dm handleCmd)
+
+
+-- | translate our custom errors into Servants server error. Any error that is not
+-- translated will cause a 500 from the server.
+translateErrors :: CounterError -> ServerError
+translateErrors = \case
+    NegativeNotSupported -> err422
+        { errBody = "Operation is not allowed as it would make the counter negative"
+        }

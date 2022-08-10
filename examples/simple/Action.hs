@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Action where
 
-import           Control.DeepSeq                ( NFData )
+import           Control.Monad                  ( when )
 import           Control.Monad.Catch
 import           Data.Aeson
 import           Data.Typeable                  ( Typeable )
@@ -18,33 +18,26 @@ type CounterModel = Int
 data CounterEvent
     = CounterIncreased
     | CounterDecreased
-    deriving (Show, Generic, ToJSON, FromJSON, NFData)
+    deriving (Show, Generic, ToJSON, FromJSON)
 
 data CounterCmd method return where
    GetCounter ::CounterCmd Query Int
-   GetCounterPlus ::Int -> CounterCmd Query Int
    IncreaseCounter ::CounterCmd Cmd Int
-   AddToCounter ::Int -> CounterCmd Cmd Int
-   AdvancedAction ::Int -> AdvancedAction m r -> CounterCmd m r
-   deriving HasApiOptions
-
-data AdvancedAction method return where
-    AdvancedIncrease ::AdvancedAction Cmd Int
-    AdvancedGet ::AdvancedAction Query Int
+   DecreaseCounter ::CounterCmd Cmd Int
+   AddToCounter ::Int -> CounterCmd Cmd Int -- ^ Add a positive number to the counter
    deriving HasApiOptions
 
 handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
 handleCmd = \case
-    GetCounter         -> Query $ pure
-    GetCounterPlus i   -> Query $ pure . (+ i)
-    IncreaseCounter    -> Cmd $ \_ -> pure (id, [CounterIncreased])
-    AddToCounter a     -> Cmd $ \_ -> pure (id, replicate a CounterIncreased)
-    AdvancedAction i a -> handleAdvancedAction i a
+    GetCounter      -> Query $ pure
+    IncreaseCounter -> Cmd $ \_ -> pure (id, [CounterIncreased])
+    DecreaseCounter -> Cmd $ \counter -> do
+        when (counter < 1) (throwM NegativeNotSupported)
+        pure (id, [CounterDecreased])
+    AddToCounter a -> Cmd $ \_ -> do
+        when (a < 0) (throwM NegativeNotSupported)
+        pure (id, replicate a CounterIncreased)
 
-handleAdvancedAction :: Int -> ActionHandler CounterModel CounterEvent IO AdvancedAction
-handleAdvancedAction i = \case
-    AdvancedIncrease -> Cmd $ \_ -> pure (id, replicate i CounterIncreased)
-    AdvancedGet      -> Query $ \m -> pure $ m * i
 
 data CounterError = NegativeNotSupported
     deriving (Show, Eq, Typeable, Exception)
