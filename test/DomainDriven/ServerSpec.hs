@@ -13,6 +13,7 @@ import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
 import           DomainDriven.Server
 import           DomainDriven.ServerSpecModel
+import           Models.Store
 import           Network.HTTP.Client            ( defaultManagerSettings
                                                 , newManager
                                                 )
@@ -22,7 +23,6 @@ import           Servant
 import           Servant.API.Flatten
 import           Servant.Client
 import           Servant.OpenApi                ( toOpenApi )
-import           StoreModel
 import           Test.Hspec
 -- import           Test.Hspec.Core.Hooks
 

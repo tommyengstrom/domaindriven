@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TemplateHaskell #-}
-module StoreModel where
+module Models.Store where
 
 
 import           Control.Monad                  ( when )

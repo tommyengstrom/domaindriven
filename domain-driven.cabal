@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 568131ecd11d8d16e227762d9016f38a3375934230972a47e4247b573ef6893c
+-- hash: 49af1fafd19a9d7bf5a0b719f9850d4b7d5663a34f3f80fadb7bd97107e0a51b
 
 name:           domain-driven
 version:        0.1.0.0
@@ -118,9 +118,12 @@ executable bench
   other-modules:
       Action
       Benchmark.PostgresIORefState
+      Models.Counter
+      Models.Store
       Paths_domain_driven
   hs-source-dirs:
       bench
+      models
   default-extensions:
       Arrows
       ConstraintKinds
@@ -192,13 +195,93 @@ executable bench
     , vector
   default-language: Haskell2010
 
-executable simple
+executable example-simple
   main-is: Main.hs
   other-modules:
       Action
       Paths_domain_driven
   hs-source-dirs:
       examples/simple
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
+  build-depends:
+      aeson
+    , aeson-pretty
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , deepseq
+    , directory
+    , domain-driven
+    , exceptions
+    , generic-lens
+    , lens
+    , monad-loops
+    , mtl
+    , openapi3
+    , postgresql-simple
+    , random
+    , safe
+    , servant
+    , servant-flatten
+    , servant-openapi3
+    , servant-server
+    , stm
+    , streaming
+    , streamly
+    , template-haskell
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unordered-containers
+    , uuid
+    , vector
+    , wai
+    , warp
+  default-language: Haskell2010
+
+executable example-store
+  main-is: Main.hs
+  other-modules:
+      Models.Counter
+      Models.Store
+      Paths_domain_driven
+  hs-source-dirs:
+      examples/store
+      models
   default-extensions:
       Arrows
       ConstraintKinds
@@ -278,10 +361,12 @@ test-suite domain-driven-test
       DomainDriven.Persistance.PostgresIORefStateSpec
       DomainDriven.ServerSpec
       DomainDriven.ServerSpecModel
-      StoreModel
+      Models.Counter
+      Models.Store
       Paths_domain_driven
   hs-source-dirs:
       test
+      models
   default-extensions:
       Arrows
       ConstraintKinds
