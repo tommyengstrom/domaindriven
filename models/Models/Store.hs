@@ -62,7 +62,7 @@ data ItemInfo = ItemInfo
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
     ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> Maybe Text -> StoreAction Query [ItemInfo]
+    Search ::Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a
     deriving HasApiOptions
@@ -103,8 +103,8 @@ handleStoreAction = \case
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
         pure (const (), [BoughtItem iKey quantity'])
-    ListItems  -> Query $ pure . M.elems
-    Search t _ -> Query $ \m -> do
+    ListItems -> Query $ pure . M.elems
+    Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
             matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
         pure . filter matches $ M.elems m
