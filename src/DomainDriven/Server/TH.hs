@@ -38,7 +38,6 @@ mkServer :: ServerConfig -> Name -> Q [Dec]
 mkServer cfg (GadtName -> gadtName) = do
     spec <- mkServerSpec cfg gadtName
     opts <- getApiOptions cfg gadtName
-    verifySpec spec
     let si :: ServerInfo
         si = ServerInfo { baseGadt           = spec ^. typed
                         , currentGadt        = spec ^. typed
@@ -191,10 +190,6 @@ mkServerSpec cfg n = do
     opts <- getApiOptions cfg n
     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
 
--- | Verifies that the server do not generate overlapping paths
-verifySpec :: ApiSpec -> Q ()
-verifySpec _ = pure ()
-
 ------------------------------------------------------------------------------------------
 
 
@@ -273,7 +268,13 @@ mkHandlerTypeDec p = enterApiPiece p $ do
                 liftQ $ prependServerEndpointName urlSegments middle
             epTypeName <- askEndpointTypeName
             pure [TySynD epTypeName [] ty]
-        SubApi _name _args spec' -> mkServerFromSpec spec'
+        SubApi _name args spec' -> enterApi spec' $ do
+            _ <- mkQueryParams args
+                -- Make sure we take into account what parameters have already been used.
+                -- Skip this and we could end up generating APIs with multiple
+                -- QueryParams with the same name, which servant will accept and use one
+                -- one the values for both parameters.
+            mkServerFromSpec spec'
 
 
 uniqueParamName :: String -> ServerGenM String

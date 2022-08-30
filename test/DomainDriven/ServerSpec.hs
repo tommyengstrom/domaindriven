@@ -56,7 +56,7 @@ type ExpectedIntersperse
     = "SubAction"
     :> QueryParam' '[Strict, Required] "Text" Text
     :> "Intersperse"
-    :> QueryParam' '[Strict, Required] "Text_1" Text
+    :> QueryParam' '[Strict, Required] "String" Text
     :> Get '[JSON] Text
 
 $(mkServer testActionConfig ''TestAction)
