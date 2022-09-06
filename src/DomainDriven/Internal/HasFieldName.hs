@@ -4,7 +4,6 @@
 module DomainDriven.Internal.HasFieldName where
 
 import           Data.Aeson
-import           Data.Char                      ( toLower )
 import           Data.OpenApi
 import           GHC.Generics
 import           Prelude
@@ -15,6 +14,7 @@ import           Data.Vector                    ( Vector )
 import qualified Data.Map                                     as M
 import qualified Data.HashMap.Strict                          as HM
 import           Data.Time
+import           DomainDriven.Internal.Text
 
 class HasFieldName t where
   fieldName :: Text
@@ -43,25 +43,25 @@ instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
   HasFieldName (M.Map k v)
   where
-    fieldName = "mapOf" <> fieldName @v
+    fieldName = "mapOf" `camelAppend` fieldName @v
 
 instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
   HasFieldName (HM.HashMap k v)
   where
-    fieldName = "mapOf" <> fieldName @v
+    fieldName = "mapOf" `camelAppend` fieldName @v
 
 instance (Ord v, HasFieldName v) => HasFieldName (Set v) where
-    fieldName = "setOf" <> fieldName @v
+    fieldName = "setOf" `camelAppend` fieldName @v
 
 instance {-# OVERLAPPABLE #-} HasFieldName v => HasFieldName [v] where
-    fieldName = "listOf" <> fieldName @v
+    fieldName = "listOf" `camelAppend` fieldName @v
 
 instance {-# OVERLAPPING #-} HasFieldName String where
     fieldName = "string"
 
 instance HasFieldName v => HasFieldName (Vector v) where
-    fieldName = "vectorOf" <> fieldName @v
+    fieldName = "vectorOf" `camelAppend` fieldName @v
 
 instance HasFieldName v => HasFieldName (Maybe v) where
     fieldName = fieldName @v
@@ -71,8 +71,3 @@ class GHasFieldName t where
 
 instance Datatype c => GHasFieldName (M1 i c f) where
     gfieldName = T.pack . lowerFirst . datatypeName
-      where
-        lowerFirst :: String -> String
-        lowerFirst = \case
-            []     -> []
-            s : ss -> toLower s : ss
