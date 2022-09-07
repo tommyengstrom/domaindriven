@@ -330,38 +330,7 @@ mkQueryParams (ConstructorArgs args) = do
                 [t| QueryParam' '[Required, Servant.Strict] $(pure n) $(pure ty) |]
         ty -> fail $ "Expected type ConT, got: " <> show ty
 
--- mkQueryParam :: Type -> ServerGenM QueryParamType
--- mkQueryParam ty = do
---     may <- liftQ [t| Maybe |] -- Maybe parameters are optional, others required
---     usedNames <- asks $ view (field @"usedParamNames")
---     let mkTyName :: Name -> Q Type
---         mkTyName n = case n ^. unqualifiedString of
---             name | name `elem` usedNames -> fail $ "Duplicate param names: " <> show name
---                  | otherwise -> pure . LitT $ StrTyLit name
---
---     case ty of
---         (AppT may'  ty@(ConT n)) | may' == may ->
---             liftQ
---                 [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]
---         ty@(ConT n) ->
---             liftQ
---                 [t| QueryParam' '[Required, Servant.Strict] $(mkTyName n) $(pure ty) |]
---         ty -> fail $ "Expected type ConT, got: " <> show ty
-
 type QueryParamType = Type
-
---enterApiPieceWithParams
---    :: ApiPiece -> ([QueryParamType] -> ServerGenM a) -> ServerGenM a
---enterApiPieceWithParams p m = do
---    newSegments <- mkUrlSegments (p ^. typed)
---    let extendServerInfo :: ServerInfo -> ServerInfo
---        extendServerInfo i =
---            i
---                & (typed @[UrlSegment] <>~ newSegments)
---                & (typed @[ConstructorName] <>~ p ^. typed . to pure)
---    qParams <- mkQueryParams $ p ^. typed @ConstructorArgs
---
---    local extendServerInfo $ m qParams
 
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret

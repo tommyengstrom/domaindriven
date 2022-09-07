@@ -22,9 +22,6 @@ data ActionType
     | Immutable
     deriving (Show, Eq)
 
--- data ActionRunner = ActionRunner Type
---     deriving (Show, Eq)
-
 data ApiPiece
     = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType EpReturnType
     | SubApi ConstructorName ConstructorArgs ApiSpec
