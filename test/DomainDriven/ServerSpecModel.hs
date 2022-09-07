@@ -17,7 +17,7 @@ data TestAction method a where
 
 data SubAction method a where
     -- Intersperse ::Text -> SubAction Query Text -- Duplicate endpoint
-    Intersperse ::String -> SubAction Query Text
+    Intersperse ::Char -> SubAction Query Text
     deriving HasApiOptions
 
 handleTestAction :: MonadThrow m => ActionHandler () () m TestAction
@@ -29,8 +29,7 @@ handleTestAction = \case
 
 handleSubAction :: MonadThrow m => Text -> ActionHandler () () m SubAction
 handleSubAction t1 = \case
-    Intersperse t2 -> Query $ \() -> case t2 of
-        [c] -> pure $ T.intersperse c t1
-        _   -> throwM err400
+    Intersperse c -> Query $ \() -> pure $ T.intersperse c t1
+
 
 $(mkServerConfig "testActionConfig")

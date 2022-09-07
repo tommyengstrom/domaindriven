@@ -34,7 +34,8 @@ import           UnliftIO                       ( MonadUnliftIO )
 ------------------------------------------------------------------------------------------
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName, ToParamSchema)
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName
+                , ToParamSchema, HasParamName)
     deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)

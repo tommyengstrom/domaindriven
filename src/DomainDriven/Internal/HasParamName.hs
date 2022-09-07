@@ -4,17 +4,17 @@
 module DomainDriven.Internal.HasParamName where
 
 import           Data.Aeson
+import qualified Data.HashMap.Strict                          as HM
+import qualified Data.Map                                     as M
 import           Data.OpenApi
-import           GHC.Generics
-import           Prelude
+import           Data.Set                       ( Set )
 import qualified Data.Text                                    as T
 import           Data.Text                      ( Text )
-import           Data.Set                       ( Set )
-import           Data.Vector                    ( Vector )
-import qualified Data.Map                                     as M
-import qualified Data.HashMap.Strict                          as HM
 import           Data.Time
+import           Data.Vector                    ( Vector )
 import           DomainDriven.Internal.Text
+import           GHC.Generics
+import           Prelude
 
 class HasParamName t where
   paramName :: Text
@@ -26,6 +26,9 @@ instance HasParamName Int where
 
 instance HasParamName Double where
     paramName = "double"
+
+instance HasParamName Char where
+    paramName = "char"
 
 instance HasParamName Text where
     paramName = "text"

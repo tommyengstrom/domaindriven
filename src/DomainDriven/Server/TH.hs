@@ -45,8 +45,12 @@ mkServer cfg (GadtName -> gadtName) = do
                         , prefixSegments     = []
                         , options            = opts
                         }
-    runServerGenM ServerGenState { info = si, usedParamNames = mempty }
-                  (mkServerFromSpec spec)
+    runServerGenM
+        ServerGenState { info           = si
+                       , usedParamNames = mempty
+                       , allParamNames  = cfg ^. field @"allParamNames"
+                       }
+        (mkServerFromSpec spec)
 
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
@@ -190,6 +194,7 @@ mkServerSpec cfg n = do
     opts <- getApiOptions cfg n
     pure ApiSpec { gadtName = n, endpoints = eps, apiOptions = opts }
 
+
 ------------------------------------------------------------------------------------------
 
 
@@ -277,10 +282,20 @@ mkHandlerTypeDec p = enterApiPiece p $ do
             mkServerFromSpec spec'
 
 
-uniqueParamName :: String -> ServerGenM String
-uniqueParamName n = do
+uniqueParamName :: Name -> ServerGenM String
+uniqueParamName tyName = do
+    paramName <- do
+        gets (^. field @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
+            Nothing ->
+                fail
+                    $  "No param name defined for "
+                    <> show tyName
+                    <> ". Make sure it implements `HasParamName` and that the "
+                    <> " instance is imported where `mkServerConfig` is called."
+            Just n -> pure $ T.unpack n
+
     existingNames <- gets (view $ field @"usedParamNames")
-    when (n `elem` existingNames) $ do
+    when (paramName `elem` existingNames) $ do
         info <- gets (^. field @"info")
         let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show
             problematicParentConstructors =
@@ -292,7 +307,7 @@ uniqueParamName n = do
                     .   to show
         fail
             $  "Duplicate query parameters of type "
-            <> show n
+            <> show paramName
             <> " in Action "
             <> show problematicConstructor
             <> " with constructor hierarcy "
@@ -300,7 +315,7 @@ uniqueParamName n = do
     info <- gets (^. field @"info")
     traceShowM
         ( S.toList existingNames
-        , n
+        , paramName
         , L.intercalate "->"
         $   info
         ^.. field @"parentConstructors"
@@ -308,15 +323,15 @@ uniqueParamName n = do
         .   typed @Name
         .   to show
         )
-    modify $ over (field @"usedParamNames") (S.insert n)
-    pure n
+    modify $ over (field @"usedParamNames") (S.insert paramName)
+    pure paramName
 
 mkQueryParams :: ConstructorArgs -> ServerGenM [QueryParamType]
 mkQueryParams (ConstructorArgs args) = do
     may <- liftQ [t| Maybe |] -- Maybe parameters are optional, others required
     let mkUniqueTyName :: Name -> ServerGenM Type
         mkUniqueTyName n =
-            LitT . StrTyLit <$> uniqueParamName (n ^. unqualifiedString)
+            LitT . StrTyLit <$> uniqueParamName n
 
     for args $ \case
         (AppT may'  ty@(ConT n')) | may' == may -> do
@@ -330,7 +345,38 @@ mkQueryParams (ConstructorArgs args) = do
                 [t| QueryParam' '[Required, Servant.Strict] $(pure n) $(pure ty) |]
         ty -> fail $ "Expected type ConT, got: " <> show ty
 
+-- mkQueryParam :: Type -> ServerGenM QueryParamType
+-- mkQueryParam ty = do
+--     may <- liftQ [t| Maybe |] -- Maybe parameters are optional, others required
+--     usedNames <- asks $ view (field @"usedParamNames")
+--     let mkTyName :: Name -> Q Type
+--         mkTyName n = case n ^. unqualifiedString of
+--             name | name `elem` usedNames -> fail $ "Duplicate param names: " <> show name
+--                  | otherwise -> pure . LitT $ StrTyLit name
+--
+--     case ty of
+--         (AppT may'  ty@(ConT n)) | may' == may ->
+--             liftQ
+--                 [t| QueryParam' '[Optional, Servant.Strict] $(mkTyName n) $(pure ty) |]
+--         ty@(ConT n) ->
+--             liftQ
+--                 [t| QueryParam' '[Required, Servant.Strict] $(mkTyName n) $(pure ty) |]
+--         ty -> fail $ "Expected type ConT, got: " <> show ty
+
 type QueryParamType = Type
+
+--enterApiPieceWithParams
+--    :: ApiPiece -> ([QueryParamType] -> ServerGenM a) -> ServerGenM a
+--enterApiPieceWithParams p m = do
+--    newSegments <- mkUrlSegments (p ^. typed)
+--    let extendServerInfo :: ServerInfo -> ServerInfo
+--        extendServerInfo i =
+--            i
+--                & (typed @[UrlSegment] <>~ newSegments)
+--                & (typed @[ConstructorName] <>~ p ^. typed . to pure)
+--    qParams <- mkQueryParams $ p ^. typed @ConstructorArgs
+--
+--    local extendServerInfo $ m qParams
 
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret

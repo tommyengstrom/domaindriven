@@ -54,9 +54,9 @@ type ExpectedReverseText
 
 type ExpectedIntersperse
     = "SubAction"
-    :> QueryParam' '[Strict, Required] "Text" Text
+    :> QueryParam' '[Strict, Required] "text" Text
     :> "Intersperse"
-    :> QueryParam' '[Strict, Required] "String" Text
+    :> QueryParam' '[Strict, Required] "char" Char
     :> Get '[JSON] Text
 
 $(mkServer testActionConfig ''TestAction)
@@ -67,7 +67,7 @@ expectedReverseText = client (Proxy @ExpectedReverseText)
 -- expectedConcatText :: Text -> Text -> ClientM Text
 -- expectedConcatText = client (Proxy @ExpectedConcatText)
 
-expectedIntersperseText :: Text -> Text -> ClientM Text
+expectedIntersperseText :: Text -> Char -> ClientM Text
 expectedIntersperseText = client (Proxy @ExpectedIntersperse)
 
 writeOpenApi :: IO ()
@@ -114,13 +114,10 @@ spec = do
                     Right [ItemInfo _ n _ _] -> n `shouldBe` "Test item"
                     a                        -> fail $ "That shouldn't happen! " <> show a
     aroundAll_ withTestServer $ do
-        describe "Alternating content types" $ do
+        describe "Endpoints generated as expected" $ do
             it "Plaintext endpoint works" $ do
                 r <- runClientM (expectedReverseText "Hej") clientEnv
                 r `shouldBe` Right "jeH"
-            -- it "Handles multiple queryparams of same type within a constructor" $ do
-            --     r <- runClientM (expectedConcatText "hello, " "world") clientEnv
-            --     r `shouldBe` Right "hello, world"
-            it "Handles multiple queryparams of same type in action and subaction" $ do
-                r <- runClientM (expectedIntersperseText "hello" " ") clientEnv
-                r `shouldBe` Right "h e l l o"
+            it "Produces the expected parameters for subserver" $ do
+                r <- runClientM (expectedIntersperseText "hello" '-') clientEnv
+                r `shouldBe` Right "h-e-l-l-o"
