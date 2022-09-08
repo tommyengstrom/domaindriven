@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import           Action
 import           Control.Lens                   ( (&)
                                                 , (.~)
                                                 )
@@ -20,6 +19,7 @@ import           DomainDriven.Persistance.Postgres.Internal
                                                 )
 import           DomainDriven.Server
 import           GHC.Int                        ( Int64 )
+import           Models.Counter                               as Counter
 import           Prelude
 import qualified Streamly.Prelude                             as Stream
 import           System.Environment             ( getArgs )
@@ -125,7 +125,7 @@ foldModelStreamBench :: IO ()
 foldModelStreamBench = do
     pg <- setupDbQuick Nothing
     putStrLn "read last event using getEventStream"
-    x <- Stream.foldl' Action.applyCounterEvent 0 $ getEventStream pg
+    x <- Stream.foldl' Counter.applyCounterEvent 0 $ getEventStream pg
     --x <-
     --    Stream.foldl' (\b (Stored _ ts _) -> max b ts)
     --                  (UTCTime (fromGregorian 1900 1 1) 0)

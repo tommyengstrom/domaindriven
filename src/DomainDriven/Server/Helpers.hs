@@ -2,7 +2,7 @@ module DomainDriven.Server.Helpers where
 
 import           Control.Lens
 import           Control.Monad
-import           Control.Monad.Reader
+import           Control.Monad.State
 import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
@@ -13,9 +13,25 @@ import           Language.Haskell.TH.Syntax     ( OccName(..) )
 import           Prelude
 
 
-mkUrlSegments :: Monad m => ConstructorName -> ReaderT ServerInfo m [UrlSegment]
+runServerGenM :: ServerGenState -> ServerGenM a -> Q a
+runServerGenM s m = evalStateT (unServerGenM m) s
+
+liftQ :: Q a -> ServerGenM a
+liftQ m = ServerGenM $ lift m
+
+withLocalState :: (ServerGenState -> ServerGenState) -> ServerGenM a -> ServerGenM a
+withLocalState fs m = ServerGenM $ do
+    startState <- get
+    modify fs
+    a <- unServerGenM m
+    put startState
+    pure a
+
+
+
+mkUrlSegments :: ConstructorName -> ServerGenM [UrlSegment]
 mkUrlSegments n = do
-    opts <- asks (view typed)
+    opts <- gets (view $ field @"info" . typed)
     pure
         $   n
         ^.. typed
@@ -42,46 +58,60 @@ upperFirst = \case
 
 
 
-askTypeName :: Monad m => ReaderT ServerInfo m Name
+askTypeName :: ServerGenM Name
 askTypeName = do
-    si <- ask
+    si <- get
     let baseName :: String
-        baseName = si ^. field @"baseGadt" . typed @Name . unqualifiedString
+        baseName =
+            si ^. field @"info" . field @"baseGadt" . typed @Name . unqualifiedString
 
         cNames :: [String]
         cNames =
-            si ^.. typed @[ConstructorName] . folded . typed @Name . unqualifiedString
+            si
+                ^.. field @"info"
+                .   typed @[ConstructorName]
+                .   folded
+                .   typed @Name
+                .   unqualifiedString
         separator :: String
-        separator = si ^. typed @ApiOptions . field @"typenameSeparator"
+        separator = si ^. field @"info" . typed @ApiOptions . field @"typenameSeparator"
 
     pure . mkName . L.intercalate separator $ baseName : cNames
 
 
-askApiTypeName :: Monad m => ReaderT ServerInfo m Name
+askApiTypeName :: ServerGenM Name
 askApiTypeName = (unqualifiedString <>~ "Api") <$> askTypeName
 
-askEndpointTypeName :: Monad m => ReaderT ServerInfo m Name
+askEndpointTypeName :: ServerGenM Name
 askEndpointTypeName = (unqualifiedString <>~ "Endpoint") <$> askTypeName
 
-askServerName :: Monad m => ReaderT ServerInfo m Name
+askServerName :: ServerGenM Name
 askServerName =
     (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Server")
         <$> askTypeName
 
-askHandlerName :: Monad m => ReaderT ServerInfo m Name
+askHandlerName :: ServerGenM Name
 askHandlerName =
     (\n -> n & unqualifiedString %~ lowerFirst & unqualifiedString <>~ "Handler")
         <$> askTypeName
 
-askBodyTag :: Monad m => ConstructorName -> ReaderT ServerInfo m TyLit
+askBodyTag :: ConstructorName -> ServerGenM TyLit
 askBodyTag cName = do
     constructorSegments <- mkUrlSegments cName
-    gadtSegment <- asks (view $ field @"options" . field @"bodyNameBase") >>= \case
-        Just n -> pure $ UrlSegment n
-        Nothing ->
-            asks (view $ field @"currentGadt" . typed . to nameBase . to UrlSegment)
+    gadtSegment         <-
+        gets (view $ field @"info" . field @"options" . field @"bodyNameBase") >>= \case
+            Just n  -> pure $ UrlSegment n
+            Nothing -> gets
+                ( view
+                $ field @"info"
+                . field @"currentGadt"
+                . typed
+                . to nameBase
+                . to UrlSegment
+                )
 
-    separator <- asks (view $ typed @ApiOptions . field @"typenameSeparator")
+    separator <- gets
+        (view $ field @"info" . typed @ApiOptions . field @"typenameSeparator")
     pure
         .   StrTyLit
         .   L.intercalate separator
@@ -89,14 +119,16 @@ askBodyTag cName = do
         ^.. folded
         .   typed
 
-enterApi :: Monad m => ApiSpec -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
-enterApi s = local extendServerInfo
+
+
+enterApi :: ApiSpec -> ServerGenM a -> ServerGenM a
+enterApi spec m = withLocalState (field @"info" %~ extendServerInfo) m
   where
     extendServerInfo :: ServerInfo -> ServerInfo
     extendServerInfo i =
-        i & typed .~ s ^. typed @ApiOptions & field @"currentGadt" .~ s ^. typed
+        i & typed .~ spec ^. typed @ApiOptions & field @"currentGadt" .~ spec ^. typed
 
-enterApiPiece :: Monad m => ApiPiece -> ReaderT ServerInfo m a -> ReaderT ServerInfo m a
+enterApiPiece :: ApiPiece -> ServerGenM a -> ServerGenM a
 enterApiPiece p m = do
     newSegments <- mkUrlSegments (p ^. typed)
     let extendServerInfo :: ServerInfo -> ServerInfo
@@ -104,7 +136,25 @@ enterApiPiece p m = do
             i
                 & (typed @[UrlSegment] <>~ newSegments)
                 & (typed @[ConstructorName] <>~ p ^. typed . to pure)
-    local extendServerInfo m
+    withLocalState (field @"info" %~ extendServerInfo) m
+
+--enterApi :: ApiSpec -> ServerGenM a -> ServerGenM a
+--enterApi s = local extendServerInfo
+--  where
+--    extendServerInfo :: ServerInfo -> ServerInfo
+--    extendServerInfo i =
+--        i & typed .~ s ^. typed @ApiOptions & field @"currentGadt" .~ s ^. typed
+--
+--enterApiPiece :: ApiPiece -> ServerGenM a -> ServerGenM a
+--enterApiPiece p m = do
+--    newSegments <- mkUrlSegments (p ^. typed)
+--    let extendServerInfo :: ServerInfo -> ServerInfo
+--        extendServerInfo i =
+--            i
+--                & (typed @[UrlSegment] <>~ newSegments)
+--                & (typed @[ConstructorName] <>~ p ^. typed . to pure)
+--    local extendServerInfo m
+
 
 
 hasJsonContentType :: HandlerSettings -> Bool

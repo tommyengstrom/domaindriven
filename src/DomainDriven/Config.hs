@@ -2,6 +2,7 @@
 
 module DomainDriven.Config
     ( module DomainDriven.Config
+    , HasParamName(..)
     , Name
     ) where
 
@@ -11,7 +12,8 @@ import qualified Data.Map                                     as M
 import           Data.Maybe
 import           Data.Text                      ( Text )
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.HasFieldName
+import           DomainDriven.Internal.HasParamName
+import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Prelude
 
@@ -22,10 +24,10 @@ import           Prelude
 data ServerConfig = ServerConfig
     { allApiOptions :: M.Map String ApiOptions
         -- ^ Map of API options for all action GADTs used in the API
-    , allFieldNames :: M.Map String Text
-        -- ^ Map of field names for all types used as captures
+    , allParamNames :: M.Map String Text
+        -- ^ Map of param names for all types translated into Servant `QueryParam`s
     }
-    deriving Show
+    deriving (Show, Generic)
 
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty M.empty
@@ -34,7 +36,7 @@ mkServerConfig :: String -> Q [Dec]
 mkServerConfig (mkName -> cfgName) = do
     sig'  <- sigD cfgName (conT ''ServerConfig)
     body' <-
-        [d| $(varP cfgName) = ServerConfig $(getApiOptionsMap) $(getFieldNameMap) |]
+        [d| $(varP cfgName) = ServerConfig $(getApiOptionsMap) $(getParamNameMap) |]
     pure $ sig' : body'
 
 -- | Generates `Map String ApiOptions`
@@ -55,17 +57,17 @@ getApiOptionsMap = reify ''HasApiOptions >>= \case
 
 
 -- | Generates `Map String Text`
-getFieldNameMap :: Q Exp
-getFieldNameMap = reify ''HasFieldName >>= \case
+getParamNameMap :: Q Exp
+getParamNameMap = reify ''HasParamName >>= \case
     ClassI _ instances -> do
-        cfgs <- catMaybes <$> traverse typeAndFieldName instances
+        cfgs <- catMaybes <$> traverse typeAndParamName instances
         [e| M.fromList $(pure $ ListE cfgs) |]
     i -> fail $ "Expected ClassI but got: " <> show i
   where
-    typeAndFieldName :: Dec -> Q (Maybe Exp)
-    typeAndFieldName = \case
+    typeAndParamName :: Dec -> Q (Maybe Exp)
+    typeAndParamName = \case
         InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
-            Just <$> [e| ($(stringE $ nameBase n), fieldName @($(pure ty)))|]
+            Just <$> [e| ($(stringE $ nameBase n), paramName @($(pure ty)))|]
         InstanceD _ _ _ _ -> pure Nothing
         d                 -> fail $ "Expected instance InstanceD but got: " <> show d
 

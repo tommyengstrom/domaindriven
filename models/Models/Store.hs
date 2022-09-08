@@ -1,6 +1,6 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TemplateHaskell #-}
-module StoreModel where
+module Models.Store where
 
 
 import           Control.Monad                  ( when )
@@ -34,7 +34,8 @@ import           UnliftIO                       ( MonadUnliftIO )
 ------------------------------------------------------------------------------------------
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName, ToParamSchema)
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName
+                , ToParamSchema, HasParamName)
     deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
@@ -62,13 +63,14 @@ data ItemInfo = ItemInfo
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
     ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> Maybe Text -> StoreAction Query [ItemInfo]
+    Search ::Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
-    AdminAction ::AdminAction method a -> StoreAction method a -- ^ Sub-actions
+    AdminAction ::AdminAction method a -> StoreAction method a
     deriving HasApiOptions
 
 data ItemAction method a where
-    StockQuantity ::ItemAction Query Quantity
+    ItemStockQuantity ::ItemAction Query Quantity
+    ItemPrice ::ItemAction Query Price
     deriving HasApiOptions
 
 data AdminAction method a where
@@ -102,13 +104,13 @@ handleStoreAction = \case
         let available = maybe 0 quantity $ M.lookup iKey m
         when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
         pure (const (), [BoughtItem iKey quantity'])
-    ListItems  -> Query $ pure . M.elems
-    Search t _ -> Query $ \m -> do
+    ListItems -> Query $ pure . M.elems
+    Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
             matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
         pure . filter matches $ M.elems m
-    AdminAction cmd     -> handleAdminAction cmd
     ItemAction iKey cmd -> handleItemAction iKey cmd
+    AdminAction cmd     -> handleAdminAction cmd
 
 handleAdminAction
     :: (MonadUnliftIO m, MonadThrow m)
@@ -130,9 +132,12 @@ handleItemAction
     => ItemKey
     -> ActionHandler StoreModel StoreEvent m ItemAction
 handleItemAction iKey = \case
-    StockQuantity -> Query $ \m -> do
+    ItemStockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
+    ItemPrice -> Query $ \m -> do
+        i <- getItem m
+        pure $ price i
   where
     getItem :: StoreModel -> m ItemInfo
     getItem = maybe (throwM err404) pure . M.lookup iKey

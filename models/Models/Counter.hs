@@ -1,7 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Action where
+module Models.Counter where
 
+import           Control.DeepSeq
 import           Control.Monad                  ( when )
 import           Control.Monad.Catch
 import           Data.Aeson
@@ -18,7 +19,7 @@ type CounterModel = Int
 data CounterEvent
     = CounterIncreased
     | CounterDecreased
-    deriving (Show, Generic, ToJSON, FromJSON)
+    deriving (Show, Generic, ToJSON, FromJSON, NFData)
 
 data CounterCmd method return where
    GetCounter ::CounterCmd Query Int

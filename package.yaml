@@ -39,6 +39,7 @@ dependencies:
 - safe
 - servant
 - servant-server
+- servant-flatten
 - stm
 - streaming
 - template-haskell
@@ -92,7 +93,9 @@ library:
 tests:
   domain-driven-test:
     main:                Spec.hs
-    source-dirs:         test
+    source-dirs:
+      - test
+      - models
     ghc-options:
     - -threaded
     - -rtsopts
@@ -113,7 +116,7 @@ tests:
 
 
 executables:
-  simple:
+  example-simple:
     main:                Main.hs
     source-dirs:         examples/simple
     dependencies:
@@ -128,9 +131,28 @@ executables:
     - -Werror
     - -Wall
     - -ddump-splices
+  example-store:
+    main:                Main.hs
+    source-dirs:
+      - examples/store
+      - models
+    dependencies:
+    - domain-driven
+    - wai
+    - servant-openapi3
+    - warp
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Werror
+    - -Wall
+    - -ddump-splices
   bench:
     main:                Main.hs
-    source-dirs:         bench
+    source-dirs:
+      - bench
+      - models
     ghc-options:
     - -threaded
     - -rtsopts

@@ -25,9 +25,9 @@ import           DomainDriven.Persistance.Postgres.Internal
                                                 , writeEvents
                                                 )
 import           DomainDriven.Persistance.Postgres.Migration
+import qualified Models.Store                                 as Store
 import           Prelude
 import           Safe                           ( headNote )
-import qualified StoreModel                                   as Store
 import qualified Streamly.Prelude                             as S
 import           Test.Hspec
 --import           Text.Pretty.Simple

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 95e0997575ee6c6ad1f8f50c307bbd0bb9f40a825e8ecf8e35458ad1dfb6316a
+-- hash: a5c7773cd8f1e307e84170504604985e85c11803552ec98a882ec9b18f521b2a
 
 name:           domain-driven
 version:        0.1.0.0
@@ -31,8 +31,10 @@ library
       DomainDriven.Config
       DomainDriven.Internal.Class
       DomainDriven.Internal.HasFieldName
+      DomainDriven.Internal.HasParamName
       DomainDriven.Internal.NamedFields
       DomainDriven.Internal.NamedJsonFields
+      DomainDriven.Internal.Text
       DomainDriven.Persistance.ForgetfulInMemory
       DomainDriven.Persistance.Postgres
       DomainDriven.Persistance.Postgres.Internal
@@ -98,6 +100,7 @@ library
     , random
     , safe
     , servant
+    , servant-flatten
     , servant-server
     , stm
     , streaming
@@ -117,9 +120,12 @@ executable bench
   other-modules:
       Action
       Benchmark.PostgresIORefState
+      Models.Counter
+      Models.Store
       Paths_domain_driven
   hs-source-dirs:
       bench
+      models
   default-extensions:
       Arrows
       ConstraintKinds
@@ -176,6 +182,7 @@ executable bench
     , random
     , safe
     , servant
+    , servant-flatten
     , servant-server
     , stm
     , streaming
@@ -190,7 +197,7 @@ executable bench
     , vector
   default-language: Haskell2010
 
-executable simple
+executable example-simple
   main-is: Main.hs
   other-modules:
       Action
@@ -250,6 +257,87 @@ executable simple
     , random
     , safe
     , servant
+    , servant-flatten
+    , servant-openapi3
+    , servant-server
+    , stm
+    , streaming
+    , streamly
+    , template-haskell
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unordered-containers
+    , uuid
+    , vector
+    , wai
+    , warp
+  default-language: Haskell2010
+
+executable example-store
+  main-is: Main.hs
+  other-modules:
+      Models.Counter
+      Models.Store
+      Paths_domain_driven
+  hs-source-dirs:
+      examples/store
+      models
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FunctionalDependencies
+      FlexibleInstances
+      GADTs
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      PolyKinds
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
+  build-depends:
+      aeson
+    , aeson-pretty
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , deepseq
+    , directory
+    , domain-driven
+    , exceptions
+    , generic-lens
+    , lens
+    , monad-loops
+    , mtl
+    , openapi3
+    , postgresql-simple
+    , random
+    , safe
+    , servant
+    , servant-flatten
     , servant-openapi3
     , servant-server
     , stm
@@ -275,10 +363,12 @@ test-suite domain-driven-test
       DomainDriven.Persistance.PostgresIORefStateSpec
       DomainDriven.ServerSpec
       DomainDriven.ServerSpecModel
-      StoreModel
+      Models.Counter
+      Models.Store
       Paths_domain_driven
   hs-source-dirs:
       test
+      models
   default-extensions:
       Arrows
       ConstraintKinds
@@ -339,6 +429,7 @@ test-suite domain-driven-test
     , safe
     , servant
     , servant-client
+    , servant-flatten
     , servant-openapi3
     , servant-server
     , stm

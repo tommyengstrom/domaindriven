@@ -1,6 +1,8 @@
 module DomainDriven.Server.Types where
 
+import           Control.Monad.State
 import qualified Data.Map                                     as M
+import           Data.Set                       ( Set )
 import           Data.Text                      ( Text )
 import           DomainDriven.Internal.Class
 import           GHC.Generics                   ( Generic )
@@ -19,9 +21,6 @@ data ActionType
     = Mutable
     | Immutable
     deriving (Show, Eq)
-
--- data ActionRunner = ActionRunner Type
---     deriving (Show, Eq)
 
 data ApiPiece
     = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType EpReturnType
@@ -49,6 +48,15 @@ data ServerInfo = ServerInfo
     , parentConstructors :: [ConstructorName] -- ^ To create good names without conflict
     , prefixSegments     :: [UrlSegment] -- ^ Used to give a good name to the request body
     , options            :: ApiOptions -- ^ The current options
-    , allFieldNames'     :: M.Map String Text
     }
     deriving (Show, Generic)
+
+data ServerGenState = ServerGenState
+    { info           :: ServerInfo
+    , usedParamNames :: Set String
+    , allParamNames  :: M.Map String Text
+    }
+    deriving (Show, Generic)
+
+newtype ServerGenM a = ServerGenM {unServerGenM :: StateT ServerGenState Q a }
+    deriving newtype (Functor, Applicative, Monad, MonadState ServerGenState, MonadFail)
