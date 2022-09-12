@@ -10,7 +10,7 @@ import           Prelude
 import           Servant
 
 data TestAction method a where
-    ReverseText ::Text -> TestAction (RequestType '[PlainText] (Verb 'POST 200 '[JSON])) Text
+    ReverseText ::Text -> TestAction (RequestType 'Direct '[PlainText] (Verb 'POST 200 '[JSON])) Text
     ConcatText ::Text -> String -> TestAction Query Text
     SubAction ::Text -> SubAction method a -> TestAction method a
     deriving HasApiOptions

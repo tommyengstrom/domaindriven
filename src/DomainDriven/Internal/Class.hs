@@ -2,13 +2,14 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE BlockArguments #-}
 
 module DomainDriven.Internal.Class where
 
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Prelude
-import           Control.Lens                   ( (^.) )
+import           Control.Lens                   (  (^.))
 import           Data.Generics.Product
 import           Data.Time
 import           System.Random
@@ -20,28 +21,42 @@ import           Data.UUID                      ( UUID )
 import UnliftIO
 import Streamly.Prelude (SerialT)
 
-data RequestType (contentTypes :: [Type]) (verb :: Type -> Type)
-type Cmd = RequestType '[JSON] (Verb 'POST 200 '[JSON])
-type Query = RequestType '[JSON] (Verb 'GET 200 '[JSON])
+data RequestType (accessType :: ModelAccess) (contentTypes :: [Type]) (verb :: Type -> Type)
+
+data ModelAccess
+    = Direct
+    | WithCallback
+
+type Cmd = RequestType 'Direct '[JSON] (Verb 'POST 200 '[JSON])
+type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
 
 type family CanMutate method :: Bool where
-    CanMutate (RequestType c (Verb 'GET code cts)) = 'False
-    CanMutate (RequestType c (Verb 'POST code cts)) = 'True
-    CanMutate (RequestType c (Verb 'PUT code cts)) = 'True
-    CanMutate (RequestType c (Verb 'PATCH code cts)) = 'True
-    CanMutate (RequestType c (Verb 'DELETE code cts)) = 'True
+    CanMutate (RequestType 'Direct c (Verb 'GET code cts)) = 'False
+    CanMutate (RequestType 'Direct c (Verb 'POST code cts)) = 'True
+    CanMutate (RequestType 'Direct c (Verb 'PUT code cts)) = 'True
+    CanMutate (RequestType 'Direct c (Verb 'PATCH code cts)) = 'True
+    CanMutate (RequestType 'Direct c (Verb 'DELETE code cts)) = 'True
 
+type family GetModelAccess method :: ModelAccess where
+    GetModelAccess (RequestType a b c) = a
 
 data HandlerType method model event m a where
     Query :: CanMutate method ~ 'False
           => (model -> m a)
           -> HandlerType method model event m a
-    Cmd :: CanMutate method ~ 'True
+    Cmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)
         => (model -> m (model -> a, [event]))
         -> HandlerType method model event m a
+    CbCmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'WithCallback)
+        => ((forall x. (model -> m (model -> x, [event])) -> m x) -> m a)
+        -> HandlerType method model event m a
+
+
+type CmdCallback model event (m :: Type -> Type) =  (forall a. model -> m (a, [event]))
 
 mapModel
-    :: Monad m
+    :: forall m event model0 model1 method a.
+        Monad m
     => (model0 -> model1)
     -> HandlerType method model1 event m a
     -> HandlerType method model0 event m a
@@ -50,9 +65,19 @@ mapModel f = \case
     Cmd   h -> Cmd $ \m -> do
         (fm, evs) <- h $ f m
         pure (fm . f, evs)
+    --CbCmd withTrans -> CbCmd $ \transact -> withTrans (transact . (. f))
+    CbCmd withTrans -> CbCmd $ \runTrans ->
+        -- withTrans :: (forall x. (model -> m (x, [event])) -> m x) -> m a
+        -- runTrans  :: forall x. (model -> m (x, [event])) -> m x
+        -- trans     :: model -> m (x, [event])
+        withTrans $ \(trans :: model -> m (x, [e0])) -> do
+            runTrans $ \model -> do
+                (r, evs ) <- trans (f model)
+                pure (r . f, evs)
 
 mapEvent
-    :: Monad m
+    :: forall m e0 e1 a method model.
+        Monad m
     => (e0 -> e1)
     -> HandlerType method model e0 m a
     -> HandlerType method model e1 m a
@@ -61,6 +86,14 @@ mapEvent f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (ret, fmap f evs)
+    CbCmd withTrans -> CbCmd $ \runTrans ->
+        -- withTrans :: (forall x. (model -> m (x, [event])) -> m x) -> m a
+        -- runTrans  :: forall x. (model -> m (x, [event])) -> m x
+        -- trans     :: model -> m (x, [event])
+        withTrans $ \(trans :: model -> m (x, [e0])) -> do
+            runTrans $ \model -> do
+                (r, evs ) <- trans model
+                pure (r, fmap f evs)
 
 mapResult
     :: Monad m
@@ -72,6 +105,8 @@ mapResult f = \case
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (f . ret, evs)
+    CbCmd withTrans -> CbCmd $ \transact -> f <$> withTrans transact
+    -- CbCmd withTrans -> CbCmd $ ( fmap f . withTrans) -- Doesn't work as it contains a forall?
 
 class ReadModel p where
     type Model p :: Type
@@ -97,6 +132,8 @@ runAction
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
     Cmd   m -> transactionalUpdate p m
+    CbCmd withTrans -> withTrans $ \runTrans -> do
+        transactionalUpdate p runTrans
 
 
 
