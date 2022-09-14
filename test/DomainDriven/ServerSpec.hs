@@ -34,12 +34,13 @@ search :: Text -> ClientM [ItemInfo]
 itemPrice :: ItemKey -> ClientM Price
 itemStockQuantity :: ItemKey -> ClientM Quantity
 
+adminOrder :: NamedFields2 "AdminAction_Order" ItemKey Quantity -> ClientM NoContent
 adminRestock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
 adminAddItem
     :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
 adminRemoveItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
 
-buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
+buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
     = client (flatten $ Proxy @StoreActionApi)
 
 
@@ -111,8 +112,8 @@ spec = do
             it "The new item shows up when listing items" $ do
                 r <- runClientM listItems clientEnv
                 case r of
-                    Right [ItemInfo _ n _ _] -> n `shouldBe` "Test item"
-                    a                        -> fail $ "That shouldn't happen! " <> show a
+                    Right [ItemInfo _ n _ _ _] -> n `shouldBe` "Test item"
+                    a -> fail $ "That shouldn't happen! " <> show a
     aroundAll_ withTestServer $ do
         describe "Endpoints generated as expected" $ do
             it "Plaintext endpoint works" $ do

@@ -4,6 +4,7 @@ module DomainDriven
     , ApiOptions(..)
     , CanMutate
     , Cmd
+    , CbCmd
     , defaultApiOptions
     , defaultServerConfig
     , HandlerType(..)

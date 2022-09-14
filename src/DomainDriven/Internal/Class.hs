@@ -25,17 +25,18 @@ data RequestType (accessType :: ModelAccess) (contentTypes :: [Type]) (verb :: T
 
 data ModelAccess
     = Direct
-    | WithCallback
+    | Callback
 
 type Cmd = RequestType 'Direct '[JSON] (Verb 'POST 200 '[JSON])
+type CbCmd = RequestType 'Callback '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
 
 type family CanMutate method :: Bool where
-    CanMutate (RequestType 'Direct c (Verb 'GET code cts)) = 'False
-    CanMutate (RequestType 'Direct c (Verb 'POST code cts)) = 'True
-    CanMutate (RequestType 'Direct c (Verb 'PUT code cts)) = 'True
-    CanMutate (RequestType 'Direct c (Verb 'PATCH code cts)) = 'True
-    CanMutate (RequestType 'Direct c (Verb 'DELETE code cts)) = 'True
+    CanMutate (RequestType a c (Verb 'GET code cts)) = 'False
+    CanMutate (RequestType a c (Verb 'POST code cts)) = 'True
+    CanMutate (RequestType a c (Verb 'PUT code cts)) = 'True
+    CanMutate (RequestType a c (Verb 'PATCH code cts)) = 'True
+    CanMutate (RequestType a c (Verb 'DELETE code cts)) = 'True
 
 type family GetModelAccess method :: ModelAccess where
     GetModelAccess (RequestType a b c) = a
@@ -44,10 +45,12 @@ data HandlerType method model event m a where
     Query :: CanMutate method ~ 'False
           => (model -> m a)
           -> HandlerType method model event m a
-    Cmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)
+    Cmd :: ( CanMutate method ~ 'True
+           , GetModelAccess method ~ 'Direct)
         => (model -> m (model -> a, [event]))
         -> HandlerType method model event m a
-    CbCmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'WithCallback)
+    CbCmd :: ( CanMutate method ~ 'True
+             , GetModelAccess method ~ 'Callback)
         => ((forall x. (model -> m (model -> x, [event])) -> m x) -> m a)
         -> HandlerType method model event m a
 
