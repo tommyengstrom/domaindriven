@@ -30,6 +30,7 @@ data ModelAccess
 type Cmd = RequestType 'Direct '[JSON] (Verb 'POST 200 '[JSON])
 type CbCmd = RequestType 'Callback '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
+type CbQuery = RequestType 'Callback '[JSON] (Verb 'GET 200 '[JSON])
 
 type family CanMutate method :: Bool where
     CanMutate (RequestType a c (Verb 'GET code cts)) = 'False
@@ -42,15 +43,16 @@ type family GetModelAccess method :: ModelAccess where
     GetModelAccess (RequestType a b c) = a
 
 data HandlerType method model event m a where
-    Query :: CanMutate method ~ 'False
+    Query :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Direct)
           => (model -> m a)
           -> HandlerType method model event m a
-    Cmd :: ( CanMutate method ~ 'True
-           , GetModelAccess method ~ 'Direct)
+    CbQuery :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Callback)
+          => ((m model) -> m a)
+          -> HandlerType method model event m a
+    Cmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)
         => (model -> m (model -> a, [event]))
         -> HandlerType method model event m a
-    CbCmd :: ( CanMutate method ~ 'True
-             , GetModelAccess method ~ 'Callback)
+    CbCmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Callback)
         => ((forall x. (model -> m (model -> x, [event])) -> m x) -> m a)
         -> HandlerType method model event m a
 
@@ -65,10 +67,11 @@ mapModel
     -> HandlerType method model0 event m a
 mapModel f = \case
     Query h -> Query (h . f)
+    CbQuery withModel -> CbQuery \fetchModel ->
+        withModel (fmap f fetchModel)
     Cmd   h -> Cmd $ \m -> do
         (fm, evs) <- h $ f m
         pure (fm . f, evs)
-    --CbCmd withTrans -> CbCmd $ \transact -> withTrans (transact . (. f))
     CbCmd withTrans -> CbCmd $ \runTrans ->
         -- withTrans :: (forall x. (model -> m (x, [event])) -> m x) -> m a
         -- runTrans  :: forall x. (model -> m (x, [event])) -> m x
@@ -86,6 +89,7 @@ mapEvent
     -> HandlerType method model e1 m a
 mapEvent f = \case
     Query h -> Query h
+    CbQuery h -> CbQuery h
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (ret, fmap f evs)
@@ -105,6 +109,7 @@ mapResult
     -> HandlerType method model e m r1
 mapResult f = \case
     Query h -> Query $ fmap f . h
+    CbQuery h -> CbQuery $ fmap f . h
     Cmd   h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (f . ret, evs)
@@ -134,6 +139,7 @@ runAction
     -> m ret
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
+    CbQuery m -> m (liftIO (getModel p))
     Cmd   m -> transactionalUpdate p m
     CbCmd withTrans -> withTrans $ \runTrans -> do
         transactionalUpdate p runTrans
