@@ -3,6 +3,7 @@
 module Models.Store where
 
 
+import           Control.Concurrent             ( threadDelay )
 import           Control.Monad                  ( when )
 import           Control.Monad.Catch            ( MonadThrow
                                                 , throwM
@@ -51,10 +52,11 @@ newtype Price = Price Int
     deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
 
 data ItemInfo = ItemInfo
-    { key      :: ItemKey
-    , name     :: ItemName
-    , quantity :: Quantity
-    , price    :: Price
+    { key             :: ItemKey
+    , name            :: ItemName
+    , quantity        :: Quantity
+    , orderedQuantity :: Quantity -- ^ Ordered from supplier
+    , price           :: Price
     }
     deriving (Show, Eq, Generic, ToJSON, FromJSON, ToSchema)
 
@@ -62,7 +64,7 @@ data ItemInfo = ItemInfo
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction method a where
     BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
-    ListItems ::StoreAction (RequestType '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
+    ListItems ::StoreAction (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
     Search ::Text -> StoreAction Query [ItemInfo]
     ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
     AdminAction ::AdminAction method a -> StoreAction method a
@@ -74,6 +76,7 @@ data ItemAction method a where
     deriving HasApiOptions
 
 data AdminAction method a where
+    Order    ::ItemKey -> Quantity -> AdminAction CbCmd ()
     Restock    ::ItemKey -> Quantity -> AdminAction Cmd ()
     AddItem    ::ItemName -> Quantity -> Price -> AdminAction Cmd ItemKey
     RemoveItem ::ItemKey -> AdminAction Cmd ()
@@ -84,6 +87,7 @@ data AdminAction method a where
 -- `foldl' applyStoreEvent mempty listOfEvents`
 data StoreEvent
     = BoughtItem ItemKey Quantity
+    | Ordered ItemKey Quantity
     | Restocked ItemKey Quantity
     | AddedItem ItemKey ItemName Price
     | RemovedItem ItemKey
@@ -107,15 +111,33 @@ handleStoreAction = \case
     ListItems -> Query $ pure . M.elems
     Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
-            matches (ItemInfo _ (ItemName n) _ _) = T.toUpper t `T.isInfixOf` T.toUpper n
+            matches (ItemInfo _ (ItemName n) _ _ _) =
+                T.toUpper t `T.isInfixOf` T.toUpper n
         pure . filter matches $ M.elems m
     ItemAction iKey cmd -> handleItemAction iKey cmd
     AdminAction cmd     -> handleAdminAction cmd
 
 handleAdminAction
-    :: (MonadUnliftIO m, MonadThrow m)
+    :: forall m
+     . (MonadUnliftIO m, MonadThrow m)
     => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
 handleAdminAction = \case
+    Order iKey q -> CbCmd $ \runTransaction -> do
+        m <- runTransaction $ \m -> pure (const m, [])
+        when (M.notMember iKey m) $ throwM err404
+        -- Simulate making an external API call that takes 2s.
+        -- It is important that we do not do this in a normal Cmd
+        -- as this will block any other command from runnning during
+        -- this time.
+        let orderItems :: ItemKey -> Quantity -> m ()
+            orderItems _ _ = liftIO $ threadDelay 2000000
+        orderItems iKey q
+        -- Note that since this whole command is not running in a transaction it is
+        -- possible that the item was removed from the inventory while we were making the
+        -- external API call. We ignore it here, but in a real world situation you may
+        -- want to handle this.
+        runTransaction $ \_ -> pure (const (), [Ordered iKey q])
+
     Restock iKey q -> Cmd $ \m -> do
         when (M.notMember iKey m) $ throwM err404
         pure (const (), [Restocked iKey q])
@@ -146,9 +168,11 @@ handleItemAction iKey = \case
 ------------------------------------------------------------------------------------------
 applyStoreEvent :: StoreModel -> Stored StoreEvent -> StoreModel
 applyStoreEvent m (Stored e _ _) = case e of
+    Ordered iKey q ->
+        M.update (\ii -> Just ii { orderedQuantity = orderedQuantity ii + q }) iKey m
     BoughtItem iKey q -> M.update (\ii -> Just ii { quantity = quantity ii - q }) iKey m
     Restocked iKey q -> M.update (\ii -> Just ii { quantity = quantity ii + q }) iKey m
-    AddedItem iKey name' price -> M.insert iKey (ItemInfo iKey name' 0 price) m
+    AddedItem iKey name' price -> M.insert iKey (ItemInfo iKey name' 0 0 price) m
     RemovedItem iKey -> M.delete iKey m
 
 

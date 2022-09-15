@@ -4,6 +4,7 @@ module DomainDriven
     , ApiOptions(..)
     , CanMutate
     , Cmd
+    , CbCmd
     , defaultApiOptions
     , defaultServerConfig
     , HandlerType(..)
@@ -15,6 +16,7 @@ module DomainDriven
     , module X
     , NamedJsonFields(..)
     , Query
+    , ModelAccess(..)
     , ReadModel(..)
     , RequestType
     , runAction

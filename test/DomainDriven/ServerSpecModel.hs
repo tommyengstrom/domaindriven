@@ -10,7 +10,7 @@ import           Prelude
 import           Servant
 
 data TestAction method a where
-    ReverseText ::Text -> TestAction (RequestType '[PlainText] (Verb 'POST 200 '[JSON])) Text
+    ReverseText ::Text -> TestAction (RequestType 'Callback '[PlainText] (Verb 'POST 200 '[JSON])) Text
     ConcatText ::Text -> String -> TestAction Query Text
     SubAction ::Text -> SubAction method a -> TestAction method a
     deriving HasApiOptions
@@ -22,7 +22,7 @@ data SubAction method a where
 
 handleTestAction :: MonadThrow m => ActionHandler () () m TestAction
 handleTestAction = \case
-    ReverseText t       -> Cmd $ \() -> pure (const $ T.reverse t, [])
+    ReverseText t       -> CbCmd $ \_runTransaction -> pure (T.reverse t)
     ConcatText a b      -> Query $ \() -> pure $ a <> T.pack b
     SubAction  t action -> handleSubAction t action
 
