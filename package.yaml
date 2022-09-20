@@ -22,7 +22,6 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 dependencies:
 - base >= 4.7 && < 5
 - aeson
-- aeson-pretty
 - async
 - bytestring
 - containers
@@ -31,17 +30,13 @@ dependencies:
 - exceptions
 - generic-lens
 - microlens
-- monad-loops
 - mtl
 - openapi3
 - postgresql-simple
 - random
-- safe
 - servant
 - servant-server
 - servant-flatten
-- stm
-- streaming
 - template-haskell
 - text
 - time

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 088c90bdb1aab741d11746335f8456ea0da6734002fdc87ecf190fd0ff67a00a
+-- hash: d5d54eb57008d361eb0d9e0b66fb34b7b70a58e1d592df39c9a88ca271e43878
 
 name:           domain-driven
 version:        0.1.0.0
@@ -82,7 +82,6 @@ library
       ViewPatterns
   build-depends:
       aeson
-    , aeson-pretty
     , async
     , base >=4.7 && <5
     , bytestring
@@ -93,17 +92,13 @@ library
     , generic-lens
     , http-types
     , microlens
-    , monad-loops
     , mtl
     , openapi3
     , postgresql-simple
     , random
-    , safe
     , servant
     , servant-flatten
     , servant-server
-    , stm
-    , streaming
     , streamly
     , template-haskell
     , text
@@ -161,7 +156,6 @@ executable bench
   ghc-options: -threaded -rtsopts -with-rtsopts=-s
   build-depends:
       aeson
-    , aeson-pretty
     , async
     , base >=4.7 && <5
     , bytestring
@@ -174,18 +168,14 @@ executable bench
     , exceptions
     , generic-lens
     , microlens
-    , monad-loops
     , mtl
     , openapi3
     , postgresql-simple
     , pretty-simple
     , random
-    , safe
     , servant
     , servant-flatten
     , servant-server
-    , stm
-    , streaming
     , streamly
     , template-haskell
     , text
@@ -239,7 +229,6 @@ executable example-simple
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
   build-depends:
       aeson
-    , aeson-pretty
     , async
     , base >=4.7 && <5
     , bytestring
@@ -250,18 +239,14 @@ executable example-simple
     , exceptions
     , generic-lens
     , microlens
-    , monad-loops
     , mtl
     , openapi3
     , postgresql-simple
     , random
-    , safe
     , servant
     , servant-flatten
     , servant-openapi3
     , servant-server
-    , stm
-    , streaming
     , streamly
     , template-haskell
     , text
@@ -319,7 +304,6 @@ executable example-store
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
   build-depends:
       aeson
-    , aeson-pretty
     , async
     , base >=4.7 && <5
     , bytestring
@@ -330,18 +314,14 @@ executable example-store
     , exceptions
     , generic-lens
     , microlens
-    , monad-loops
     , mtl
     , openapi3
     , postgresql-simple
     , random
-    , safe
     , servant
     , servant-flatten
     , servant-openapi3
     , servant-server
-    , stm
-    , streaming
     , streamly
     , template-haskell
     , text
@@ -405,7 +385,6 @@ test-suite domain-driven-test
   build-depends:
       QuickCheck
     , aeson
-    , aeson-pretty
     , async
     , base >=4.7 && <5
     , bytestring
@@ -419,21 +398,17 @@ test-suite domain-driven-test
     , hspec-core
     , http-client
     , microlens
-    , monad-loops
     , mtl
     , openapi3
     , postgresql-simple
     , quickcheck-arbitrary-adt
     , quickcheck-classes
     , random
-    , safe
     , servant
     , servant-client
     , servant-flatten
     , servant-openapi3
     , servant-server
-    , stm
-    , streaming
     , streamly
     , template-haskell
     , text

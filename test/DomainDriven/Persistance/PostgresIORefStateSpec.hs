@@ -27,7 +27,6 @@ import           DomainDriven.Persistance.Postgres.Migration
 import           Lens.Micro                     ( (^.) )
 import qualified Models.Store                                 as Store
 import           Prelude
-import           Safe                           ( headNote )
 import qualified Streamly.Prelude                             as S
 import           Test.Hspec
 --import           Text.Pretty.Simple
@@ -202,7 +201,7 @@ storeModelSpec = describe "Test basic functionality" $ do
         Store.quantity item `shouldBe` 10
 
     it "Can buy item" $ \p -> do
-        iKey <- headNote "Ops" . M.keys <$> getModel p
+        iKey <- head . M.keys <$> getModel p
         runAction p Store.handleStoreAction $ Store.BuyItem iKey 7
         m    <- getModel p
         item <- maybe (fail $ show iKey <> " is not part of:\n" <> show m) pure
