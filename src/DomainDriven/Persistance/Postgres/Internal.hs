@@ -1,9 +1,6 @@
 -- | Postgres events with state as an IORef
 module DomainDriven.Persistance.Postgres.Internal where
 
-import           Control.Lens                   ( (^.)
-                                                , to
-                                                )
 import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
@@ -21,6 +18,9 @@ import qualified Database.PostgreSQL.Simple.Cursor            as Cursor
 import           DomainDriven.Internal.Class
 import           DomainDriven.Persistance.Postgres.Types
 import           GHC.Generics                   ( Generic )
+import           Lens.Micro                     ( (^.)
+                                                , to
+                                                )
 import           Prelude
 import qualified Streamly.Data.Unfold                         as Unfold
 import qualified Streamly.Prelude                             as S

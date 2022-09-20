@@ -9,7 +9,7 @@ module DomainDriven.Internal.Class where
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Prelude
-import           Control.Lens                   (  (^.))
+import           Lens.Micro                   (  (^.))
 import           Data.Generics.Product
 import           Data.Time
 import           System.Random

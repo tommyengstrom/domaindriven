@@ -5,11 +5,9 @@
 module DomainDriven.Server.TH where
 
 
-import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Catch            ( MonadThrow(..) )
 import           Control.Monad.State
-import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
 import qualified Data.Map                                     as M
@@ -22,6 +20,7 @@ import           DomainDriven.Internal.Class
 import           DomainDriven.Server.Helpers
 import           DomainDriven.Server.Types
 import           Language.Haskell.TH
+import           Lens.Micro
 import           Prelude
 import           Servant
 import           UnliftIO                       ( MonadUnliftIO(..) )
@@ -174,17 +173,6 @@ mkApiPiece cfg = \case
             <> pprint c
             <> show c -- FIXME: Remove once it works
 
--- | Turn "OhYEAH" into "ohYEAH"...
-lowerFirst :: String -> String
-lowerFirst = \case
-    c : cs -> toLower c : cs
-    []     -> []
-
-upperFirst :: String -> String
-upperFirst = \case
-    c : cs -> toUpper c : cs
-    []     -> []
-
 
 -- | Create a ApiSpec from a GADT
 -- The GADT must have one parameter representing the return type
@@ -285,16 +273,21 @@ mkHandlerTypeDec p = enterApiPiece p $ do
 uniqueParamName :: Name -> ServerGenM String
 uniqueParamName tyName = do
     paramName <- do
-        gets (^. field @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
-            Nothing ->
-                fail
-                    $  "No param name defined for "
-                    <> show tyName
-                    <> ". Make sure it implements `HasParamName` and that the "
-                    <> " instance is imported where `mkServerConfig` is called."
-            Just n -> pure $ T.unpack n
+        -- gets (^. field' @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
+        gets
+                (\c -> M.lookup (tyName ^. unqualifiedString)
+                    $ DomainDriven.Server.Types.allParamNames c
+                )
+            >>= \case
+                    Nothing ->
+                        fail
+                            $  "No param name defined for "
+                            <> show tyName
+                            <> ". Make sure it implements `HasParamName` and that the "
+                            <> " instance is imported where `mkServerConfig` is called."
+                    Just n -> pure $ T.unpack n
 
-    existingNames <- gets (view $ field @"usedParamNames")
+    existingNames <- gets (^. field @"usedParamNames")
     when (paramName `elem` existingNames) $ do
         info <- gets (^. field @"info")
         let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show
@@ -614,7 +607,7 @@ prependServerEndpointName :: [UrlSegment] -> Type -> Q Type
 prependServerEndpointName prefix rest = do
     foldr (\a b -> [t| $(pure a) :> $b |])
           (pure rest)
-          (fmap (LitT . StrTyLit . view typed) prefix)
+          (fmap (LitT . StrTyLit . (^. typed)) prefix)
 
 mkReqBody
     :: HandlerSettings -> ConstructorName -> ConstructorArgs -> ServerGenM (Maybe Type)

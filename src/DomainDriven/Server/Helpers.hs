@@ -1,15 +1,15 @@
 module DomainDriven.Server.Helpers where
 
-import           Control.Lens
 import           Control.Monad
 import           Control.Monad.State
-import           Data.Char
 import           Data.Generics.Product
 import qualified Data.List                                    as L
 import           DomainDriven.Internal.Class
+import           DomainDriven.Internal.Text
 import           DomainDriven.Server.Types
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax     ( OccName(..) )
+import           Lens.Micro
 import           Prelude
 
 
@@ -31,7 +31,7 @@ withLocalState fs m = ServerGenM $ do
 
 mkUrlSegments :: ConstructorName -> ServerGenM [UrlSegment]
 mkUrlSegments n = do
-    opts <- gets (view $ field @"info" . typed)
+    opts <- gets (^. field @"info" . typed)
     pure
         $   n
         ^.. typed
@@ -44,18 +44,6 @@ mkUrlSegments n = do
 
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
-
--- | Turn "OhYEAH" into "ohYEAH"...
-lowerFirst :: String -> String
-lowerFirst = \case
-    c : cs -> toLower c : cs
-    []     -> []
-
-upperFirst :: String -> String
-upperFirst = \case
-    c : cs -> toUpper c : cs
-    []     -> []
-
 
 
 askTypeName :: ServerGenM Name
@@ -99,19 +87,18 @@ askBodyTag :: ConstructorName -> ServerGenM TyLit
 askBodyTag cName = do
     constructorSegments <- mkUrlSegments cName
     gadtSegment         <-
-        gets (view $ field @"info" . field @"options" . field @"bodyNameBase") >>= \case
-            Just n  -> pure $ UrlSegment n
-            Nothing -> gets
-                ( view
-                $ field @"info"
-                . field @"currentGadt"
-                . typed
-                . to nameBase
-                . to UrlSegment
-                )
+        gets (^. field @"info" . field @"options" . field @"bodyNameBase") >>= \case
+            Just n -> pure $ UrlSegment n
+            Nothing ->
+                gets
+                    (^. field @"info"
+                      . field @"currentGadt"
+                      . typed
+                      . to nameBase
+                      . to UrlSegment
+                    )
 
-    separator <- gets
-        (view $ field @"info" . typed @ApiOptions . field @"typenameSeparator")
+    separator <- gets (^. field @"info" . typed @ApiOptions . field @"typenameSeparator")
     pure
         .   StrTyLit
         .   L.intercalate separator

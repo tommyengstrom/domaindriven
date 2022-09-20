@@ -1,20 +1,31 @@
 module DomainDriven.Internal.Text where
 
-import           Prelude
-import           Data.Text.Lens
-import           Control.Lens                   ( taking
-                                                , (%~)
-                                                )
 import           Data.Char                      ( toLower
                                                 , toUpper
                                                 )
-
-lowerFirst :: IsText t => t -> t
-lowerFirst = taking 1 text %~ toLower
-
-upperFirst :: IsText t => t -> t
-upperFirst = taking 1 text %~ toUpper
+import qualified Data.Text                                    as T
+import           Data.Text                      ( Text )
+import           Prelude
 
 
-camelAppend :: (IsText t, Monoid t) => t -> t -> t
+lowerFirst :: String -> String
+lowerFirst = \case
+    []     -> []
+    c : cs -> toLower c : cs
+
+lowerFirstT :: Text -> Text
+lowerFirstT = T.pack . lowerFirst . T.unpack
+
+upperFirst :: String -> String
+upperFirst = \case
+    []     -> []
+    c : cs -> toUpper c : cs
+
+upperFirstT :: Text -> Text
+upperFirstT = T.pack . upperFirst . T.unpack
+
+camelAppend :: String -> String -> String
 camelAppend a b = a <> upperFirst b
+
+camelAppendT :: Text -> Text -> Text
+camelAppendT a b = a <> upperFirstT b

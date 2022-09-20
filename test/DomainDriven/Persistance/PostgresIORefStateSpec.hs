@@ -3,7 +3,6 @@
 module DomainDriven.Persistance.PostgresIORefStateSpec where
 
 import           Control.Concurrent.Async
-import           Control.Lens                   ( (^.) )
 import           Control.Monad
 import           Data.Aeson                     ( Value
                                                 , encode
@@ -25,6 +24,7 @@ import           DomainDriven.Persistance.Postgres.Internal
                                                 , writeEvents
                                                 )
 import           DomainDriven.Persistance.Postgres.Migration
+import           Lens.Micro                     ( (^.) )
 import qualified Models.Store                                 as Store
 import           Prelude
 import           Safe                           ( headNote )

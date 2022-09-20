@@ -4,17 +4,17 @@
 module DomainDriven.Internal.HasFieldName where
 
 import           Data.Aeson
+import qualified Data.HashMap.Strict                          as HM
+import qualified Data.Map                                     as M
 import           Data.OpenApi
-import           GHC.Generics
-import           Prelude
+import           Data.Set                       ( Set )
 import qualified Data.Text                                    as T
 import           Data.Text                      ( Text )
-import           Data.Set                       ( Set )
-import           Data.Vector                    ( Vector )
-import qualified Data.Map                                     as M
-import qualified Data.HashMap.Strict                          as HM
 import           Data.Time
+import           Data.Vector                    ( Vector )
 import           DomainDriven.Internal.Text
+import           GHC.Generics
+import           Prelude
 
 class HasFieldName t where
   fieldName :: Text
@@ -43,25 +43,25 @@ instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
   HasFieldName (M.Map k v)
   where
-    fieldName = "mapOf" `camelAppend` fieldName @v
+    fieldName = "mapOf" `camelAppendT` fieldName @v
 
 instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
   HasFieldName (HM.HashMap k v)
   where
-    fieldName = "mapOf" `camelAppend` fieldName @v
+    fieldName = "mapOf" `camelAppendT` fieldName @v
 
 instance (Ord v, HasFieldName v) => HasFieldName (Set v) where
-    fieldName = "setOf" `camelAppend` fieldName @v
+    fieldName = "setOf" `camelAppendT` fieldName @v
 
 instance {-# OVERLAPPABLE #-} HasFieldName v => HasFieldName [v] where
-    fieldName = "listOf" `camelAppend` fieldName @v
+    fieldName = "listOf" `camelAppendT` fieldName @v
 
 instance {-# OVERLAPPING #-} HasFieldName String where
     fieldName = "string"
 
 instance HasFieldName v => HasFieldName (Vector v) where
-    fieldName = "vectorOf" `camelAppend` fieldName @v
+    fieldName = "vectorOf" `camelAppendT` fieldName @v
 
 instance HasFieldName v => HasFieldName (Maybe v) where
     fieldName = fieldName @v

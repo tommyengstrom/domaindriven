@@ -1,9 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Main where
 
-import           Control.Lens                   ( (&)
-                                                , (.~)
-                                                )
 import           Criterion
 import           Criterion.Main
 import           Data.Generics.Product
@@ -19,6 +16,9 @@ import           DomainDriven.Persistance.Postgres.Internal
                                                 )
 import           DomainDriven.Server
 import           GHC.Int                        ( Int64 )
+import           Lens.Micro                     ( (&)
+                                                , (.~)
+                                                )
 import           Models.Counter                               as Counter
 import           Prelude
 import qualified Streamly.Prelude                             as Stream

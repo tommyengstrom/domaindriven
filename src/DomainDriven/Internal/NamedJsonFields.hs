@@ -5,9 +5,6 @@
 module DomainDriven.Internal.NamedJsonFields where
 
 import           Control.Applicative
-import           Control.Lens            hiding ( from
-                                                , to
-                                                )
 import           Control.Monad.State
 import           Data.Aeson
 import qualified Data.Aeson.Key                               as Key
@@ -20,11 +17,16 @@ import           Data.OpenApi.Declare
 import           Data.Proxy
 import           Data.Text                      ( Text )
 import qualified Data.Text                                    as T
-import           Data.Text.Lens                 ( packed )
 import           Data.Typeable
 import           DomainDriven.Internal.HasFieldName
 import           GHC.Generics
+import           Lens.Micro              hiding ( to )
 import           Prelude
+
+import qualified Lens.Micro                                   as Lens
+
+packed :: Getting r String Text
+packed = Lens.to T.pack
 
 newtype NamedJsonFields a = NamedJsonFields a
 

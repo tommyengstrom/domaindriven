@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a5c7773cd8f1e307e84170504604985e85c11803552ec98a882ec9b18f521b2a
+-- hash: 088c90bdb1aab741d11746335f8456ea0da6734002fdc87ecf190fd0ff67a00a
 
 name:           domain-driven
 version:        0.1.0.0
@@ -92,7 +92,7 @@ library
     , exceptions
     , generic-lens
     , http-types
-    , lens
+    , microlens
     , monad-loops
     , mtl
     , openapi3
@@ -173,7 +173,7 @@ executable bench
     , domain-driven
     , exceptions
     , generic-lens
-    , lens
+    , microlens
     , monad-loops
     , mtl
     , openapi3
@@ -249,7 +249,7 @@ executable example-simple
     , domain-driven
     , exceptions
     , generic-lens
-    , lens
+    , microlens
     , monad-loops
     , mtl
     , openapi3
@@ -329,7 +329,7 @@ executable example-store
     , domain-driven
     , exceptions
     , generic-lens
-    , lens
+    , microlens
     , monad-loops
     , mtl
     , openapi3
@@ -418,7 +418,7 @@ test-suite domain-driven-test
     , hspec
     , hspec-core
     , http-client
-    , lens
+    , microlens
     , monad-loops
     , mtl
     , openapi3

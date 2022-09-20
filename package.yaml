@@ -30,7 +30,7 @@ dependencies:
 - directory
 - exceptions
 - generic-lens
-- lens
+- microlens
 - monad-loops
 - mtl
 - openapi3

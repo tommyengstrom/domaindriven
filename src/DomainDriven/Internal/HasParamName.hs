@@ -46,25 +46,25 @@ instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasParamName v,ToSchema k) =>
   HasParamName (M.Map k v)
   where
-    paramName = "mapOf" `camelAppend` paramName @v
+    paramName = "mapOf" `camelAppendT` paramName @v
 
 instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasParamName v,ToSchema k) =>
   HasParamName (HM.HashMap k v)
   where
-    paramName = "mapOf" `camelAppend` paramName @v
+    paramName = "mapOf" `camelAppendT` paramName @v
 
 instance (Ord v, HasParamName v) => HasParamName (Set v) where
-    paramName = "setOf" `camelAppend` paramName @v
+    paramName = "setOf" `camelAppendT` paramName @v
 
 instance {-# OVERLAPPABLE #-} HasParamName v => HasParamName [v] where
-    paramName = "listOf" `camelAppend` paramName @v
+    paramName = "listOf" `camelAppendT` paramName @v
 
 instance {-# OVERLAPPING #-} HasParamName String where
     paramName = "string"
 
 instance HasParamName v => HasParamName (Vector v) where
-    paramName = "vectorOf" `camelAppend` paramName @v
+    paramName = "vectorOf" `camelAppendT` paramName @v
 
 instance HasParamName v => HasParamName (Maybe v) where
     paramName = paramName @v
