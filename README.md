@@ -1,11 +1,11 @@
-# Domain Driven
+# DomainDriven
 
-Domain driven is an eventsourcing/CQRS/DDD library. The goal of this library is to allow you to implement DDD principles without focusing on the boilerplate. Using `Template Haskell` we generate a Servant server from the model specification.
+DomainDriven is a batteries included synchronous eventsourcing and CQRS library. The goal of this library is to allow you to implement DDD principles without focusing on the boilerplate. Using `Template Haskell` we generate a Servant server from the specification and we keep the specification succinct.
 
 ## The idea
 
-- Focus on small scale systems that can run in memory (Models can be split up, e.g. per customer)
-- Let the user focus on the actual problem by generating most of the code
+- Use a GADT to specify the actions, what will be translated into `GET`s and `POST`s.
+- Make each event update run in a transaction, thereby avoiding the eventual consistency issues commonly associated with eventsourcing.
 
 ## How it works
 
@@ -13,18 +13,24 @@ In order to implement a model in `domain-driven` you have to define:
 - The model (current state)
 - The events
 - How to handle events
-- The commands
-- How to handle commands
+- The actions (queries and commands)
+- How to handle actions
 
 ### Model
 
-The model is the current state of the system. This is what you normally would keep in a database.
-
-Note that, since this library is based on eventsourcing, you often do not need to add in things you think you'll need down the line. Anything that is available in the events in some form can be included in the model at some later time.
+The model is the current state of the system. This is what you normally would keep in a database, but as this is an eventsources system the state is not fundamental as it can be recalculated.
 
 ### Events
 
 Events are things that happened in the past. The event you define represent all the changes that can occur in the system.
+
+Events should be specified in past tens.
+```haskell
+
+data Event
+    = IncreasedCounter
+    | DecreasedCounter
+```
 
 ### Event handler
 
@@ -48,9 +54,10 @@ data Stored a = Stored
 Commands are defined using a GADT with one type parameter represending the return type. For example:
 
 ``` haskell
-data StorageCmd a where
-    AddFile :: ByteString -> StorageCmd UUID
-    RemoveFile :: UUID -> StorageCmd ()
+data StorageAction method a where
+    GetFile :: UUID -> StorageAction Query ByteString
+    AddFile :: ByteString -> StorageAction Cmd UUID
+    RemoveFile :: UUID -> StorageAction Cmd ()
 ```
 
 ### Command handler
@@ -62,13 +69,37 @@ In addition you may need to make requests, read from disk, or perform other side
 `ActionHandler` is defined as:
 
 ``` haskell
-type ActionHandler model event cmd err
-    = forall a . Exception err => cmd a -> IO (model -> Either err (a, [event]))
+type ActionHandler model event m cmd
+    = forall method a . cmd method a -> HandlerType method model event m a
 ```
 
-Meaning when you get a command you can perform arbitrary side effects in IO, but in this stage you do not have access to the current model. Instead you have to return a continuation telling the library how to generate events or errors based on the model.
+In practice this means you specify actions as
 
-The reason for this approach is that it allows the library to guarantee that the model isn't updated where it should not be.
+```haskell
+
+data CounterAction method return where
+   GetCounter ::CounterAction Query Int
+   IncreaseCounter ::CounterAction Cmd Int
+   DecreaseCounter ::CounterAction Cmd Int
+```
+
+and the corresponding handler as
+
+```haskell
+handleAction
+    :: CounterAction method a -> HandlerType method CounterModel CounterEvent IO a
+handleAction = \case
+    GetCounter      -> Query $ pure
+    IncreaseCounter -> Cmd $ \_ -> pure (id, [CounterIncreased])
+    DecreaseCounter -> Cmd $ \counter -> do
+        when (counter < 1) (throwM NegativeNotSupported)
+        pure (id, [CounterDecreased])
+
+```
+
+A `Query` takes a `model -> m a`, i.e. you get access to the model and the ability to run monadic efficts. `Query`s will be translates into `GET` in the generated API.
+
+A `Cmd` has the additional ability of emitting events. It takes a `model -> m (model -> a, [event])`. The return value is specified as a function from the updated model to the return type. This way we can, in the Counter example, return the new value after the event handler has run.
 
 
 ### Generating the server

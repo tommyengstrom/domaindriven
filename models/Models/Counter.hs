@@ -21,15 +21,16 @@ data CounterEvent
     | CounterDecreased
     deriving (Show, Generic, ToJSON, FromJSON, NFData)
 
-data CounterCmd method return where
-   GetCounter ::CounterCmd Query Int
-   IncreaseCounter ::CounterCmd Cmd Int
-   DecreaseCounter ::CounterCmd Cmd Int
-   AddToCounter ::Int -> CounterCmd Cmd Int -- ^ Add a positive number to the counter
+data CounterAction method return where
+   GetCounter ::CounterAction Query Int
+   IncreaseCounter ::CounterAction Cmd Int
+   DecreaseCounter ::CounterAction Cmd Int
+   AddToCounter ::Int -> CounterAction Cmd Int -- ^ Add a positive number to the counter
    deriving HasApiOptions
 
-handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
-handleCmd = \case
+handleAction
+    :: CounterAction method a -> HandlerType method CounterModel CounterEvent IO a
+handleAction = \case
     GetCounter      -> Query $ pure
     IncreaseCounter -> Cmd $ \_ -> pure (id, [CounterIncreased])
     DecreaseCounter -> Cmd $ \counter -> do

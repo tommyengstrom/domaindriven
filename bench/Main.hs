@@ -56,7 +56,7 @@ setupDbFull nrEvents = do
     _      <- writeEvents conn (getEventTableName eventTable) events
     setupDbQuick Nothing
 
-$(mkServer serverConfig ''CounterCmd)
+$(mkServer serverConfig ''CounterAction)
 
 main' :: IO ()
 main' = do
