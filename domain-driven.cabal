@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d5d54eb57008d361eb0d9e0b66fb34b7b70a58e1d592df39c9a88ca271e43878
+-- hash: 848d2b887e4c49a70ee03437c11634d15ded2bf53db00d4a449bcf239476d034
 
 name:           domain-driven
 version:        0.1.0.0
@@ -87,7 +87,6 @@ library
     , bytestring
     , containers
     , deepseq
-    , directory
     , exceptions
     , generic-lens
     , http-types
@@ -96,7 +95,6 @@ library
     , openapi3
     , postgresql-simple
     , random
-    , servant
     , servant-flatten
     , servant-server
     , streamly
@@ -153,38 +151,23 @@ executable bench
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-s
+  ghc-options: -threaded -rtsopts -with-rtsopts=-s -Wunused-packages -Werror
   build-depends:
       aeson
-    , async
     , base >=4.7 && <5
-    , bytestring
     , containers
     , criterion
-    , criterion-measurement
     , deepseq
-    , directory
     , domain-driven
     , exceptions
     , generic-lens
     , microlens
-    , mtl
     , openapi3
     , postgresql-simple
-    , pretty-simple
-    , random
-    , servant
-    , servant-flatten
     , servant-server
     , streamly
-    , template-haskell
     , text
-    , time
-    , transformers
     , unliftio
-    , unordered-containers
-    , uuid
-    , vector
   default-language: Haskell2010
 
 executable example-simple
@@ -226,37 +209,16 @@ executable example-simple
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
   build-depends:
       aeson
-    , async
     , base >=4.7 && <5
     , bytestring
-    , containers
-    , deepseq
-    , directory
     , domain-driven
     , exceptions
-    , generic-lens
-    , microlens
     , mtl
-    , openapi3
-    , postgresql-simple
-    , random
-    , servant
-    , servant-flatten
     , servant-openapi3
     , servant-server
-    , streamly
-    , template-haskell
-    , text
-    , time
-    , transformers
-    , unliftio
-    , unordered-containers
-    , uuid
-    , vector
-    , wai
     , warp
   default-language: Haskell2010
 
@@ -301,37 +263,21 @@ executable example-store
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -ddump-splices
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Werror -Wunused-packages
   build-depends:
       aeson
-    , async
     , base >=4.7 && <5
     , bytestring
     , containers
     , deepseq
-    , directory
     , domain-driven
     , exceptions
-    , generic-lens
-    , microlens
     , mtl
     , openapi3
-    , postgresql-simple
-    , random
-    , servant
-    , servant-flatten
     , servant-openapi3
     , servant-server
-    , streamly
-    , template-haskell
     , text
-    , time
-    , transformers
     , unliftio
-    , unordered-containers
-    , uuid
-    , vector
-    , wai
     , warp
   default-language: Haskell2010
 
@@ -381,7 +327,7 @@ test-suite domain-driven-test
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -ddump-splices
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
   build-depends:
       QuickCheck
     , aeson
@@ -390,12 +336,10 @@ test-suite domain-driven-test
     , bytestring
     , containers
     , deepseq
-    , directory
     , domain-driven
     , exceptions
     , generic-lens
     , hspec
-    , hspec-core
     , http-client
     , microlens
     , mtl
@@ -403,20 +347,14 @@ test-suite domain-driven-test
     , postgresql-simple
     , quickcheck-arbitrary-adt
     , quickcheck-classes
-    , random
-    , servant
     , servant-client
     , servant-flatten
     , servant-openapi3
     , servant-server
     , streamly
-    , template-haskell
     , text
     , time
-    , transformers
     , unliftio
-    , unordered-containers
     , uuid
-    , vector
     , warp
   default-language: Haskell2010

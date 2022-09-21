@@ -21,31 +21,6 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 
 dependencies:
 - base >= 4.7 && < 5
-- aeson
-- async
-- bytestring
-- containers
-- deepseq
-- directory
-- exceptions
-- generic-lens
-- microlens
-- mtl
-- openapi3
-- postgresql-simple
-- random
-- servant
-- servant-server
-- servant-flatten
-- template-haskell
-- text
-- time
-- transformers
-- vector
-- streamly
-- unordered-containers
-- uuid
-- unliftio
 
 default-extensions:
 - Arrows
@@ -83,7 +58,30 @@ default-extensions:
 library:
   source-dirs: src
   dependencies:
+    - aeson
+    - async
+    - bytestring
+    - containers
+    - deepseq
+    - exceptions
+    - generic-lens
     - http-types
+    - microlens
+    - mtl
+    - openapi3
+    - postgresql-simple
+    - random
+    - servant-flatten
+    - servant-server
+    - streamly
+    - template-haskell
+    - text
+    - time
+    - transformers
+    - unliftio
+    - unordered-containers
+    - uuid
+    - vector
 
 tests:
   domain-driven-test:
@@ -95,19 +93,37 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -ddump-splices
+    - -Werror
+    - -Wall
+    - -Wunused-packages
     dependencies:
-    - domain-driven
-    - hspec
-    - hspec-core
-    - QuickCheck
-    - quickcheck-classes
-    - quickcheck-arbitrary-adt
+    - aeson
     - async
-    - servant-client
-    - servant-openapi3
-    - warp
+    - bytestring
+    - containers
+    - deepseq
+    - domain-driven
+    - exceptions
+    - hspec
     - http-client
+    - mtl
+    - openapi3
+    - QuickCheck
+    - postgresql-simple
+    - uuid
+    - generic-lens
+    - microlens
+    - streamly
+    - time
+    - quickcheck-arbitrary-adt
+    - quickcheck-classes
+    - servant-client
+    - servant-flatten
+    - servant-openapi3
+    - servant-server
+    - text
+    - unliftio
+    - warp
 
 
 executables:
@@ -115,8 +131,12 @@ executables:
     main:                Main.hs
     source-dirs:         examples/simple
     dependencies:
+    - aeson
+    - bytestring
     - domain-driven
-    - wai
+    - exceptions
+    - mtl
+    - servant-server
     - servant-openapi3
     - warp
     ghc-options:
@@ -125,16 +145,25 @@ executables:
     - -with-rtsopts=-N
     - -Werror
     - -Wall
-    - -ddump-splices
+    - -Wunused-packages
   example-store:
     main:                Main.hs
     source-dirs:
       - examples/store
       - models
     dependencies:
+    - aeson
+    - bytestring
+    - containers
+    - deepseq
     - domain-driven
-    - wai
+    - exceptions
+    - mtl
+    - openapi3
     - servant-openapi3
+    - servant-server
+    - text
+    - unliftio
     - warp
     ghc-options:
     - -threaded
@@ -142,7 +171,8 @@ executables:
     - -with-rtsopts=-N
     - -Werror
     - -Wall
-    - -ddump-splices
+    - -Werror
+    - -Wunused-packages
   bench:
     main:                Main.hs
     source-dirs:
@@ -152,9 +182,21 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-s
+    - -Wunused-packages
+    - -Werror
     dependencies:
-    - domain-driven
     - aeson
+    - aeson
+    - containers
     - criterion
-    - criterion-measurement
-    - pretty-simple
+    - deepseq
+    - domain-driven
+    - exceptions
+    - generic-lens
+    - microlens
+    - openapi3
+    - postgresql-simple
+    - servant-server
+    - streamly
+    - text
+    - unliftio
