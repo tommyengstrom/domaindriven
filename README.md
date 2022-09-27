@@ -104,12 +104,14 @@ A `Cmd` has the additional ability of emitting events. It takes a `model -> m (m
 
 ### Generating the server
 
-Now we have defined the core parts of our domain. We can now generate the server using the template-haskell function `mkCmdServer`. It will generate a Servant API and server implementation. The only thing you need to do is to supply a `ActionRunner`.
 
-To get a command runner we first have to define a persistance model, which tells us how the events are to be stored (note that the state is not persisted). We can then pick a start state and tie all the things together using `createModel`.
+Now we have defined the core parts of our service. We can now generate the server using the template-haskell function `mkServer`. It takes two arguments: The server config and the name of the GADT representing the actions. E.g. `$(mkServer counterActionConfig ''CounterAction)`.
+
+The `ServerConfig`, `storeActionConfig` in this example, contains the API options for the for the Action and all it's sub actions, as well as a all parameter names. This can be tenerated with `$(mkServerConfig "counterActionConfig")`, but due to TemplateHaskell's stage restrictions it cannot run in the same file as `mkServer`.
+
 
 ### Simple example
 
 Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs).
 
-For a slightly more realistic example check out [examples/hierarchical/Main.hs](examples/hierarchical/Main.hs).
+For a slightly more realistic example check out [examples/store/Main.hs](examples/hierarchical/Main.hs).

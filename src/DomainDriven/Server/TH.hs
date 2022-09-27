@@ -53,8 +53,17 @@ mkServer cfg (GadtName -> gadtName) = do
 
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
-    Just o  -> pure o
-    Nothing -> fail $ "Missing HasApiOptions instance for " <> show n
+    Just o -> pure o
+    Nothing ->
+        fail
+            $  "Cannot find ApiOptions for "
+            <> show n
+            <> ". "
+            <> "\nProbable reasons:"
+            <> "\n - It does not implement `HasApiOptions`."
+            <> "\n - The instance is not visible from where `mkServerConfig` is run."
+            <> "\n - The `ServerConfig` instance was manually defined and not complete."
+
 
 
 getActionDec :: GadtName -> Q Dec

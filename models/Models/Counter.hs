@@ -49,7 +49,4 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
     CounterIncreased -> m + 1
     CounterDecreased -> m - 1
 
-simpleConfig :: ServerConfig
-simpleConfig = ServerConfig mempty mempty
-
 $(mkServerConfig "serverConfig")
