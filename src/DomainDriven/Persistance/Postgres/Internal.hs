@@ -57,7 +57,7 @@ instance (FromJSON e, Typeable e) => ReadModel (PostgresEvent m e) where
         conn <- getConnection pg
         fmap fst <$> queryEvents conn (pg ^. field @"eventTableName")
 
-    getEventStream pg = withStreamTrans pg getEventStream'
+    getEventStream pg = withStreamReadTransaction pg getEventStream'
 
 getEventTableName :: EventTable -> EventTableName
 getEventTableName = go 0
@@ -303,13 +303,15 @@ getEventStream' pgt = S.map fst $ mkEventStream
 
 
 
-withStreamTrans
+-- | A transaction that is always rolled back at the end.
+-- This required because cursors require a running transaction.
+withStreamReadTransaction
     :: forall t m a model event
      . (S.IsStream t, S.MonadAsync m, MonadCatch m)
     => PostgresEvent model event
     -> (PostgresEventTrans model event -> t m a)
     -> t m a
-withStreamTrans pg f = S.bracket startTrans rollbackTrans f
+withStreamReadTransaction pg f = S.bracket startTrans rollbackTrans f
   where
     startTrans :: m (PostgresEventTrans model event)
     startTrans = liftIO $ do
@@ -325,19 +327,44 @@ withStreamTrans pg f = S.bracket startTrans rollbackTrans f
 
     rollbackTrans :: PostgresEventTrans model event -> m ()
     rollbackTrans pgt = liftIO $ do
-        PG.commit $ pgt ^. field @"transaction" . to fromTrans
+        -- Nothing changes. We just need the transaction to be able to stream events.
+        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
 
 withIOTrans
     :: forall a model event
      . PostgresEvent model event
     -> (PostgresEventTrans model event -> IO a)
     -> IO a
-withIOTrans pg f = bracket startTrans rollbackTrans f
-  where
-    startTrans :: IO (PostgresEventTrans model event)
-    startTrans = do
-        conn <- getConnection pg
+withIOTrans pg f = do
+    bracket prepareTransaction cleanup $ \pgt -> do
+        let conn = pgt ^. field @"transaction" . to fromTrans :: Connection
+        -- We start the transaction inside the bracket so that it gets cleaned up
         PG.begin conn
+        migrationResult <- try @_ @SomeException $ do
+            a <- f pgt
+            PG.commit conn
+            pure a
+        case migrationResult of
+            Left e -> do
+                _ <- PG.rollback conn
+                throwM e
+            Right a -> pure a
+  where
+    cleanup :: PostgresEventTrans model event -> IO ()
+    cleanup pgt = do
+        let conn = pgt ^. field @"transaction" . to fromTrans
+        inRunningTransaction <- PG.query_ @(Only Bool)
+            conn
+            "SELECT now() = statement_timestamp()"
+            -- `pg_current_xact_id_if_assigned()` will be null if a transaction has
+            -- started but nothing has been written.
+        case inRunningTransaction of
+            Only True : _ -> PG.rollback conn
+            _             -> pure ()
+
+    prepareTransaction :: IO (PostgresEventTrans model event)
+    prepareTransaction = do
+        conn <- getConnection pg
         pure $ PostgresEventTrans { transaction    = OngoingTransaction conn
                                   , eventTableName = pg ^. field @"eventTableName"
                                   , modelIORef     = pg ^. field @"modelIORef"
@@ -345,10 +372,6 @@ withIOTrans pg f = bracket startTrans rollbackTrans f
                                   , seed           = pg ^. field @"seed"
                                   , chunkSize      = pg ^. field @"chunkSize"
                                   }
-
-    rollbackTrans :: PostgresEventTrans model event -> IO ()
-    rollbackTrans pgt = do
-        PG.commit $ pgt ^. field @"transaction" . to fromTrans
 
 
 

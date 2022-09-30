@@ -3,6 +3,7 @@
 module DomainDriven.Persistance.PostgresIORefStateSpec where
 
 import           Control.Concurrent.Async
+import           Control.Exception              ( SomeException )
 import           Control.Lens                   ( (^.) )
 import           Control.Monad
 import           Data.Aeson                     ( Value
@@ -47,12 +48,12 @@ spec :: Spec
 spec = do
     aroundAll setupPersistance $ storeModelSpec
     aroundAll setupPersistance $ do
+        streaming
+    aroundAll setupPersistance $ do
         writeEventsSpec
         queryEventsSpec
         -- make sure migrationSpec is run last!
         migrationSpec
-    aroundAll setupPersistance $ do
-        streaming
 
 
 
@@ -75,11 +76,11 @@ mkTestConn = connect $ ConnectInfo { connectHost     = "localhost"
 dropEventTables :: Connection -> IO ()
 dropEventTables conn = void . for (tableNames eventTable2) $ \n ->
     void $ execute_ conn ("drop table if exists \"" <> fromString n <> "\"")
-  where
-    tableNames :: EventTable -> [EventTableName]
-    tableNames et = case et of
-        MigrateUsing _ next -> getEventTableName et : tableNames next
-        InitialVersion{}    -> [getEventTableName et]
+
+tableNames :: EventTable -> [EventTableName]
+tableNames et = case et of
+    MigrateUsing _ next -> getEventTableName et : tableNames next
+    InitialVersion{}    -> [getEventTableName et]
 
 writeEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
 writeEventsSpec = describe "queryEvents" $ do
@@ -186,6 +187,37 @@ migrationSpec = describe "migrate1to1" $ do
                         uuid
         conn <- getConnection p
         void $ writeEvents conn (getEventTableName eventTable2) [ev]
+
+    it "Broken migration throws and rollbacks transaction" $ \_ -> do
+        let eventTable3 :: EventTable
+            eventTable3 = MigrateUsing undefined eventTable2
+
+        print $ tableNames eventTable3
+
+        postgresWriteModel mkTestConn eventTable3 Store.applyStoreEvent mempty
+            `shouldThrow` const @_ @SomeException True
+        conn <- mkTestConn
+
+        case tableNames eventTable3 of
+
+            failedMig : prevMig : _ -> do
+                [Only prevExists] <-
+                    query_ @(Only Bool) conn
+                    $  "select exists(select * from pg_tables where tablename='"
+                    <> fromString prevMig
+                    <> "')"
+                [Only brokenExists] <-
+                    query_ @(Only Bool) conn
+                    $  "select exists(select * from pg_tables where tablename='"
+                    <> fromString failedMig
+                    <> "')"
+                prevExists `shouldBe` True
+                brokenExists `shouldBe` False
+            _ -> fail "Unexpectedly lacking table versions!"
+
+
+
+
 
 
 storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
