@@ -304,7 +304,7 @@ getEventStream' pgt = S.map fst $ mkEventStream
 
 
 -- | A transaction that is always rolled back at the end.
--- This required because cursors require a running transaction.
+-- This is useful when using cursors as they can only be used inside a transaction.
 withStreamReadTransaction
     :: forall t m a model event
      . (S.IsStream t, S.MonadAsync m, MonadCatch m)
@@ -336,35 +336,22 @@ withIOTrans
     -> (PostgresEventTrans model event -> IO a)
     -> IO a
 withIOTrans pg f = do
-    bracket prepareTransaction cleanup $ \pgt -> do
-        let conn = pgt ^. field @"transaction" . to fromTrans :: Connection
-        -- We start the transaction inside the bracket so that it gets cleaned up
-        PG.begin conn
-        migrationResult <- try @_ @SomeException $ do
-            a <- f pgt
-            PG.commit conn
-            pure a
-        case migrationResult of
-            Left e -> do
-                _ <- PG.rollback conn
-                throwM e
-            Right a -> pure a
+    transactionCompleted <- newIORef False
+    bracket prepareTransaction (cleanup transactionCompleted) $ \pgt -> do
+        a <- f pgt
+        modifyIORef transactionCompleted (const True)
+        pure a
   where
-    cleanup :: PostgresEventTrans model event -> IO ()
-    cleanup pgt = do
-        let conn = pgt ^. field @"transaction" . to fromTrans
-        inRunningTransaction <- PG.query_ @(Only Bool)
-            conn
-            "SELECT now() = statement_timestamp()"
-            -- `pg_current_xact_id_if_assigned()` will be null if a transaction has
-            -- started but nothing has been written.
-        case inRunningTransaction of
-            Only True : _ -> PG.rollback conn
-            _             -> pure ()
+    cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
+    cleanup transactionCompleted ((^. field @"transaction" . to fromTrans) -> conn) =
+        readIORef transactionCompleted >>= \case
+            True  -> PG.commit conn
+            False -> PG.rollback conn
 
     prepareTransaction :: IO (PostgresEventTrans model event)
     prepareTransaction = do
         conn <- getConnection pg
+        PG.begin conn
         pure $ PostgresEventTrans { transaction    = OngoingTransaction conn
                                   , eventTableName = pg ^. field @"eventTableName"
                                   , modelIORef     = pg ^. field @"modelIORef"
@@ -372,8 +359,6 @@ withIOTrans pg f = do
                                   , seed           = pg ^. field @"seed"
                                   , chunkSize      = pg ^. field @"chunkSize"
                                   }
-
-
 
 mkEventStream
     :: FromJSON event
