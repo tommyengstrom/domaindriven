@@ -16,6 +16,7 @@ import           DomainDriven.Internal.HasParamName
 import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Prelude
+import           System.IO.Unsafe
 
 
 -- | Configuration used to generate server
@@ -32,6 +33,9 @@ data ServerConfig = ServerConfig
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty M.empty
 
+-- | Generate a server configuration and give it the specified name
+-- Note that everything that relies on a HasParamName or HasFieldName instance must be
+-- visible from where this is run.
 mkServerConfig :: String -> Q [Dec]
 mkServerConfig (mkName -> cfgName) = do
     sig'  <- sigD cfgName (conT ''ServerConfig)
@@ -68,6 +72,9 @@ getParamNameMap = reify ''HasParamName >>= \case
     typeAndParamName = \case
         InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
             Just <$> [e| ($(stringE $ nameBase n), paramName @($(pure ty)))|]
+        InstanceD _ _ ty _ -> do
+            seq (unsafePerformIO (putStrLn $ "PROBLEM: " <> show ty)) (pure ())
+            pure Nothing
         InstanceD _ _ _ _ -> pure Nothing
         d                 -> fail $ "Expected instance InstanceD but got: " <> show d
 

@@ -25,6 +25,7 @@ import           Data.Typeable
 import           DomainDriven
 import           DomainDriven.Config
 import           GHC.Generics                   ( Generic )
+import           GHC.TypeLits
 import           Prelude
 import           Servant
 import           UnliftIO                       ( MonadUnliftIO )
@@ -181,6 +182,12 @@ applyStoreEvent m (Stored e _ _) = case e of
 -- Grab the config for each GADT
 ------------------------------------------------------------------------------------------
 
+newtype Wrup s a = Wrup a deriving (Show, Generic)
+
+instance KnownSymbol s => HasParamName (Wrup s a) where
+    paramName = T.pack $ symbolVal (Proxy @s)
+
+type BuffeliBongBong = Wrup "BuffeliBongBong" Text
 $(mkServerConfig "storeActionConfig")
 
 -- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty

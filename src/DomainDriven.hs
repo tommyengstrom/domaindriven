@@ -30,5 +30,6 @@ import           Data.UUID
 import           DomainDriven.Config
 import           DomainDriven.Internal.Class
 import           DomainDriven.Internal.HasFieldName           as X
+import           DomainDriven.Internal.HasParamName           as X
 import           DomainDriven.Internal.NamedJsonFields
                                                 ( NamedJsonFields(..) )

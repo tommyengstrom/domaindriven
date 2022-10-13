@@ -25,7 +25,8 @@ data CounterAction method return where
    GetCounter ::CounterAction Query Int
    IncreaseCounter ::CounterAction Cmd Int
    DecreaseCounter ::CounterAction Cmd Int
-   AddToCounter ::Int -> CounterAction Cmd Int -- ^ Add a positive number to the counter
+   AddToCounter ::{ numberToAdd :: Int
+                   } -> CounterAction Cmd Int -- ^ Add a positive number to the counter
    deriving HasApiOptions
 
 handleAction

@@ -6,7 +6,8 @@ module DomainDriven.Internal.HasParamName where
 import           Data.Aeson
 import qualified Data.HashMap.Strict                          as HM
 import qualified Data.Map                                     as M
-import           Data.OpenApi
+import           Data.OpenApi            hiding ( ParamName )
+import           Data.Proxy
 import           Data.Set                       ( Set )
 import qualified Data.Text                                    as T
 import           Data.Text                      ( Text )
@@ -14,33 +15,36 @@ import           Data.Time
 import           Data.Vector                    ( Vector )
 import           DomainDriven.Internal.Text
 import           GHC.Generics
+import           GHC.TypeLits
 import           Prelude
 
 class HasParamName t where
+  type ParamName t :: Symbol
   paramName :: Text
-  default paramName :: (Generic t, GHasFieldName (Rep t)) => Text
-  paramName = gParamName $ from (undefined :: t)
+  -- default paramName :: (Generic t, GHasParamName (Rep t)) => Text
+  -- paramName = gParamName $ from (undefined :: t)
+  paramName = T.pack $ symbolVal (Proxy @(ParamName Int))
 
 instance HasParamName Int where
-    paramName = "int"
+    type ParamName Int = "int"
 
 instance HasParamName Double where
-    paramName = "double"
+    type ParamName Double = "double"
 
 instance HasParamName Char where
-    paramName = "char"
+    type ParamName Char = "char"
 
 instance HasParamName Text where
-    paramName = "text"
+    type ParamName Text = "text"
 
 instance HasParamName Bool where
-    paramName = "bool"
+    type ParamName Bool = "bool"
 
 instance HasParamName Day where
-    paramName = "day"
+    type ParamName Day = "day"
 
 instance HasParamName UTCTime where
-    paramName = "utcTime"
+    type ParamName UTCTime = "utcTime"
 
 instance
   ( FromJSONKey k,ToJSONKey k,Ord k,HasParamName v,ToSchema k) =>
@@ -69,8 +73,8 @@ instance HasParamName v => HasParamName (Vector v) where
 instance HasParamName v => HasParamName (Maybe v) where
     paramName = paramName @v
 
-class GHasFieldName t where
+class GHasParamName t where
   gParamName :: t x -> Text
 
-instance Datatype c => GHasFieldName (M1 i c f) where
+instance Datatype c => GHasParamName (M1 i c f) where
     gParamName = T.pack . lowerFirst . datatypeName

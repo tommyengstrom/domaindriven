@@ -6,20 +6,21 @@
 
 module DomainDriven.Internal.Class where
 
+import           Control.DeepSeq (NFData)
 import           Control.Monad.Reader
 import           Data.Aeson
-import           Prelude
-import           Lens.Micro                   (  (^.))
 import           Data.Generics.Product
-import           Data.Time
-import           System.Random
-import           Control.DeepSeq (NFData)
-import           GHC.Generics                   ( Generic )
-import           Servant
 import           Data.Kind
+import           Data.Time
 import           Data.UUID                      ( UUID )
-import UnliftIO
-import Streamly.Prelude (SerialT)
+import           GHC.Generics                   ( Generic )
+import           GHC.TypeLits
+import           Lens.Micro                   (  (^.))
+import           Prelude
+import           Servant
+import           Streamly.Prelude (SerialT)
+import           System.Random
+import           UnliftIO
 
 data RequestType (accessType :: ModelAccess) (contentTypes :: [Type]) (verb :: Type -> Type)
 
@@ -41,6 +42,19 @@ type family CanMutate method :: Bool where
 
 type family GetModelAccess method :: ModelAccess where
     GetModelAccess (RequestType a b c) = a
+
+-- | Used as a parameter to the `P` type family on order to determine the focus.
+data ParamPart
+    = ParamName
+    | ParamType
+    deriving (Show)
+
+-- | P is used for specifying the parameters of the model.
+-- The name will be used as the name in the JSON encoding or the query parameter of the
+-- generated server.
+type family P (b :: ParamPart) (name :: Symbol) (a :: Type) where
+    P 'ParamName name ty = Proxy name
+    P 'ParamType name ty = ty
 
 data HandlerType method model event m a where
     Query :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Direct)

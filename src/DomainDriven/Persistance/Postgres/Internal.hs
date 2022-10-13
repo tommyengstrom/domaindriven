@@ -147,22 +147,22 @@ newtype Exists = Exists
     deriving anyclass (FromRow)
 
 runMigrations :: OngoingTransaction -> EventTable -> IO ()
-runMigrations trans et = case et of
-    InitialVersion _        -> createTable
-    MigrateUsing mig prevEt -> do
-        r <- query
-            conn
-            "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
-            (Only $ getEventTableName et)
-        case r of
-            [Exists True ] -> pure () -- Table exists. Nothing needs to be done
-            [Exists False] -> do
-                runMigrations trans prevEt
-                createTable
-                mig (getEventTableName prevEt) (getEventTableName et) conn
-                retireTable conn (getEventTableName prevEt)
+runMigrations trans et = do
+    tableExistQuery <- query
+        conn
+        "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
+        (Only $ getEventTableName et)
 
-            l -> fail $ "runMigrations unexpected answer: " <> show l
+    case (et, tableExistQuery) of
+        (InitialVersion _       , [Only True] ) -> pure ()
+        (MigrateUsing{}         , [Only True] ) -> pure ()
+        (InitialVersion _       , [Only False]) -> createTable
+        (MigrateUsing mig prevEt, [Only False]) -> do
+            runMigrations trans prevEt
+            createTable
+            mig (getEventTableName prevEt) (getEventTableName et) conn
+            retireTable conn (getEventTableName prevEt)
+        (_, r) -> fail $ "Unexpected table query result: " <> show r
   where
     conn :: Connection
     conn = fromTrans trans
@@ -171,17 +171,6 @@ runMigrations trans et = case et of
     createTable = do
         let tableName = getEventTableName et
         void $ createEventTable' conn tableName
-
-
-nextEventTableVersionExists :: Connection -> EventTable -> IO Bool
-nextEventTableVersionExists conn et = do
-    r <- query
-        conn
-        "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
-        (Only $ getEventTableName $ MigrateUsing (\_ _ _ -> pure ()) et)
-    case r of
-        [Exists v] -> pure v
-        l          -> fail $ "nextEventTableVersionExists unexpected answer: " <> show l
 
 
 createPostgresPersistance
@@ -201,7 +190,6 @@ createPostgresPersistance getConn eventTable app' seed' = do
                          , seed           = seed'
                          , chunkSize      = 50
                          }
-
 
 
 queryEvents

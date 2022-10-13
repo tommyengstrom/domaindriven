@@ -16,20 +16,66 @@ module DomainDriven.Internal.NamedFields
 import           Data.Aeson
 import           Data.OpenApi
 import           DomainDriven.Internal.HasFieldName
+import           DomainDriven.Internal.Class
 import           Prelude
 import           GHC.Generics                   ( Generic )
 import           Data.Proxy
 import           DomainDriven.Internal.NamedJsonFields
 import           GHC.TypeLits
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Aeson.Key as Key
+import qualified Data.Text as T
 
 opts :: forall name . KnownSymbol name => NamedJsonOptions
 opts = defaultNamedJsonOptions { skipTagField         = True
                                , datatypeNameModifier = const (symbolVal $ Proxy @name)
                                }
 
+data NF1 (name :: Symbol) (f1 :: Symbol) ty = NF1 ty
+    deriving (Show, Generic)
+
+data NF2 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 = NF2 a1 a2
+    deriving (Show, Generic)
+
+symbolKey :: forall n. KnownSymbol n => Key
+symbolKey = Key.fromString . symbolVal $ Proxy @n
+
+instance (KnownSymbol f1, ToJSON a1) => ToJSON (NF1 name f1 a1) where
+    toJSON (NF1 a1) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ]
+
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+          )
+    => ToJSON (NF2 name f1 a1 f2 a2) where
+    toJSON (NF2 a1 a2) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ]
+
+instance (KnownSymbol name, KnownSymbol f1, FromJSON a1)
+    => FromJSON (NF1 name f1 a1) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        pure $ NF1 a1
+
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2)
+    => FromJSON (NF2 name f1 a1 f2 a2) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        pure $ NF2 a1 a2
+
 ---------------------------------------------------------------
 data NamedFields1 (name :: Symbol) a  = NamedFields1 a
     deriving (Show, Eq, Ord, Generic)
+
+-- instance (ToJSON a, KnownSymbol name, KnownSymbol f1)
+--     => ToJSON (NamedFields1 name (P x f1 a)) where
+--         toJSON (NamedFields1 a) = Object [(T.pack $ symbolVal (Proxy @f1), toJSON a)]
 
 instance (KnownSymbol name
         , ToJSON a, HasFieldName a)
