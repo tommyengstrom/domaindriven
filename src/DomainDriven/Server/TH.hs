@@ -19,6 +19,7 @@ import           DomainDriven.Config            ( ServerConfig(..) )
 import           DomainDriven.Internal.Class
 import           DomainDriven.Server.Helpers
 import           DomainDriven.Server.Types
+import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Lens.Micro
 import           Prelude
@@ -114,73 +115,269 @@ guardReturnVar = \case
 
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
-    DataD _ _ [method, ret] _ cs _ -> do
+    DataD _ _ [x, method, ret] _ cs _ -> do
         guardMethodVar method
         guardReturnVar ret
         pure cs
-    d@DataD{} -> fail $ "bad data type: " <> show d
+    d@DataD{} -> fail $ "Unexpected Action data type: " <> show d
     d         -> fail $ "Expected a GADT with two parameters but got: " <> show d
 
+-- data ConstructorMatch = ConstructorMatch
+--     {
+data Pmatch = Pmatch
+    { paramPart :: Name
+    , paramName :: String
+    , paramType :: Type
+    }
+    deriving (Show, Generic)
+
+sampleP :: Type
+sampleP = AppT
+    (AppT
+        (AppT (ConT (mkName "DomainDriven.Internal.Class.P"))
+              (VarT (mkName "x_7566047373983226774"))
+        )
+        (LitT (StrTyLit "something_more"))
+    )
+    (AppT
+        (AppT
+            (AppT (ConT (mkName "DomainDriven.ServerSpecModel.SubAction"))
+                  (VarT (mkName "x_7566047373983226774"))
+            )
+            (VarT (mkName "method_7566047373983226775"))
+        )
+        (VarT (mkName "a_7566047373983226776"))
+    )
+
+data ConstructorMatch = ConstructorMatch
+    { xParam          :: Name -- ^ Of kind ParamPart
+    , constructorName :: Name
+    , parameters      :: [Pmatch]
+    , finalType       :: FinalConstructorTypeMatch
+    }
+    deriving (Show, Generic)
+
+data FinalConstructorTypeMatch = FinalConstructorTypeMatch
+    { requestType :: RequestTypeMatch
+    , returnType  :: Type
+    }
+    deriving (Show, Generic)
+
+data RequestTypeMatch = RequestTypeMatch
+    { accessType   :: Type
+    , contentTypes :: Type
+    , verb         :: Type
+    }
+    deriving (Show, Generic)
+
+matchNormalConstructor :: Con -> Either String ConstructorMatch
+matchNormalConstructor con = do
+    -- Get the `forall (x ::ParamPart)`
+    (x, gadtCon)                       <- unconsForall con
+    (conName, params, constructorType) <- unconsGadt gadtCon
+    finalType                          <- matchFinalConstructorType constructorType
+    pure ConstructorMatch { xParam          = x
+                          , constructorName = conName
+                          , parameters      = params
+                          , finalType       = finalType
+                          }
+  where
+
+    unconsForall :: Con -> Either String (Name, Con)
+    unconsForall = \case
+        ForallC [KindedTV x SpecifiedSpec _kind] _ctx con -> Right (x, con)
+        con ->
+            Left
+                $  "Expected a constrctor parameterized by `(x :: ParamPart)`, got: "
+                <> show con
+
+    unconsGadt :: Con -> Either String (Name, [Pmatch], Type)
+    unconsGadt = \case
+        GadtC [conName] bangArgs ty -> do
+            params <- traverse (matchP . snd) bangArgs
+            pure (conName, params, ty)
+        con -> Left $ "Expected Gadt constrctor, got: " <> show con
+
+matchFinalConstructorType :: Type -> Either String FinalConstructorTypeMatch
+matchFinalConstructorType = \case
+    AppT (AppT _typeName a) retTy -> do
+        reqTy <- matchRequestType a
+        Right FinalConstructorTypeMatch { requestType = reqTy, returnType = retTy }
+
+    ty -> Left $ "Expected constructor like `GetCount x Query Int`, got: " <> show ty
+
+
+matchRequestType :: Type -> Either String RequestTypeMatch
+matchRequestType = \case
+    AppT (AppT (AppT (ConT reqTy) accessType) ct) verb ->
+        Right RequestTypeMatch { accessType = accessType, contentTypes = ct, verb = verb }
+    ty -> Left $ "Expected `RequestType`, got: " <> show ty
+
+
+sampleConstructor :: Con
+sampleConstructor = ForallC
+    [ KindedTV (mkName "x")
+               SpecifiedSpec
+               (ConT (mkName "DomainDriven.Internal.Class.ParamPart"))
+    ]
+    []
+    (GadtC
+        [(mkName "DomainDriven.ServerSpecModel.ReverseText")]
+        [ ( Bang NoSourceUnpackedness NoSourceStrictness
+          , AppT
+              (AppT
+                  (AppT (ConT (mkName "DomainDriven.Internal.Class.P"))
+                        (VarT (mkName "x_7566047373983632093"))
+                  )
+                  (LitT (StrTyLit "text"))
+              )
+              (ConT (mkName "Data.Text.Internal.Text"))
+          )
+        ]
+        -------------------------
+        (AppT
+            (AppT
+                (AppT (ConT (mkName "DomainDriven.ServerSpecModel.TestAction"))
+                      (VarT (mkName "x_7566047373983632093"))
+                )
+                ------------------------
+                (AppT
+                    (AppT
+                        (AppT
+                            (ConT (mkName "DomainDriven.Internal.Class.RequestType"))
+                            (PromotedT (mkName "DomainDriven.Internal.Class.Callback"))
+                        )
+                        (AppT
+                            (AppT PromotedConsT
+                                  (ConT (mkName "Servant.API.ContentTypes.JSON"))
+                            )
+                            (SigT PromotedNilT (AppT ListT StarT))
+                        )
+                    )
+                    (AppT
+                        (AppT
+                            (AppT
+                                (ConT (mkName "Servant.API.Verbs.Verb"))
+                                (PromotedT (mkName "Network.HTTP.Types.Method.POST"))
+                            )
+                            (LitT (NumTyLit 200))
+                        )
+                        (AppT
+                            (AppT PromotedConsT
+                                  (ConT (mkName "Servant.API.ContentTypes.JSON"))
+                            )
+                            (SigT PromotedNilT (AppT ListT StarT))
+                        )
+                    )
+                )
+            )
+            (ConT (mkName "Data.Text.Internal.Text"))
+        )
+    )
+-- | Tries to match a Type to a more easily readable Pmatch.
+-- Successful match means the type is representing the type family `P`
+matchP :: Type -> Either String Pmatch
+matchP = \case
+    (AppT pPart ty) -> case pPart of
+        AppT (AppT (ConT p) (VarT x)) (LitT (StrTyLit pName)) -> do
+            unless (show p == show ''P) -- FIXME: Comparing them directly will not match? or is it just my test case with mkName?
+                   (Left $ "Expected " <> show ''P <> ", got: " <> show p)
+            Right Pmatch { paramPart = x, paramName = pName, paramType = ty }
+        ty -> Left $ "Expected type family `P`, got: " <> show ty
+
+
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
-mkApiPiece cfg = \case
+mkApiPiece cfg con = do
+    case matchNormalConstructor con of
+        Right c -> do
+            actionType <-
+                getActionType
+                $  c
+                ^. field @"finalType"
+                .  field @"requestType"
+                .  field @"verb"
+            pure $ Endpoint
+                (ConstructorName $ c ^. field @"constructorName")
+                (ConstructorArgs $ c ^.. field @"parameters" . folded . to
+                    (\p -> (p ^. field @"paramName" . to show, p ^. field @"paramType"))
+                )
+                HandlerSettings
+                    { contentTypes = c
+                                     ^. field @"finalType"
+                                     .  field @"requestType"
+                                     .  field @"contentTypes"
+                    , verb         = c
+                                     ^. field @"finalType"
+                                     .  field @"requestType"
+                                     .  field @"verb"
+                    }
+                actionType
+                (EpReturnType $ c ^. field @"finalType" . field @"returnType")
+
+        Left err -> fail $ "mkApiPiece - " <> show err
     -- The normal case
-    GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType) -> do
-        handlerSettings <- do
-            expandedReqType <- case requestType of
-                ConT n -> reify n >>= \case
-                    TyConI (TySynD _ _ realType) -> pure realType
-                    ty ->
-                        fail
-                            $  "Expected "
-                            <> show n
-                            <> " to be a type synonym, got: "
-                            <> show ty
-                (AppT _ _) -> pure requestType
-                ty         -> fail $ "Expected RequestType, got: " <> show ty
-            case expandedReqType of
-                (AppT (AppT _RequesType contentTypes') verb') ->
-                    pure $ HandlerSettings contentTypes' verb'
-                ty -> fail $ "Expected RequestType, got: " <> show ty
+    -- xx@(ForallC [x@(KindedTV _ SpecifiedSpec _)] _ (GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType)))
+    --     -> do
+    --         fail $ show xx
+    --         handlerSettings <- do
+    --             expandedReqType <- case requestType of
+    --                 ConT n -> reify n >>= \case
+    --                     TyConI (TySynD _ _ realType) -> pure realType
+    --                     ty ->
+    --                         fail
+    --                             $  "Expected "
+    --                             <> show n
+    --                             <> " to be a type synonym, got: "
+    --                             <> show ty
+    --                 (AppT _ _) -> pure requestType
+    --                 ty         -> fail $ "Expected RequestType, got: " <> show ty
+    --             case expandedReqType of
+    --                 (AppT (AppT _RequesType contentTypes') verb') ->
+    --                     pure $ HandlerSettings contentTypes' verb'
+    --                 ty -> fail $ "Expected RequestType, got: " <> show ty
 
-        actionType <- getActionType $ handlerSettings ^. field @"verb"
-        pure $ Endpoint (ConstructorName gadtName)
-                        (ConstructorArgs $ fmap snd bangArgs)
-                        handlerSettings
-                        actionType
-                        (EpReturnType retType)
+    --         actionType <- getActionType $ handlerSettings ^. field @"verb"
+    --         pure $ Endpoint (ConstructorName gadtName)
+    --                         (ConstructorArgs $ fmap snd bangArgs)
+    --                         handlerSettings
+    --                         actionType
+    --                         (EpReturnType retType)
     -- When the constructor contain references to other domain models
-    ForallC [method@(KindedTV methodName _ _), ret@(KindedTV retName _ _)] [] (GadtC [gadtName] bangArgs (AppT (AppT _ _) _))
-        -> do
-            guardMethodVar method
-            guardReturnVar ret
-            (args, subCmd') <- case reverse $ fmap snd bangArgs of
-                AppT (AppT (ConT subCmd') (VarT methodName')) (VarT retName') : rest ->
-                    do
-                        unless (retName == retName')
-                            $  fail
-                            $  "\nSubCmd must use the return type variable of the parent."
-                            <> ("\n\tExpected: " <> show retName)
-                            <> ("\n\tGot: " <> show retName')
-                        unless (methodName == methodName')
-                            $  fail
-                            $  "\nSubCmd must use the method type variable of the parent."
-                            <> ("\n\tExpected: " <> show methodName)
-                            <> ("\n\tGot: " <> show methodName')
-                        pure (reverse rest, subCmd')
-                ty : _ ->
-                    fail
-                        $ "Last constructor argument must have form \
-                          \`SubCmd method return`. Got: \n"
-                        <> pprint ty
-                [] -> fail "I thought this coulnd't happen!"
+   -- ForallC [x@(KindedTV _ SpecifiedSpec _), method@(KindedTV methodName _ _), ret@(KindedTV retName _ _)] [] (GadtC [gadtName] bangArgs (AppT (AppT (AppT (ConT p) _) _) _))
+   --     -> do
+   --         guardMethodVar method
+   --         guardReturnVar ret
+   --         (args, subCmd') <- case fmap matchP . reverse $ fmap snd bangArgs of
+   --             Right (Pmatch x pName (AppT (AppT (AppT (ConT subCmd') (VarT x')) (VarT methodName')) (VarT retName'))) : rest
+   --                 -> do
+   --                     unless (retName == retName')
+   --                         $  fail
+   --                         $  "\nSubCmd must use the return type variable of the parent."
+   --                         <> ("\n\tExpected: " <> show retName)
+   --                         <> ("\n\tGot: " <> show retName')
+   --                     unless (methodName == methodName')
+   --                         $  fail
+   --                         $  "\nSubCmd must use the method type variable of the parent."
+   --                         <> ("\n\tExpected: " <> show methodName)
+   --                         <> ("\n\tGot: " <> show methodName')
+   --                     pure (reverse rest, subCmd')
+   --             ty : _ ->
+   --                 fail
+   --                     $ "Last constructor argument must have form \
+   --                       \`P \"name\" (SubCmd x method return)`. Got: \n"
+   --                     <> pprint ty
+   --                     <> "\n"
+   --                     <> show ty
+   --             [] -> fail "I thought this coulnd't happen!"
 
-            subServerSpec <- mkServerSpec cfg (GadtName subCmd')
-            pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
-    c ->
-        fail
-            $  "Expected a GADT constructor representing an endpoint but got:\n"
-            <> pprint c
-            <> show c -- FIXME: Remove once it works
+   --         subServerSpec <- mkServerSpec cfg (GadtName subCmd')
+   --         pure $ SubApi (ConstructorName gadtName) (ConstructorArgs args) subServerSpec
+    --c ->
+    --    fail
+    --        $  "Expected a GADT constructor representing an endpoint but got:\n"
+    --        <> pprint c
+    --        <> "\n"
+    --        <> show c -- FIXME: Remove once it works
 
 
 -- | Create a ApiSpec from a GADT
@@ -336,16 +533,20 @@ mkQueryParams (ConstructorArgs args) = do
             LitT . StrTyLit <$> uniqueParamName n
 
     for args $ \case
-        (AppT may'  ty@(ConT n')) | may' == may -> do
-            n <- mkUniqueTyName n'
+        (name, (AppT may'  ty@(ConT _))) | may' == may -> do
             liftQ
-                [t| QueryParam' '[Optional, Servant.Strict] $(pure n) $(pure ty) |]
-        ty@(ConT n') -> do
+                [t| QueryParam' '[Optional, Servant.Strict]
+                                 $(pure . LitT . StrTyLit $ name)
+                                 $(pure ty)
+                |]
+        (name, ty@(ConT _)) -> do
 
-            n <- mkUniqueTyName n'
             liftQ
-                [t| QueryParam' '[Required, Servant.Strict] $(pure n) $(pure ty) |]
-        ty -> fail $ "Expected type ConT, got: " <> show ty
+                [t| QueryParam' '[Required, Servant.Strict]
+                                 $(pure . LitT . StrTyLit $ name)
+                                 $(pure ty)
+                |]
+        crap -> fail $ "mkQueryParams - unexpected input: " <> show crap
 
 -- mkQueryParam :: Type -> ServerGenM QueryParamType
 -- mkQueryParam ty = do
@@ -447,11 +648,15 @@ mkNamedFieldsType cName = \case
 
             nfName :: Name
             nfName = mkName $ "NamedFields" <> show (length args)
-        pure . Just $ foldl AppT nfType args
+
+            addNFxParam :: Type -> (String, Type) -> Type
+            addNFxParam nfx (name, ty) = AppT (AppT nfx (LitT $ StrTyLit name)) ty
+        pure . Just $ foldl addNFxParam nfType args
+
 
 mkQueryHandlerSignature :: GadtType -> ConstructorArgs -> EpReturnType -> Type
 mkQueryHandlerSignature (GadtType actionType) (ConstructorArgs args) (EpReturnType retType)
-    = withForall $ mkFunction $ actionRunner actionType : args <> [ret]
+    = withForall $ mkFunction $ actionRunner actionType : fmap snd args <> [ret]
   where
     ret :: Type
     ret = AppT (VarT runnerMonadName) retType
@@ -487,7 +692,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
     case apiPiece of
         Endpoint _cName cArgs _hs Immutable ty -> do
             let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
+                nrArgs = length $ cArgs ^. typed @[(String, Type)]
             varNames       <- liftQ $ replicateM nrArgs (newName "arg")
             handlerName    <- askHandlerName
             runnerName     <- liftQ $ newName "runner"
@@ -511,7 +716,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             pure [funSig, FunD handlerName [funClause]]
         Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
             let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
+                nrArgs = length $ cArgs ^. typed @[(String, Type)]
             varNames       <- liftQ $ replicateM nrArgs (newName "arg")
             handlerName    <- askHandlerName
             runnerName     <- liftQ $ newName "runner"
@@ -542,7 +747,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             -- It could probably be fixed by adding MimeRender instances to NamedField1
             -- that just uses the underlying MimeRender.
             let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[Type]
+                nrArgs = length $ cArgs ^. typed @[(String, Type)]
             unless (nrArgs < 2) $
                 fail "Only one argument is supported for non-JSON request bodies"
             varName       <- liftQ $ newName "arg"
@@ -569,7 +774,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             pure [funSig, FunD handlerName [funClause]]
         SubApi cName cArgs spec -> do
             -- Apply the arguments to the constructor before referencing the subserver
-            varNames  <- liftQ $ replicateM (length (cArgs ^. typed @[Type])) (newName "arg")
+            varNames  <- liftQ $ replicateM (length (cArgs ^. typed @[(String, Type)])) (newName "arg")
             handlerName    <- askHandlerName
             targetApiTypeName <- enterApi spec askApiTypeName
             targetServer <- enterApi spec askServerName
@@ -578,7 +783,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
             funSig <- liftQ $ do
                 let params = withForall $ mkFunction $
                         [ actionRunner actionType']
-                        <> cArgs ^. typed @[Type]
+                        <> cArgs ^.. typed @[(String, Type)] . folded . _2
                         <> [ConT ''ServerT
                             `AppT` (ConT targetApiTypeName)
                             `AppT` (VarT runnerMonadName)]
@@ -622,15 +827,17 @@ mkReqBody
     :: HandlerSettings -> ConstructorName -> ConstructorArgs -> ServerGenM (Maybe Type)
 mkReqBody hs name args = if hasJsonContentType hs
     then do
-        bodyTag <- askBodyTag name
-        let
-            body = case args of
-                ConstructorArgs [] -> Nothing
-                ConstructorArgs ts ->
-                    let n           = length ts
-                        constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
-                                           (LitT bodyTag)
-                    in  Just $ foldl AppT constructor ts
+
+        body <- mkNamedFieldsType name args
+        --bodyTag <- askBodyTag name
+        --let
+        --    body = case args of
+        --        ConstructorArgs [] -> Nothing
+        --        ConstructorArgs ts ->
+        --            let n           = length ts
+        --                constructor = AppT (ConT (mkName $ "NamedFields" <> show n))
+        --                                   (LitT bodyTag)
+        --            in  Just $ foldl AppT constructor ts
         case body of
             Nothing -> pure Nothing
             Just b  -> Just <$> liftQ [t| ReqBody '[JSON] $(pure b) |]
@@ -638,7 +845,7 @@ mkReqBody hs name args = if hasJsonContentType hs
         let
             body = case args of
                 ConstructorArgs []  -> Nothing
-                ConstructorArgs [t] -> Just t
+                ConstructorArgs [(_, t)] -> Just t
                 ConstructorArgs _ ->
                     fail "Multiple arguments are only supported for JSON content"
         case body of

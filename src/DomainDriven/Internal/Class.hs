@@ -160,20 +160,18 @@ runAction p handleCmd cmd = case handleCmd cmd of
 
 
 
-class HasApiOptions (action :: Type -> Type -> Type) where
+class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
     apiOptions :: ApiOptions
     apiOptions = defaultApiOptions
 
 data ApiOptions = ApiOptions
-    { renameConstructor :: String -> [String]
-    , typenameSeparator :: String
+    { typenameSeparator :: String
     , bodyNameBase      :: Maybe String
     }
     deriving Generic
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { renameConstructor = pure
-                               , typenameSeparator = "_"
+defaultApiOptions = ApiOptions { typenameSeparator = "_"
                                , bodyNameBase      = Nothing
                                }
 

@@ -26,41 +26,41 @@ import           Servant.OpenApi                ( toOpenApi )
 import           Test.Hspec
 -- import           Test.Hspec.Core.Hooks
 
-$(mkServer storeActionConfig ''StoreAction)
-
-buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
-listItems :: ClientM [ItemInfo]
-search :: Text -> ClientM [ItemInfo]
-itemPrice :: ItemKey -> ClientM Price
-itemStockQuantity :: ItemKey -> ClientM Quantity
-
-adminOrder :: NamedFields2 "AdminAction_Order" ItemKey Quantity -> ClientM NoContent
-adminRestock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
-adminAddItem
-    :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
-adminRemoveItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
-
-buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
-    = client (flatten $ Proxy @StoreActionApi)
-
-
-type ExpectedReverseText
-    = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
-
--- type ExpectedConcatText
---     = "ConcatText"
---     :> QueryParam' '[Strict, Required] "Text" Text
---     :> QueryParam' '[Strict, Required] "Text_1" Text
+-- $(mkServer storeActionConfig ''StoreAction)
+--
+-- buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
+-- listItems :: ClientM [ItemInfo]
+-- search :: Text -> ClientM [ItemInfo]
+-- itemPrice :: ItemKey -> ClientM Price
+-- itemStockQuantity :: ItemKey -> ClientM Quantity
+--
+-- adminOrder :: NamedFields2 "AdminAction_Order" ItemKey Quantity -> ClientM NoContent
+-- adminRestock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
+-- adminAddItem
+--     :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
+-- adminRemoveItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
+--
+-- buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
+--     = client (flatten $ Proxy @StoreActionApi)
+--
+--
+-- type ExpectedReverseText
+--     = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
+--
+-- -- type ExpectedConcatText
+-- --     = "ConcatText"
+-- --     :> QueryParam' '[Strict, Required] "Text" Text
+-- --     :> QueryParam' '[Strict, Required] "Text_1" Text
+-- --     :> Get '[JSON] Text
+--
+-- type ExpectedIntersperse
+--     = "SubAction"
+--     :> QueryParam' '[Strict, Required] "text" Text
+--     :> "Intersperse"
+--     :> QueryParam' '[Strict, Required] "char" Char
 --     :> Get '[JSON] Text
 
-type ExpectedIntersperse
-    = "SubAction"
-    :> QueryParam' '[Strict, Required] "text" Text
-    :> "Intersperse"
-    :> QueryParam' '[Strict, Required] "char" Char
-    :> Get '[JSON] Text
-
-$(mkServer testActionConfig ''TestAction)
+$(mkServer (ServerConfig mempty mempty) ''TestAction)
 
 expectedReverseText :: Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)

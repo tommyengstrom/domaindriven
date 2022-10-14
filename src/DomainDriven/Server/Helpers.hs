@@ -30,15 +30,8 @@ withLocalState fs m = ServerGenM $ do
 
 
 mkUrlSegments :: ConstructorName -> ServerGenM [UrlSegment]
-mkUrlSegments n = do
-    opts <- gets (^. field @"info" . typed)
-    pure
-        $   n
-        ^.. typed
-        .   unqualifiedString
-        .   to (renameConstructor opts)
-        .   folded
-        .   to UrlSegment
+mkUrlSegments n = do -- FIXME: Drop monad or use it
+    pure $ n ^.. typed . unqualifiedString . to UrlSegment
 
 
 
