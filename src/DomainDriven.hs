@@ -16,6 +16,7 @@ module DomainDriven
     , module X
     , NamedJsonFields(..)
     , Query
+    , ParamPart(..)
     , ModelAccess(..)
     , ReadModel(..)
     , RequestType

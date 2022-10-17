@@ -1,7 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
 module DomainDriven.Internal.NamedFields
-    ( NamedFields1 (..)
+    ( NF1 (..)
+    , NF2 (..)
+    , NamedFields1 (..)
     , NamedFields2 (..)
     , NamedFields3 (..)
     , NamedFields4 (..)

@@ -8,7 +8,6 @@ import           DomainDriven
 import           DomainDriven.Config
 import           DomainDriven.Internal.Class
 import           Prelude
-import           Servant
 
 data TestAction x method a where
     ReverseText ::P x "text" Text

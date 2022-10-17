@@ -54,7 +54,6 @@ data ServerInfo = ServerInfo
 data ServerGenState = ServerGenState
     { info           :: ServerInfo
     , usedParamNames :: Set String
-    , allParamNames  :: M.Map String Text
     }
     deriving (Show, Generic)
 

@@ -45,12 +45,8 @@ mkServer cfg (GadtName -> gadtName) = do
                         , prefixSegments     = []
                         , options            = opts
                         }
-    runServerGenM
-        ServerGenState { info           = si
-                       , usedParamNames = mempty
-                       , allParamNames  = cfg ^. field @"allParamNames"
-                       }
-        (mkServerFromSpec spec)
+    runServerGenM ServerGenState { info = si, usedParamNames = mempty }
+                  (mkServerFromSpec spec)
 
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
 getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
@@ -299,7 +295,7 @@ mkApiPiece cfg con = do
             pure $ Endpoint
                 (ConstructorName $ c ^. field @"constructorName")
                 (ConstructorArgs $ c ^.. field @"parameters" . folded . to
-                    (\p -> (p ^. field @"paramName" . to show, p ^. field @"paramType"))
+                    (\p -> (p ^. field @"paramName", p ^. field @"paramType"))
                 )
                 HandlerSettings
                     { contentTypes = c
@@ -476,61 +472,58 @@ mkHandlerTypeDec p = enterApiPiece p $ do
             mkServerFromSpec spec'
 
 
-uniqueParamName :: Name -> ServerGenM String
-uniqueParamName tyName = do
-    paramName <- do
-        -- gets (^. field' @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
-        gets
-                (\c -> M.lookup (tyName ^. unqualifiedString)
-                    $ DomainDriven.Server.Types.allParamNames c
-                )
-            >>= \case
-                    Nothing ->
-                        fail
-                            $  "No param name defined for "
-                            <> show tyName
-                            <> ". Make sure it implements `HasParamName` and that the "
-                            <> " instance is imported where `mkServerConfig` is called."
-                    Just n -> pure $ T.unpack n
-
-    existingNames <- gets (^. field @"usedParamNames")
-    when (paramName `elem` existingNames) $ do
-        info <- gets (^. field @"info")
-        let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show
-            problematicParentConstructors =
-                L.intercalate "->"
-                    $   info
-                    ^.. field @"parentConstructors"
-                    .   folded
-                    .   typed @Name
-                    .   to show
-        fail
-            $  "Duplicate query parameters of type "
-            <> show paramName
-            <> " in Action "
-            <> show problematicConstructor
-            <> " with constructor hierarcy "
-            <> show problematicParentConstructors
-    info <- gets (^. field @"info")
-    traceShowM
-        ( S.toList existingNames
-        , paramName
-        , L.intercalate "->"
-        $   info
-        ^.. field @"parentConstructors"
-        .   folded
-        .   typed @Name
-        .   to show
-        )
-    modify $ over (field @"usedParamNames") (S.insert paramName)
-    pure paramName
+--uniqueParamName :: Name -> ServerGenM String
+--uniqueParamName tyName = do
+--    paramName <- do
+--        -- gets (^. field' @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
+--        gets
+--                (\c -> M.lookup (tyName ^. unqualifiedString)
+--                    $ DomainDriven.Server.Types.allParamNames c
+--                )
+--            >>= \case
+--                    Nothing ->
+--                        fail
+--                            $  "No param name defined for "
+--                            <> show tyName
+--                            <> ". Make sure it implements `HasParamName` and that the "
+--                            <> " instance is imported where `mkServerConfig` is called."
+--                    Just n -> pure $ T.unpack n
+--
+--    existingNames <- gets (^. field @"usedParamNames")
+--    when (paramName `elem` existingNames) $ do
+--        info <- gets (^. field @"info")
+--        let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show
+--            problematicParentConstructors =
+--                L.intercalate "->"
+--                    $   info
+--                    ^.. field @"parentConstructors"
+--                    .   folded
+--                    .   typed @Name
+--                    .   to show
+--        fail
+--            $  "Duplicate query parameters of type "
+--            <> show paramName
+--            <> " in Action "
+--            <> show problematicConstructor
+--            <> " with constructor hierarcy "
+--            <> show problematicParentConstructors
+--    info <- gets (^. field @"info")
+--    traceShowM
+--        ( S.toList existingNames
+--        , paramName
+--        , L.intercalate "->"
+--        $   info
+--        ^.. field @"parentConstructors"
+--        .   folded
+--        .   typed @Name
+--        .   to show
+--        )
+--    modify $ over (field @"usedParamNames") (S.insert paramName)
+--    pure paramName
 
 mkQueryParams :: ConstructorArgs -> ServerGenM [QueryParamType]
 mkQueryParams (ConstructorArgs args) = do
     may <- liftQ [t| Maybe |] -- Maybe parameters are optional, others required
-    let mkUniqueTyName :: Name -> ServerGenM Type
-        mkUniqueTyName n =
-            LitT . StrTyLit <$> uniqueParamName n
 
     for args $ \case
         (name, (AppT may'  ty@(ConT _))) | may' == may -> do
@@ -596,7 +589,7 @@ mkServerDec spec = do
         gadtType = GadtType $ spec ^. field @"gadtName" . typed @Name . to ConT
     serverType <- liftQ
         [t| forall m. (MonadThrow m, MonadUnliftIO m)
-                  => ActionRunner m $(pure $ unGadtType gadtType)
+                  => ActionRunner m  $(pure $ unGadtType gadtType `AppT` PromotedT (mkName "ParamType"))
                   -> ServerT $(pure $ ConT apiTypeName) m
           |]
 
@@ -632,7 +625,9 @@ withForall = ForallT
 
 actionRunner :: Type -> Type
 actionRunner runnerGADT =
-    ConT ''ActionRunner `AppT` VarT runnerMonadName `AppT` runnerGADT
+    ConT ''ActionRunner
+        `AppT` VarT runnerMonadName
+        `AppT` (runnerGADT `AppT` PromotedT (mkName "ParamType"))
 
 runnerMonadName :: Name
 runnerMonadName = mkName "m"
@@ -647,7 +642,7 @@ mkNamedFieldsType cName = \case
             nfType = AppT (ConT nfName) (LitT bodyTag)
 
             nfName :: Name
-            nfName = mkName $ "NamedFields" <> show (length args)
+            nfName = mkName $ "NF" <> show (length args)
 
             addNFxParam :: Type -> (String, Type) -> Type
             addNFxParam nfx (name, ty) = AppT (AppT nfx (LitT $ StrTyLit name)) ty
@@ -724,7 +719,7 @@ mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPi
                 varPat = ConP nfName [] (fmap VarP varNames)
 
                 nfName :: Name
-                nfName = mkName $ "NamedFields" <> show nrArgs
+                nfName = mkName $ "NF" <> show nrArgs
 
             funSig <- SigD handlerName <$> mkCmdHandlerSignature actionType' cName cArgs ty
 

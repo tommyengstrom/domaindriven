@@ -44,26 +44,26 @@ import           Test.Hspec
 --     = client (flatten $ Proxy @StoreActionApi)
 --
 --
--- type ExpectedReverseText
---     = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
---
--- -- type ExpectedConcatText
--- --     = "ConcatText"
--- --     :> QueryParam' '[Strict, Required] "Text" Text
--- --     :> QueryParam' '[Strict, Required] "Text_1" Text
--- --     :> Get '[JSON] Text
---
--- type ExpectedIntersperse
---     = "SubAction"
---     :> QueryParam' '[Strict, Required] "text" Text
---     :> "Intersperse"
---     :> QueryParam' '[Strict, Required] "char" Char
+type ExpectedReverseText
+    = "ReverseText" :> ReqBody '[JSON] (NF1 "text" "text" Text) :> Post '[JSON] Text
+
+-- type ExpectedConcatText
+--     = "ConcatText"
+--     :> QueryParam' '[Strict, Required] "Text" Text
+--     :> QueryParam' '[Strict, Required] "Text_1" Text
 --     :> Get '[JSON] Text
 
-$(mkServer (ServerConfig mempty mempty) ''TestAction)
+type ExpectedIntersperse
+    = "SubAction"
+    :> QueryParam' '[Strict, Required] "text" Text
+    :> "Intersperse"
+    :> QueryParam' '[Strict, Required] "char" Char
+    :> Get '[JSON] Text
+
+$(mkServer testActionConfig ''TestAction)
 
 expectedReverseText :: Text -> ClientM Text
-expectedReverseText = client (Proxy @ExpectedReverseText)
+expectedReverseText = client (Proxy @ExpectedReverseText) . NF1
 
 -- expectedConcatText :: Text -> Text -> ClientM Text
 -- expectedConcatText = client (Proxy @ExpectedConcatText)
@@ -71,20 +71,20 @@ expectedReverseText = client (Proxy @ExpectedReverseText)
 expectedIntersperseText :: Text -> Char -> ClientM Text
 expectedIntersperseText = client (Proxy @ExpectedIntersperse)
 
-writeOpenApi :: IO ()
-writeOpenApi =
-    BL.writeFile "/tmp/store_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
-
-withStoreServer :: IO () -> IO ()
-withStoreServer runTests = do
-    p      <- createForgetful applyStoreEvent mempty
-    server <- async . run 9898 $ serve (Proxy @StoreActionApi) $ hoistServer
-        (Proxy @StoreActionApi)
-        (Handler . ExceptT . try)
-        (storeActionServer $ runAction p handleStoreAction)
-    threadDelay 10000 -- Ensure the server is live when the tests run
-    runTests
-    cancel server
+--writeOpenApi :: IO ()
+--writeOpenApi =
+--    BL.writeFile "/tmp/store_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
+--
+--withStoreServer :: IO () -> IO ()
+--withStoreServer runTests = do
+--    p      <- createForgetful applyStoreEvent mempty
+--    server <- async . run 9898 $ serve (Proxy @StoreActionApi) $ hoistServer
+--        (Proxy @StoreActionApi)
+--        (Handler . ExceptT . try)
+--        (storeActionServer $ runAction p handleStoreAction)
+--    threadDelay 10000 -- Ensure the server is live when the tests run
+--    runTests
+--    cancel server
 
 withTestServer :: IO () -> IO ()
 withTestServer runTests = do
@@ -93,27 +93,36 @@ withTestServer runTests = do
     server <- async . run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
         (Proxy @TestActionApi)
         (Handler . ExceptT . try)
-        (testActionServer $ runAction p handleTestAction)
+        (testActionServer $ runAction p handleAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
     cancel server
+
+
+kuken :: IO ()
+kuken = do
+    p <- createForgetful (\m _ -> m) ()
+    run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
+        (Proxy @TestActionApi)
+        (Handler . ExceptT . try)
+        (testActionServer $ runAction p handleAction)
 
 spec :: Spec
 spec = do
     clientEnv <- runIO $ do
         man <- newManager defaultManagerSettings
         pure $ mkClientEnv man (BaseUrl Http "localhost" 9898 "")
-    aroundAll_ withStoreServer $ do
+    --aroundAll_ withStoreServer $ do
 
-        describe "Server endpoint renaming" $ do
-            it "Can add item" $ do
-                r <- runClientM (adminAddItem $ NamedFields3 "Test item" 10 99) clientEnv
-                r `shouldSatisfy` not . null
-            it "The new item shows up when listing items" $ do
-                r <- runClientM listItems clientEnv
-                case r of
-                    Right [ItemInfo _ n _ _ _] -> n `shouldBe` "Test item"
-                    a -> fail $ "That shouldn't happen! " <> show a
+    --    describe "Server endpoint renaming" $ do
+    --        it "Can add item" $ do
+    --            r <- runClientM (adminAddItem $ NamedFields3 "Test item" 10 99) clientEnv
+    --            r `shouldSatisfy` not . null
+    --        it "The new item shows up when listing items" $ do
+    --            r <- runClientM listItems clientEnv
+    --            case r of
+    --                Right [ItemInfo _ n _ _ _] -> n `shouldBe` "Test item"
+    --                a -> fail $ "That shouldn't happen! " <> show a
     aroundAll_ withTestServer $ do
         describe "Endpoints generated as expected" $ do
             it "Plaintext endpoint works" $ do

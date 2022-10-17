@@ -63,24 +63,24 @@ data ItemInfo = ItemInfo
 
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
-data StoreAction method a where
-    BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
-    ListItems ::StoreAction (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> StoreAction Query [ItemInfo]
-    ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
-    AdminAction ::AdminAction method a -> StoreAction method a
+data StoreAction x method a where
+    BuyItem    ::ItemKey -> Quantity -> StoreAction x Cmd ()
+    ListItems ::StoreAction x (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
+    Search ::Text -> StoreAction x Query [ItemInfo]
+    ItemAction ::ItemKey -> ItemAction x method a -> StoreAction x method a
+    AdminAction ::AdminAction x method a -> StoreAction x method a
     deriving HasApiOptions
 
-data ItemAction method a where
-    ItemStockQuantity ::ItemAction Query Quantity
-    ItemPrice ::ItemAction Query Price
+data ItemAction x method a where
+    ItemStockQuantity ::ItemAction x Query Quantity
+    ItemPrice ::ItemAction x Query Price
     deriving HasApiOptions
 
-data AdminAction method a where
-    Order    ::ItemKey -> Quantity -> AdminAction CbCmd ()
-    Restock    ::ItemKey -> Quantity -> AdminAction Cmd ()
-    AddItem    ::ItemName -> Quantity -> Price -> AdminAction Cmd ItemKey
-    RemoveItem ::ItemKey -> AdminAction Cmd ()
+data AdminAction x method a where
+    Order    ::ItemKey -> Quantity -> AdminAction x CbCmd ()
+    Restock    ::ItemKey -> Quantity -> AdminAction x Cmd ()
+    AddItem    ::ItemName -> Quantity -> Price -> AdminAction x Cmd ItemKey
+    RemoveItem ::ItemKey -> AdminAction x Cmd ()
     deriving HasApiOptions
 
 -- | The event
@@ -103,7 +103,7 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 handleStoreAction
     :: (MonadUnliftIO m, MonadThrow m)
-    => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
+    => MonadThrow m => ActionHandler StoreModel StoreEvent m (StoreAction 'ParamType)
 handleStoreAction = \case
     BuyItem iKey quantity' -> Cmd $ \m -> do
         let available = maybe 0 quantity $ M.lookup iKey m
@@ -121,7 +121,7 @@ handleStoreAction = \case
 handleAdminAction
     :: forall m
      . (MonadUnliftIO m, MonadThrow m)
-    => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
+    => MonadIO m => ActionHandler StoreModel StoreEvent m (AdminAction 'ParamType)
 handleAdminAction = \case
     Order iKey q -> CbCmd $ \runTransaction -> do
         m <- runTransaction $ \m -> pure (const m, [])
@@ -153,7 +153,7 @@ handleItemAction
     :: forall m
      . (MonadUnliftIO m, MonadThrow m)
     => ItemKey
-    -> ActionHandler StoreModel StoreEvent m ItemAction
+    -> ActionHandler StoreModel StoreEvent m (ItemAction 'ParamType)
 handleItemAction iKey = \case
     ItemStockQuantity -> Query $ \m -> do
         i <- getItem m
@@ -188,7 +188,7 @@ instance KnownSymbol s => HasParamName (Wrup s a) where
     paramName = T.pack $ symbolVal (Proxy @s)
 
 type BuffeliBongBong = Wrup "BuffeliBongBong" Text
-$(mkServerConfig "storeActionConfig")
+-- $(mkServerConfig "storeActionConfig")
 
 -- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
 --
