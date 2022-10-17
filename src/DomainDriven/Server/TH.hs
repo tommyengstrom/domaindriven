@@ -118,8 +118,6 @@ getConstructors = \case
     d@DataD{} -> fail $ "Unexpected Action data type: " <> show d
     d         -> fail $ "Expected a GADT with two parameters but got: " <> show d
 
--- data ConstructorMatch = ConstructorMatch
---     {
 data Pmatch = Pmatch
     { paramPart :: Name
     , paramName :: String
@@ -151,6 +149,17 @@ data ConstructorMatch = ConstructorMatch
     , parameters      :: [Pmatch]
     , finalType       :: FinalConstructorTypeMatch
     }
+    deriving (Show, Generic)
+
+data SubActionMatch = SubActionMatch
+    { xParam          :: Name -- ^ Of kind ParamPart
+    , constructorName :: Name
+    , parameters      :: [Pmatch]
+    , finalType       :: SubActionTypeMatch
+    }
+    deriving (Show, Generic)
+
+data SubActionTypeMatch = SubActionTypeMatch
     deriving (Show, Generic)
 
 data FinalConstructorTypeMatch = FinalConstructorTypeMatch
@@ -193,6 +202,44 @@ matchNormalConstructor con = do
             params <- traverse (matchP . snd) bangArgs
             pure (conName, params, ty)
         con -> Left $ "Expected Gadt constrctor, got: " <> show con
+
+matchSubActionConstructor :: Con -> Either String SubActionMatch
+matchSubActionConstructor con = do
+    -- Get the `forall (x ::ParamPart)`
+    (x, method, a, gadtCon)            <- unconsForall con
+    -- Left $ show gadtCon
+    (conName, params, constructorType) <- unconsGadt gadtCon
+    finalType                          <- matchSubActionConstructorType constructorType
+    pure SubActionMatch { xParam          = x
+                        , constructorName = conName
+                        , parameters      = params
+                        , finalType       = finalType
+                        }
+  where
+
+    unconsForall :: Con -> Either String (Name, Name, Name, Con)
+    unconsForall = \case
+        ForallC [KindedTV x SpecifiedSpec _kind, KindedTV method SpecifiedSpec StarT, KindedTV a SpecifiedSpec StarT] _ctx con
+            -> Right (x, method, a, con)
+        con ->
+            Left
+                $ "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
+                <> show con
+
+    unconsGadt :: Con -> Either String (Name, [Pmatch], Type)
+    unconsGadt = \case
+        GadtC [actionName] bangArgs ty -> do
+            params <- traverse (matchP . snd) bangArgs
+            pure (actionName, params, ty)
+        con -> Left $ "Expected Gadt constrctor, got: " <> show con
+
+matchSubActionConstructorType :: Type -> Either String SubActionTypeMatch
+matchSubActionConstructorType = \case
+    (AppT (AppT (AppT (ConT _typeName) (VarT _x)) (VarT _method)) (VarT _a)) ->
+        Right SubActionTypeMatch
+    ty -> Left $ "Expected a sub subaction with polymorphic argumnets, got: " <> show ty
+
+
 
 matchFinalConstructorType :: Type -> Either String FinalConstructorTypeMatch
 matchFinalConstructorType = \case
@@ -284,8 +331,8 @@ matchP = \case
 
 mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
 mkApiPiece cfg con = do
-    case matchNormalConstructor con of
-        Right c -> do
+    case (matchNormalConstructor con, matchSubActionConstructor con) of
+        (Right c, _) -> do
             actionType <-
                 getActionType
                 $  c
@@ -309,8 +356,16 @@ mkApiPiece cfg con = do
                     }
                 actionType
                 (EpReturnType $ c ^. field @"finalType" . field @"returnType")
-
-        Left err -> fail $ "mkApiPiece - " <> show err
+        (_, Right c) -> fail $ "APA: " <> show c
+        (Left err1, Left err2) ->
+            fail
+                $  "mkApiPiece - "
+                <> "\n---------------------mkApiPiece: Expected ------------------------"
+                <> show err1
+                <> "\n---------------------or-------------------------------------------"
+                <> "\n"
+                <> show err2
+                <> "\n------------------------------------------------------------------"
     -- The normal case
     -- xx@(ForallC [x@(KindedTV _ SpecifiedSpec _)] _ (GadtC [gadtName] bangArgs (AppT (AppT _ requestType) retType)))
     --     -> do
@@ -472,8 +527,26 @@ mkHandlerTypeDec p = enterApiPiece p $ do
             mkServerFromSpec spec'
 
 
---uniqueParamName :: Name -> ServerGenM String
---uniqueParamName tyName = do
+guardUniqueParamName :: String -> ServerGenM ()
+guardUniqueParamName paramName = do
+    existingNames <- gets (^. field @"usedParamNames")
+    when (paramName `elem` existingNames) $ do
+        info <- gets (^. field @"info")
+        let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show
+            problematicParentConstructors =
+                L.intercalate "->"
+                    $   info
+                    ^.. field @"parentConstructors"
+                    .   folded
+                    .   typed @Name
+                    .   to show
+        fail
+            $  "Duplicate query parameters of type "
+            <> show paramName
+            <> " in Action "
+            <> show problematicConstructor
+            <> " with constructor hierarcy "
+            <> show problematicParentConstructors
 --    paramName <- do
 --        -- gets (^. field' @"allParamNames" . at (tyName ^. unqualifiedString)) >>= \case
 --        gets
@@ -489,7 +562,6 @@ mkHandlerTypeDec p = enterApiPiece p $ do
 --                            <> " instance is imported where `mkServerConfig` is called."
 --                    Just n -> pure $ T.unpack n
 --
---    existingNames <- gets (^. field @"usedParamNames")
 --    when (paramName `elem` existingNames) $ do
 --        info <- gets (^. field @"info")
 --        let problematicConstructor = info ^. field @"currentGadt" . typed @Name . to show

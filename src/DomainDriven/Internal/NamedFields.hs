@@ -3,16 +3,6 @@
 module DomainDriven.Internal.NamedFields
     ( NF1 (..)
     , NF2 (..)
-    , NamedFields1 (..)
-    , NamedFields2 (..)
-    , NamedFields3 (..)
-    , NamedFields4 (..)
-    , NamedFields5 (..)
-    , NamedFields6 (..)
-    , NamedFields7 (..)
-    , NamedFields8 (..)
-    , NamedFields9 (..)
-    , NamedFields10 (..)
     ) where
 
 import           Data.Aeson
@@ -39,6 +29,27 @@ data NF1 (name :: Symbol) (f1 :: Symbol) ty = NF1 ty
 data NF2 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 = NF2 a1 a2
     deriving (Show, Generic)
 
+data NF3 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 = NF3 a1 a2 a3
+    deriving (Show, Generic)
+
+data NF4 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 = NF4 a1 a2 a3 a4
+    deriving (Show, Generic)
+
+data NF5 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 (f5 :: Symbol) a5 = NF5 a1 a2 a3 a4 a5
+    deriving (Show, Generic)
+
+data NF6 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 (f5 :: Symbol) a5 (f6 :: Symbol) a6 = NF6 a1 a2 a3 a4 a5 a6
+    deriving (Show, Generic)
+
+data NF7 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 (f5 :: Symbol) a5 (f6 :: Symbol) a6 (f7 :: Symbol) a7 = NF7 a1 a2 a3 a4 a5 a6 a7
+    deriving (Show, Generic)
+
+data NF8 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 (f5 :: Symbol) a5 (f6 :: Symbol) a6 (f7 :: Symbol) a7 (f8 :: Symbol) a8 = NF8 a1 a2 a3 a4 a5 a6 a7 a8
+    deriving (Show, Generic)
+
+data NF9 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 (f4 :: Symbol) a4 (f5 :: Symbol) a5 (f6 :: Symbol) a6 (f7 :: Symbol) a7 (f8 :: Symbol) a8 (f9 :: Symbol) a9 = NF9 a1 a2 a3 a4 a5 a6 a7 a8 a9
+    deriving (Show, Generic)
+
 symbolKey :: forall n. KnownSymbol n => Key
 symbolKey = Key.fromString . symbolVal $ Proxy @n
 
@@ -56,356 +67,241 @@ instance (KnownSymbol f1, ToJSON a1
         ,(symbolKey @f2, toJSON a2)
         ]
 
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+          )
+    => ToJSON (NF3 name f1 a1 f2 a2 f3 a3) where
+    toJSON (NF3 a1 a2 a3) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+          )
+    => ToJSON (NF4 name f1 a1 f2 a2 f3 a3 f4 a4) where
+    toJSON (NF4 a1 a2 a3 a4) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+         ,KnownSymbol f5, ToJSON a5
+          )
+    => ToJSON (NF5 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5) where
+    toJSON (NF5 a1 a2 a3 a4 a5) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ,(symbolKey @f5, toJSON a5)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+         ,KnownSymbol f5, ToJSON a5
+         ,KnownSymbol f6, ToJSON a6
+          )
+    => ToJSON (NF6 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6) where
+    toJSON (NF6 a1 a2 a3 a4 a5 a6) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ,(symbolKey @f5, toJSON a5)
+        ,(symbolKey @f6, toJSON a6)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+         ,KnownSymbol f5, ToJSON a5
+         ,KnownSymbol f6, ToJSON a6
+         ,KnownSymbol f7, ToJSON a7
+          )
+    => ToJSON (NF7 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7) where
+    toJSON (NF7 a1 a2 a3 a4 a5 a6 a7) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ,(symbolKey @f5, toJSON a5)
+        ,(symbolKey @f6, toJSON a6)
+        ,(symbolKey @f7, toJSON a7)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+         ,KnownSymbol f5, ToJSON a5
+         ,KnownSymbol f6, ToJSON a6
+         ,KnownSymbol f7, ToJSON a7
+         ,KnownSymbol f8, ToJSON a8
+          )
+    => ToJSON (NF8 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8) where
+    toJSON (NF8 a1 a2 a3 a4 a5 a6 a7 a8) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ,(symbolKey @f5, toJSON a5)
+        ,(symbolKey @f6, toJSON a6)
+        ,(symbolKey @f7, toJSON a7)
+        ,(symbolKey @f8, toJSON a8)
+        ]
+instance (KnownSymbol f1, ToJSON a1
+         ,KnownSymbol f2, ToJSON a2
+         ,KnownSymbol f3, ToJSON a3
+         ,KnownSymbol f4, ToJSON a4
+         ,KnownSymbol f5, ToJSON a5
+         ,KnownSymbol f6, ToJSON a6
+         ,KnownSymbol f7, ToJSON a7
+         ,KnownSymbol f8, ToJSON a8
+         ,KnownSymbol f9, ToJSON a9
+          )
+    => ToJSON (NF9 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8 f9 a9) where
+    toJSON (NF9  a1 a2 a3 a4 a5 a6 a7 a8 a9) = Object $ KM.fromList
+        [(symbolKey @f1, toJSON a1)
+        ,(symbolKey @f2, toJSON a2)
+        ,(symbolKey @f3, toJSON a3)
+        ,(symbolKey @f4, toJSON a4)
+        ,(symbolKey @f5, toJSON a5)
+        ,(symbolKey @f6, toJSON a6)
+        ,(symbolKey @f7, toJSON a7)
+        ,(symbolKey @f8, toJSON a8)
+        ,(symbolKey @f9, toJSON a9)
+        ]
+
 instance (KnownSymbol name, KnownSymbol f1, FromJSON a1)
     => FromJSON (NF1 name f1 a1) where
     parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
         a1 <- o .: symbolKey @f1
         pure $ NF1 a1
 
+
 instance ( KnownSymbol name
          , KnownSymbol f1, FromJSON a1
-         , KnownSymbol f2, FromJSON a2)
-    => FromJSON (NF2 name f1 a1 f2 a2) where
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3)
+    => FromJSON (NF3 name f1 a1 f2 a2 f3 a3) where
     parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
         a1 <- o .: symbolKey @f1
         a2 <- o .: symbolKey @f2
-        pure $ NF2 a1 a2
+        a3 <- o .: symbolKey @f3
+        pure $ NF3 a1 a2 a3
 
----------------------------------------------------------------
-data NamedFields1 (name :: Symbol) a  = NamedFields1 a
-    deriving (Show, Eq, Ord, Generic)
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4)
+    => FromJSON (NF4 name f1 a1 f2 a2 f3 a3 f4 a4) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        pure $ NF4 a1 a2 a3 a4
 
--- instance (ToJSON a, KnownSymbol name, KnownSymbol f1)
---     => ToJSON (NamedFields1 name (P x f1 a)) where
---         toJSON (NamedFields1 a) = Object [(T.pack $ symbolVal (Proxy @f1), toJSON a)]
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4
+         , KnownSymbol f5, FromJSON a5)
+    => FromJSON (NF5 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        a5 <- o .: symbolKey @f5
+        pure $ NF5 a1 a2 a3 a4 a5
 
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a)
-        =>  ToJSON (NamedFields1 name a ) where
-    toJSON = gNamedToJson (opts @name)
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4
+         , KnownSymbol f5, FromJSON a5
+         , KnownSymbol f6, FromJSON a6)
+    => FromJSON (NF6 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        a5 <- o .: symbolKey @f5
+        a6 <- o .: symbolKey @f6
+        pure $ NF6 a1 a2 a3 a4 a5 a6
 
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a)
-    =>  ToSchema (NamedFields1 name a ) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4
+         , KnownSymbol f5, FromJSON a5
+         , KnownSymbol f6, FromJSON a6
+         , KnownSymbol f7, FromJSON a7)
+    => FromJSON (NF7 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        a5 <- o .: symbolKey @f5
+        a6 <- o .: symbolKey @f6
+        a7 <- o .: symbolKey @f7
+        pure $ NF7 a1 a2 a3 a4 a5 a6 a7
 
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a)
-    =>  FromJSON (NamedFields1 name a ) where
-    parseJSON = gNamedParseJson (opts @name)
----------------------------------------------------------------
-data NamedFields2 (name :: Symbol) a b = NamedFields2 a b
-    deriving (Show, Eq, Ord, Generic)
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4
+         , KnownSymbol f5, FromJSON a5
+         , KnownSymbol f6, FromJSON a6
+         , KnownSymbol f7, FromJSON a7
+         , KnownSymbol f8, FromJSON a8)
+    => FromJSON (NF8 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        a5 <- o .: symbolKey @f5
+        a6 <- o .: symbolKey @f6
+        a7 <- o .: symbolKey @f7
+        a8 <- o .: symbolKey @f8
+        pure $ NF8 a1 a2 a3 a4 a5 a6 a7 a8
 
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b)
-        =>  ToJSON (NamedFields2 name a b) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b)
-    =>  ToSchema (NamedFields2 name a b) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b)
-    =>  FromJSON (NamedFields2 name a b) where
-    parseJSON = gNamedParseJson (opts @name)
-
----------------------------------------------------------------
-data NamedFields3 (name :: Symbol) a b c = NamedFields3 a b c
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c)
-        =>  ToJSON (NamedFields3 name a b c) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c)
-    =>  ToSchema (NamedFields3 name a b c) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c)
-    =>  FromJSON (NamedFields3 name a b c) where
-    parseJSON = gNamedParseJson (opts @name)
-
----------------------------------------------------------------
-data NamedFields4 (name :: Symbol) a b c d = NamedFields4 a b c d
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d)
-        =>  ToJSON (NamedFields4 name a b c d) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d)
-    =>  ToSchema (NamedFields4 name a b c d) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d)
-    =>  FromJSON (NamedFields4 name a b c d) where
-    parseJSON = gNamedParseJson (opts @name)
-
-
----------------------------------------------------------------
-data NamedFields5 (name :: Symbol) a b c d e = NamedFields5 a b c d e
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e)
-        =>  ToJSON (NamedFields5 name a b c d e) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e)
-    =>  ToSchema (NamedFields5 name a b c d e) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e)
-    =>  FromJSON (NamedFields5 name a b c d e) where
-    parseJSON = gNamedParseJson (opts @name)
-
-
----------------------------------------------------------------
-data NamedFields6 (name :: Symbol) a b c d e f = NamedFields6 a b c d e f
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e
-        , ToJSON f, HasFieldName f)
-        =>  ToJSON (NamedFields6 name a b c d e f) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e
-        , ToSchema f, HasFieldName f)
-    =>  ToSchema (NamedFields6 name a b c d e f) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e
-        , FromJSON f, HasFieldName f)
-    =>  FromJSON (NamedFields6 name a b c d e f) where
-    parseJSON = gNamedParseJson (opts @name)
-
----------------------------------------------------------------
-data NamedFields7 (name :: Symbol) a b c d e f g = NamedFields7 a b c d e f g
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e
-        , ToJSON f, HasFieldName f
-        , ToJSON g, HasFieldName g)
-        =>  ToJSON (NamedFields7 name a b c d e f g) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e
-        , ToSchema f, HasFieldName f
-        , ToSchema g, HasFieldName g)
-    =>  ToSchema (NamedFields7 name a b c d e f g) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e
-        , FromJSON f, HasFieldName f
-        , FromJSON g, HasFieldName g)
-    =>  FromJSON (NamedFields7 name a b c d e f g) where
-    parseJSON = gNamedParseJson (opts @name)
----------------------------------------------------------------
-data NamedFields8 (name :: Symbol) a b c d e f g h = NamedFields8 a b c d e f g h
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e
-        , ToJSON f, HasFieldName f
-        , ToJSON g, HasFieldName g
-        , ToJSON h, HasFieldName h)
-        =>  ToJSON (NamedFields8 name a b c d e f g h) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e
-        , ToSchema f, HasFieldName f
-        , ToSchema g, HasFieldName g
-        , ToSchema h, HasFieldName h)
-    =>  ToSchema (NamedFields8 name a b c d e f g h) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e
-        , FromJSON f, HasFieldName f
-        , FromJSON g, HasFieldName g
-        , FromJSON h, HasFieldName h)
-    =>  FromJSON (NamedFields8 name a b c d e f g h) where
-    parseJSON = gNamedParseJson (opts @name)
----------------------------------------------------------------
-data NamedFields9 (name :: Symbol) a b c d e f g h i = NamedFields9 a b c d e f g h i
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e
-        , ToJSON f, HasFieldName f
-        , ToJSON g, HasFieldName g
-        , ToJSON h, HasFieldName h
-        , ToJSON i, HasFieldName i)
-        =>  ToJSON (NamedFields9 name a b c d e f g h i) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e
-        , ToSchema f, HasFieldName f
-        , ToSchema g, HasFieldName g
-        , ToSchema h, HasFieldName h
-        , ToSchema i, HasFieldName i)
-    =>  ToSchema (NamedFields9 name a b c d e f g h i) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e
-        , FromJSON f, HasFieldName f
-        , FromJSON g, HasFieldName g
-        , FromJSON h, HasFieldName h
-        , FromJSON i, HasFieldName i)
-    =>  FromJSON (NamedFields9 name a b c d e f g h i) where
-    parseJSON = gNamedParseJson (opts @name)
----------------------------------------------------------------
-data NamedFields10 (name :: Symbol) a b c d e f g h i j = NamedFields10 a b c d e f g h i j
-    deriving (Show, Eq, Ord, Generic)
-
-instance (KnownSymbol name
-        , ToJSON a, HasFieldName a
-        , ToJSON b, HasFieldName b
-        , ToJSON c, HasFieldName c
-        , ToJSON d, HasFieldName d
-        , ToJSON e, HasFieldName e
-        , ToJSON f, HasFieldName f
-        , ToJSON g, HasFieldName g
-        , ToJSON h, HasFieldName h
-        , ToJSON i, HasFieldName i
-        , ToJSON j, HasFieldName j)
-        =>  ToJSON (NamedFields10 name a b c d e f g h i j) where
-    toJSON = gNamedToJson (opts @name)
-
-instance (KnownSymbol name
-        , ToSchema a, HasFieldName a
-        , ToSchema b, HasFieldName b
-        , ToSchema c, HasFieldName c
-        , ToSchema d, HasFieldName d
-        , ToSchema e, HasFieldName e
-        , ToSchema f, HasFieldName f
-        , ToSchema g, HasFieldName g
-        , ToSchema h, HasFieldName h
-        , ToSchema i, HasFieldName i
-        , ToSchema j, HasFieldName j)
-    =>  ToSchema (NamedFields10 name a b c d e f g h i j) where
-    declareNamedSchema = gNamedDeclareNamedSchema (opts @name)
-
-instance (KnownSymbol name
-        , FromJSON a, HasFieldName a
-        , FromJSON b, HasFieldName b
-        , FromJSON c, HasFieldName c
-        , FromJSON d, HasFieldName d
-        , FromJSON e, HasFieldName e
-        , FromJSON f, HasFieldName f
-        , FromJSON g, HasFieldName g
-        , FromJSON h, HasFieldName h
-        , FromJSON i, HasFieldName i
-        , FromJSON j, HasFieldName j)
-    =>  FromJSON (NamedFields10 name a b c d e f g h i j) where
-    parseJSON = gNamedParseJson (opts @name)
-
-
-
-
-
-
-
-
-
-
-
-
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
+         , KnownSymbol f3, FromJSON a3
+         , KnownSymbol f4, FromJSON a4
+         , KnownSymbol f5, FromJSON a5
+         , KnownSymbol f6, FromJSON a6
+         , KnownSymbol f7, FromJSON a7
+         , KnownSymbol f8, FromJSON a8
+         , KnownSymbol f9, FromJSON a9)
+    => FromJSON (NF9 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8 f9 a9) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        a3 <- o .: symbolKey @f3
+        a4 <- o .: symbolKey @f4
+        a5 <- o .: symbolKey @f5
+        a6 <- o .: symbolKey @f6
+        a7 <- o .: symbolKey @f7
+        a8 <- o .: symbolKey @f8
+        a9 <- o .: symbolKey @f9
+        pure $ NF9 a1 a2 a3 a4 a5 a6 a7 a8 a9

@@ -15,9 +15,9 @@ data TestAction x method a where
     ConcatText  ::P x "text" Text
                 -> P x "string" String
                 -> TestAction x Query Text
---    SubAction   ::P x "text" Text
---                 -> P x "something_more" (SubAction x method a)
---                 -> TestAction x method a
+    SubAction   ::P x "text" Text
+                 -> P x "something_more" (SubAction x method a)
+                 -> TestAction x method a
     deriving HasApiOptions
 
 
@@ -27,13 +27,13 @@ handleAction = \case
     ConcatText a b -> Query $ \() -> pure $ a <> T.pack b
     --SubAction  t action -> handleSubAction t action
 
--- data SubAction x method a where
---     Intersperse ::P x "char" Char -> SubAction x Query Text
---     deriving HasApiOptions
---
---
--- handleSubAction :: MonadThrow m => Text -> ActionHandler () () m (SubAction 'ParamType)
--- handleSubAction t1 = \case
---     Intersperse c -> Query $ \() -> pure $ T.intersperse c t1
+data SubAction x method a where
+    Intersperse ::P x "char" Char -> SubAction x Query Text
+    deriving HasApiOptions
+
+
+handleSubAction :: MonadThrow m => Text -> ActionHandler () () m (SubAction 'ParamType)
+handleSubAction t1 = \case
+    Intersperse c -> Query $ \() -> pure $ T.intersperse c t1
 
 $(mkServerConfig "testActionConfig")
