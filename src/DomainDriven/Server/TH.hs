@@ -155,6 +155,9 @@ data SubActionMatch = SubActionMatch
     { xParam          :: Name -- ^ Of kind ParamPart
     , constructorName :: Name
     , parameters      :: [Pmatch]
+    , subActionPath   :: String
+    , subActionName   :: Name
+    , subActionType   :: Type
     , finalType       :: SubActionTypeMatch
     }
     deriving (Show, Generic)
@@ -206,13 +209,17 @@ matchNormalConstructor con = do
 matchSubActionConstructor :: Con -> Either String SubActionMatch
 matchSubActionConstructor con = do
     -- Get the `forall (x ::ParamPart)`
-    (x, method, a, gadtCon)            <- unconsForall con
+    (x      , method      , a, gadtCon        ) <- unconsForall con
     -- Left $ show gadtCon
-    (conName, params, constructorType) <- unconsGadt gadtCon
-    finalType                          <- matchSubActionConstructorType constructorType
+    (conName, normalParams, (subActionPath, subActionName, subActionType), constructorType) <-
+        unconsGadt gadtCon
+    finalType <- matchSubActionConstructorType constructorType
     pure SubActionMatch { xParam          = x
                         , constructorName = conName
-                        , parameters      = params
+                        , parameters      = normalParams
+                        , subActionPath   = subActionPath
+                        , subActionName   = subActionName
+                        , subActionType   = subActionType
                         , finalType       = finalType
                         }
   where
@@ -226,12 +233,31 @@ matchSubActionConstructor con = do
                 $ "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
                 <> show con
 
-    unconsGadt :: Con -> Either String (Name, [Pmatch], Type)
+    unconsGadt :: Con -> Either String (Name, [Pmatch], (String, Name, Type), Type)
     unconsGadt = \case
         GadtC [actionName] bangArgs ty -> do
-            params <- traverse (matchP . snd) bangArgs
-            pure (actionName, params, ty)
+            params                    <- traverse (matchP . snd) bangArgs
+            (normalParams, subServer) <- case L.splitAt (length params - 1) params of
+                (normalParams, [subServer]) -> Right (normalParams, subServer)
+                (_, []) ->
+                    Left
+                        $  "Expected last parameter to be a subaction, got: "
+                        <> show params
+            subActionName <- getSubActionName (subServer ^. field @"paramType")
+            let subActionStuff =
+                    ( subServer ^. field @"paramName"
+                    , subActionName
+                    , subServer ^. field @"paramType"
+                    )
+            pure (actionName, normalParams, subActionStuff, ty)
         con -> Left $ "Expected Gadt constrctor, got: " <> show con
+
+    getSubActionName :: Type -> Either String Name
+    getSubActionName = \case
+        AppT (AppT (AppT (ConT action) (VarT _x)) (VarT _method)) (VarT _a) ->
+            Right action
+        ty -> Left $ "Expected a sub action, got: " <> show ty
+
 
 matchSubActionConstructorType :: Type -> Either String SubActionTypeMatch
 matchSubActionConstructorType = \case
@@ -356,7 +382,15 @@ mkApiPiece cfg con = do
                     }
                 actionType
                 (EpReturnType $ c ^. field @"finalType" . field @"returnType")
-        (_, Right c) -> fail $ "APA: " <> show c
+        (_, Right c) -> do
+            subServerSpec <- mkServerSpec cfg (GadtName $ c ^. field @"subActionName")
+            pure $ SubApi
+                (c ^. field @"constructorName" . to ConstructorName)
+
+                (ConstructorArgs $ c ^.. field @"parameters" . folded . to
+                    (\p -> (p ^. field @"paramName", p ^. field @"paramType"))
+                )
+                subServerSpec
         (Left err1, Left err2) ->
             fail
                 $  "mkApiPiece - "

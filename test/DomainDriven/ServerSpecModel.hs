@@ -23,9 +23,9 @@ data TestAction x method a where
 
 handleAction :: MonadThrow m => ActionHandler () () m (TestAction 'ParamType)
 handleAction = \case
-    ReverseText t  -> CbCmd $ \_runTransaction -> pure (T.reverse t)
-    ConcatText a b -> Query $ \() -> pure $ a <> T.pack b
-    --SubAction  t action -> handleSubAction t action
+    ReverseText t       -> CbCmd $ \_runTransaction -> pure (T.reverse t)
+    ConcatText a b      -> Query $ \() -> pure $ a <> T.pack b
+    SubAction  t action -> handleSubAction t action
 
 data SubAction x method a where
     Intersperse ::P x "char" Char -> SubAction x Query Text
