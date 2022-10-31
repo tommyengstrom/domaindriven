@@ -16,6 +16,8 @@ import           Data.UUID                      ( UUID )
 import           GHC.Generics                   ( Generic )
 import           GHC.TypeLits
 import           Lens.Micro                   (  (^.))
+import qualified Data.List as L
+import Data.Function (on)
 import           Prelude
 import           Servant
 import           Streamly.Prelude (SerialT)
@@ -165,13 +167,19 @@ class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
     apiOptions = defaultApiOptions
 
 data ApiOptions = ApiOptions
-    { typenameSeparator :: String
+    { renameConstructor :: String -> String
+    , typenameSeparator :: String
     , bodyNameBase      :: Maybe String
     }
     deriving Generic
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { typenameSeparator = "_"
+defaultApiOptions = ApiOptions { renameConstructor =
+    \s -> case L.splitAt (on (-) L.length s "Action") s of
+        (x, "Action") -> x
+        _ -> s
+
+                               , typenameSeparator = "_"
                                , bodyNameBase      = Nothing
                                }
 

@@ -99,7 +99,6 @@ tests:
     dependencies:
     - aeson
     - async
-    - bytestring
     - containers
     - deepseq
     - domain-driven
@@ -119,7 +118,6 @@ tests:
     - quickcheck-classes
     - servant-client
     - servant-flatten
-    - servant-openapi3
     - servant-server
     - text
     - unliftio
@@ -129,13 +127,20 @@ tests:
 executables:
   example-simple:
     main:                Main.hs
-    source-dirs:         examples/simple
+    source-dirs:
+      - examples/simple
+      - models
     dependencies:
     - aeson
     - bytestring
     - domain-driven
     - exceptions
     - mtl
+    - deepseq
+    - containers
+    - openapi3
+    - unliftio
+    - text
     - servant-server
     - servant-openapi3
     - warp

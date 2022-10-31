@@ -1,8 +1,16 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE OverloadedLists #-}
 
 module DomainDriven.Internal.NamedFields
     ( NF1 (..)
     , NF2 (..)
+    , NF3 (..)
+    , NF4 (..)
+    , NF5 (..)
+    , NF6 (..)
+    , NF7 (..)
+    , NF8 (..)
+    , NF9 (..)
     ) where
 
 import           Data.Aeson
@@ -190,6 +198,16 @@ instance (KnownSymbol name, KnownSymbol f1, FromJSON a1)
 instance ( KnownSymbol name
          , KnownSymbol f1, FromJSON a1
          , KnownSymbol f2, FromJSON a2
+         )
+    => FromJSON (NF2 name f1 a1 f2 a2) where
+    parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
+        a1 <- o .: symbolKey @f1
+        a2 <- o .: symbolKey @f2
+        pure $ NF2 a1 a2
+
+instance ( KnownSymbol name
+         , KnownSymbol f1, FromJSON a1
+         , KnownSymbol f2, FromJSON a2
          , KnownSymbol f3, FromJSON a3)
     => FromJSON (NF3 name f1 a1 f2 a2 f3 a3) where
     parseJSON = withObject (symbolVal $ Proxy @name) $ \o -> do
@@ -305,3 +323,388 @@ instance ( KnownSymbol name
         a8 <- o .: symbolKey @f8
         a9 <- o .: symbolKey @f9
         pure $ NF9 a1 a2 a3 a4 a5 a6 a7 a8 a9
+
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         )
+    =>  ToSchema (NF1 name f1 a1) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1]
+                   , _schemaProperties = [(f1, Inline f1Dec)]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         )
+    =>  ToSchema (NF2 name f1 a1 f2 a2) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         )
+    =>  ToSchema (NF3 name f1 a1 f2 a2 f3 a3) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         , KnownSymbol f5
+         , ToSchema a5
+         )
+    =>  ToSchema (NF5 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            f5Dec <- declareSchema $ Proxy @a5
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            let f5 = T.pack . symbolVal $ Proxy @f5
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4, f5]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
+                    ,(f5, Inline f5Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         , KnownSymbol f5
+         , ToSchema a5
+         , KnownSymbol f6
+         , ToSchema a6
+         )
+    =>  ToSchema (NF6 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            f5Dec <- declareSchema $ Proxy @a5
+            f6Dec <- declareSchema $ Proxy @a6
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            let f5 = T.pack . symbolVal $ Proxy @f5
+            let f6 = T.pack . symbolVal $ Proxy @f6
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4, f5, f6]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
+                    ,(f5, Inline f5Dec)
+                    ,(f6, Inline f6Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         , KnownSymbol f5
+         , ToSchema a5
+         , KnownSymbol f6
+         , ToSchema a6
+         , KnownSymbol f7
+         , ToSchema a7
+         )
+    =>  ToSchema (NF7 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            f5Dec <- declareSchema $ Proxy @a5
+            f6Dec <- declareSchema $ Proxy @a6
+            f7Dec <- declareSchema $ Proxy @a7
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            let f5 = T.pack . symbolVal $ Proxy @f5
+            let f6 = T.pack . symbolVal $ Proxy @f6
+            let f7 = T.pack . symbolVal $ Proxy @f7
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4, f5, f6, f7]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
+                    ,(f5, Inline f5Dec)
+                    ,(f6, Inline f6Dec)
+                    ,(f7, Inline f7Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         , KnownSymbol f5
+         , ToSchema a5
+         , KnownSymbol f6
+         , ToSchema a6
+         , KnownSymbol f7
+         , ToSchema a7
+         , KnownSymbol f8
+         , ToSchema a8
+         )
+    =>  ToSchema (NF8 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            f5Dec <- declareSchema $ Proxy @a5
+            f6Dec <- declareSchema $ Proxy @a6
+            f7Dec <- declareSchema $ Proxy @a7
+            f8Dec <- declareSchema $ Proxy @a8
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            let f5 = T.pack . symbolVal $ Proxy @f5
+            let f6 = T.pack . symbolVal $ Proxy @f6
+            let f7 = T.pack . symbolVal $ Proxy @f7
+            let f8 = T.pack . symbolVal $ Proxy @f8
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4, f5, f6, f7, f8]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
+                    ,(f5, Inline f5Dec)
+                    ,(f6, Inline f6Dec)
+                    ,(f7, Inline f7Dec)
+                    ,(f8, Inline f8Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         , KnownSymbol f5
+         , ToSchema a5
+         , KnownSymbol f6
+         , ToSchema a6
+         , KnownSymbol f7
+         , ToSchema a7
+         , KnownSymbol f8
+         , ToSchema a8
+         , KnownSymbol f9
+         , ToSchema a9
+         )
+    =>  ToSchema (NF9 name f1 a1 f2 a2 f3 a3 f4 a4 f5 a5 f6 a6 f7 a7 f8 a8 f9 a9) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            f5Dec <- declareSchema $ Proxy @a5
+            f6Dec <- declareSchema $ Proxy @a6
+            f7Dec <- declareSchema $ Proxy @a7
+            f8Dec <- declareSchema $ Proxy @a8
+            f9Dec <- declareSchema $ Proxy @a9
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            let f5 = T.pack . symbolVal $ Proxy @f5
+            let f6 = T.pack . symbolVal $ Proxy @f6
+            let f7 = T.pack . symbolVal $ Proxy @f7
+            let f8 = T.pack . symbolVal $ Proxy @f8
+            let f9 = T.pack . symbolVal $ Proxy @f9
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4, f5, f6, f7, f8, f9]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
+                    ,(f5, Inline f5Dec)
+                    ,(f6, Inline f6Dec)
+                    ,(f7, Inline f7Dec)
+                    ,(f8, Inline f8Dec)
+                    ,(f9, Inline f9Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

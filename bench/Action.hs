@@ -20,20 +20,30 @@ data CounterEvent
     | CounterDecreased
     deriving (Show, Generic, ToJSON, FromJSON, NFData)
 
-data CounterCmd method return where
-   GetCounter ::CounterCmd Query Int
-   GetCounterPlus ::Int -> CounterCmd Query Int
-   IncreaseCounter ::CounterCmd Cmd Int
-   AddToCounter ::Int -> CounterCmd Cmd Int
-   AdvancedAction ::Int -> AdvancedAction m r -> CounterCmd m r
+data CounterAction x method return where
+   GetCounter      ::CounterAction x Query Int
+   GetCounterPlus  ::P x "int" Int
+                   -> CounterAction x Query Int
+   IncreaseCounter ::CounterAction x Cmd Int
+   AddToCounter    ::P x "int" Int
+                   -> CounterAction x Cmd Int
+   AdvancedAction  ::P x "int" Int
+                   -> P x "advanced" (AdvancedAction x m r)
+                   -> CounterAction x m r
    deriving HasApiOptions
 
-data AdvancedAction method return where
-    AdvancedIncrease ::Int -> Int -> AdvancedAction Cmd Int
-    AdvancedGet ::Int -> Int -> AdvancedAction Query Int
+data AdvancedAction x method return where
+    AdvancedIncrease ::P x "int1" Int
+                     -> P x "int2" Int
+                     -> AdvancedAction x Cmd Int
+    AdvancedGet      ::P x "int1" Int
+                     -> P x "int2" Int
+                     ->  AdvancedAction x Query Int
    deriving HasApiOptions
 
-handleCmd :: CounterCmd method a -> HandlerType method CounterModel CounterEvent IO a
+handleCmd
+    :: CounterAction 'ParamType method a
+    -> HandlerType method CounterModel CounterEvent IO a
 handleCmd = \case
     GetCounter         -> Query $ pure
     GetCounterPlus i   -> Query $ pure . (+ i)
@@ -41,7 +51,8 @@ handleCmd = \case
     AddToCounter a     -> Cmd $ \_ -> pure (id, replicate a CounterIncreased)
     AdvancedAction i a -> handleAdvancedAction i a
 
-handleAdvancedAction :: Int -> ActionHandler CounterModel CounterEvent IO AdvancedAction
+handleAdvancedAction
+    :: Int -> ActionHandler CounterModel CounterEvent IO (AdvancedAction 'ParamType)
 handleAdvancedAction i = \case
     AdvancedIncrease _ _ -> Cmd $ \_ -> pure (id, replicate i CounterIncreased)
     AdvancedGet      a b -> Query $ \m -> pure $ m * i + a * b
@@ -55,6 +66,6 @@ applyCounterEvent m (Stored event _timestamp _uuid) = case event of
     CounterDecreased -> m - 1
 
 simpleConfig :: ServerConfig
-simpleConfig = ServerConfig mempty mempty
+simpleConfig = ServerConfig mempty
 
 $(mkServerConfig "serverConfig")

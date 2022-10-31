@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 848d2b887e4c49a70ee03437c11634d15ded2bf53db00d4a449bcf239476d034
+-- hash: 2f7402608f216f6c33a03646eeb25c69997b4bfc33cb015d9edbdc75dbab1cf4
 
 name:           domain-driven
 version:        0.1.0.0
@@ -173,10 +173,12 @@ executable bench
 executable example-simple
   main-is: Main.hs
   other-modules:
-      Action
+      Models.Counter
+      Models.Store
       Paths_domain_driven
   hs-source-dirs:
       examples/simple
+      models
   default-extensions:
       Arrows
       ConstraintKinds
@@ -214,11 +216,16 @@ executable example-simple
       aeson
     , base >=4.7 && <5
     , bytestring
+    , containers
+    , deepseq
     , domain-driven
     , exceptions
     , mtl
+    , openapi3
     , servant-openapi3
     , servant-server
+    , text
+    , unliftio
     , warp
   default-language: Haskell2010
 
@@ -333,7 +340,6 @@ test-suite domain-driven-test
     , aeson
     , async
     , base >=4.7 && <5
-    , bytestring
     , containers
     , deepseq
     , domain-driven
@@ -349,7 +355,6 @@ test-suite domain-driven-test
     , quickcheck-classes
     , servant-client
     , servant-flatten
-    , servant-openapi3
     , servant-server
     , streamly
     , text

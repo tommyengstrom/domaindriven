@@ -25,7 +25,6 @@ import           Data.Typeable
 import           DomainDriven
 import           DomainDriven.Config
 import           GHC.Generics                   ( Generic )
-import           GHC.TypeLits
 import           Prelude
 import           Servant
 import           UnliftIO                       ( MonadUnliftIO )
@@ -37,7 +36,7 @@ import           UnliftIO                       ( MonadUnliftIO )
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
     deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName
-                , ToParamSchema, HasParamName)
+                , ToParamSchema)
     deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
@@ -63,24 +62,39 @@ data ItemInfo = ItemInfo
 
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
-data StoreAction x method a where
-    BuyItem    ::ItemKey -> Quantity -> StoreAction x Cmd ()
+data StoreAction (x :: ParamPart) method a where
     ListItems ::StoreAction x (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> StoreAction x Query [ItemInfo]
-    ItemAction ::ItemKey -> ItemAction x method a -> StoreAction x method a
-    AdminAction ::AdminAction x method a -> StoreAction x method a
+    Search ::P x "searchPhrase" Text
+           -> StoreAction x Query [ItemInfo]
+    ItemAction ::P x "item" ItemKey
+               -> ItemAction x method a
+               -> StoreAction x method a
+    AdminAction ::AdminAction x method a
+                -> StoreAction x method a
     deriving HasApiOptions
 
-data ItemAction x method a where
+
+data ItemAction (x :: ParamPart) method a where
+    ItemBuy ::P x "quantity" Quantity -> ItemAction x Cmd ()
     ItemStockQuantity ::ItemAction x Query Quantity
     ItemPrice ::ItemAction x Query Price
-    deriving HasApiOptions
+
+instance HasApiOptions ItemAction where
+    apiOptions = defaultApiOptions { renameConstructor = drop (length @[] "Item") }
 
 data AdminAction x method a where
-    Order    ::ItemKey -> Quantity -> AdminAction x CbCmd ()
-    Restock    ::ItemKey -> Quantity -> AdminAction x Cmd ()
-    AddItem    ::ItemName -> Quantity -> Price -> AdminAction x Cmd ItemKey
-    RemoveItem ::ItemKey -> AdminAction x Cmd ()
+    Order      ::P x "item" ItemKey
+               -> P x "quantity" Quantity
+               -> AdminAction x CbCmd ()
+    Restock    ::P x "itemKey" ItemKey
+               -> P x "quantity" Quantity
+               -> AdminAction x Cmd ()
+    AddItem    ::P x "itemName" ItemName
+               -> P x "quantity" Quantity
+               -> P x "price" Price
+               -> AdminAction x Cmd ItemKey
+    RemoveItem ::P x "item" ItemKey
+               -> AdminAction x Cmd ()
     deriving HasApiOptions
 
 -- | The event
@@ -105,10 +119,6 @@ handleStoreAction
     :: (MonadUnliftIO m, MonadThrow m)
     => MonadThrow m => ActionHandler StoreModel StoreEvent m (StoreAction 'ParamType)
 handleStoreAction = \case
-    BuyItem iKey quantity' -> Cmd $ \m -> do
-        let available = maybe 0 quantity $ M.lookup iKey m
-        when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
-        pure (const (), [BoughtItem iKey quantity'])
     ListItems -> Query $ pure . M.elems
     Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
@@ -155,6 +165,10 @@ handleItemAction
     => ItemKey
     -> ActionHandler StoreModel StoreEvent m (ItemAction 'ParamType)
 handleItemAction iKey = \case
+    ItemBuy quantity' -> Cmd $ \m -> do
+        let available = maybe 0 quantity $ M.lookup iKey m
+        when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
+        pure (const (), [BoughtItem iKey quantity'])
     ItemStockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
@@ -178,17 +192,7 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-------------------------------------------------------------------------------------------
--- Grab the config for each GADT
-------------------------------------------------------------------------------------------
-
-newtype Wrup s a = Wrup a deriving (Show, Generic)
-
-instance KnownSymbol s => HasParamName (Wrup s a) where
-    paramName = T.pack $ symbolVal (Proxy @s)
-
-type BuffeliBongBong = Wrup "BuffeliBongBong" Text
--- $(mkServerConfig "storeActionConfig")
+$(mkServerConfig "storeActionConfig")
 
 -- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
 --

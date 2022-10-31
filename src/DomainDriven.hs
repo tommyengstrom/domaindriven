@@ -23,6 +23,7 @@ module DomainDriven
     , runAction
     , ServerConfig(..)
     , Stored(..)
+    , P(..)
     , UUID
     , WriteModel(..)
     ) where
