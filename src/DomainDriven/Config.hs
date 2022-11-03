@@ -11,7 +11,6 @@ import qualified Data.Map                                     as M
 import           Data.Maybe
 import           Data.Text                      ( Text )
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.HasParamName
 import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Prelude
@@ -31,8 +30,6 @@ defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty
 
 -- | Generate a server configuration and give it the specified name
--- Note that everything that relies on a HasParamName or HasFieldName instance must be
--- visible from where this is run.
 mkServerConfig :: String -> Q [Dec]
 mkServerConfig (mkName -> cfgName) = do
     sig'  <- sigD cfgName (conT ''ServerConfig)
