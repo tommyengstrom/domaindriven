@@ -25,8 +25,7 @@ import           Test.Hspec
 
 $(mkServer storeActionConfig ''StoreAction)
 --
-buyItem
-    :: NF2 "StoreAction_BuyItem" "item" ItemKey "quantity" Quantity -> ClientM NoContent
+itemBuy :: ItemKey -> NF1 "ItemAction_Buy" "quantity" Quantity -> ClientM NoContent
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
 itemPrice :: ItemKey -> ClientM Price
@@ -42,7 +41,7 @@ adminAddItem
     -> ClientM ItemKey
 adminRemoveItem :: NF1 "AdminAction_RemoveItem" "item" ItemKey -> ClientM NoContent
 --
-buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
+listItems :<|> search :<|> itemBuy :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
     = client (flatten $ Proxy @StoreActionApi)
 --
 --
@@ -56,7 +55,7 @@ type ExpectedReverseText
 --    :> Get '[JSON] Text
 
 type ExpectedIntersperse
-    = "SubAction"
+    = "Sub"
     :> QueryParam' '[Strict, Required] "text" Text
     :> "Intersperse"
     :> QueryParam' '[Strict, Required] "intersperse_text" Text

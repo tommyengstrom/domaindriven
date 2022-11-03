@@ -2,7 +2,6 @@
 
 module DomainDriven.Config
     ( module DomainDriven.Config
-    , HasParamName(..)
     , Name
     ) where
 

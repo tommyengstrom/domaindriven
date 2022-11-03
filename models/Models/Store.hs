@@ -29,27 +29,23 @@ import           Prelude
 import           Servant
 import           UnliftIO                       ( MonadUnliftIO )
 
-------------------------------------------------------------------------------------------
--- Defining the types we need                                                           --
--- `HasFieldName` defines the name the type will get in the request body.               --
-------------------------------------------------------------------------------------------
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema
                 , ToParamSchema)
     deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 newtype ItemName = ItemName Text
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
     deriving newtype (IsString)
 newtype Price = Price Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 data ItemInfo = ItemInfo
     { key             :: ItemKey
@@ -107,7 +103,7 @@ data StoreEvent
     | AddedItem ItemKey ItemName Price
     | RemovedItem ItemKey
     deriving stock (Show, Eq, Generic, Typeable)
-    deriving (FromJSON, ToJSON) via (NamedJsonFields StoreEvent)
+    deriving anyclass (FromJSON, ToJSON)
 
 
 type StoreModel = M.Map ItemKey ItemInfo
