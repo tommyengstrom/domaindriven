@@ -15,21 +15,13 @@ module DomainDriven.Internal.NamedFields
 
 import           Data.Aeson
 import           Data.OpenApi
-import           DomainDriven.Internal.HasFieldName
-import           DomainDriven.Internal.Class
 import           Prelude
 import           GHC.Generics                   ( Generic )
 import           Data.Proxy
-import           DomainDriven.Internal.NamedJsonFields
 import           GHC.TypeLits
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as Key
 import qualified Data.Text as T
-
-opts :: forall name . KnownSymbol name => NamedJsonOptions
-opts = defaultNamedJsonOptions { skipTagField         = True
-                               , datatypeNameModifier = const (symbolVal $ Proxy @name)
-                               }
 
 data NF1 (name :: Symbol) (f1 :: Symbol) ty = NF1 ty
     deriving (Show, Generic)
@@ -60,6 +52,8 @@ data NF9 (name :: Symbol) (f1 :: Symbol) a1 (f2 :: Symbol) a2 (f3 :: Symbol) a3 
 
 symbolKey :: forall n. KnownSymbol n => Key
 symbolKey = Key.fromString . symbolVal $ Proxy @n
+
+
 
 instance (KnownSymbol f1, ToJSON a1) => ToJSON (NF1 name f1 a1) where
     toJSON (NF1 a1) = Object $ KM.fromList
@@ -396,6 +390,43 @@ instance ( KnownSymbol name
                     [(f1, Inline f1Dec)
                     ,(f2, Inline f2Dec)
                     ,(f3, Inline f3Dec)
+                    ]
+                   }
+            pure NamedSchema
+                { _namedSchemaName = Just . T.pack . symbolVal $ Proxy @name
+                , _namedSchemaSchema = nfSchema
+                }
+
+
+instance ( KnownSymbol name
+         , KnownSymbol f1
+         , ToSchema a1
+         , KnownSymbol f2
+         , ToSchema a2
+         , KnownSymbol f3
+         , ToSchema a3
+         , KnownSymbol f4
+         , ToSchema a4
+         )
+    =>  ToSchema (NF4 name f1 a1 f2 a2 f3 a3 f4 a4) where
+        declareNamedSchema _ = do
+            f1Dec <- declareSchema $ Proxy @a1
+            f2Dec <- declareSchema $ Proxy @a2
+            f3Dec <- declareSchema $ Proxy @a3
+            f4Dec <- declareSchema $ Proxy @a4
+            let f1 = T.pack . symbolVal $ Proxy @f1
+            let f2 = T.pack . symbolVal $ Proxy @f2
+            let f3 = T.pack . symbolVal $ Proxy @f3
+            let f4 = T.pack . symbolVal $ Proxy @f4
+            -- Not sure we should be inlining the schema. Let
+            let nfSchema :: Schema
+                nfSchema = mempty
+                   { _schemaRequired = [ f1, f2, f3, f4]
+                   , _schemaProperties =
+                    [(f1, Inline f1Dec)
+                    ,(f2, Inline f2Dec)
+                    ,(f3, Inline f3Dec)
+                    ,(f4, Inline f4Dec)
                     ]
                    }
             pure NamedSchema
