@@ -40,7 +40,6 @@ packages:
 extra-deps:
   # - streamly-0.8.2
   # - unicode-data-0.3.0@sha256:0545e079705a5381d0893f8fe8daaa08fc9174baeab269b9cf651817d8eadbc6,5123
-  - servant-flatten-0.2@sha256:276896f7c5cdec5b8f8493f6205fded0cc602d050b58fdb09a6d7c85c3bb0837,1234
 # build:
 #   library-profiling: true
 #   executable-profiling: true

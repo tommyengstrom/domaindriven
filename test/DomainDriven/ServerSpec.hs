@@ -18,18 +18,19 @@ import           Network.HTTP.Client            ( defaultManagerSettings
 import           Network.Wai.Handler.Warp       ( run )
 import           Prelude
 import           Servant
-import           Servant.API.Flatten
 import           Servant.Client
 import           Test.Hspec
 -- import           Test.Hspec.Core.Hooks
 
 $(mkServer storeActionConfig ''StoreAction)
 --
-itemBuy :: ItemKey -> NF1 "ItemAction_Buy" "quantity" Quantity -> ClientM NoContent
+
+itemStuff :: ItemKey -> (NF1 "ItemAction_Buy" "quantity" Quantity -> ClientM NoContent)
+                    :<|> ClientM Quantity
+                    :<|> ClientM Price
+
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
-itemPrice :: ItemKey -> ClientM Price
-itemStockQuantity :: ItemKey -> ClientM Quantity
 
 adminOrder
     :: NF2 "AdminAction_Order" "item" ItemKey "quantity" Quantity -> ClientM NoContent
@@ -40,19 +41,16 @@ adminAddItem
     :: NF3 "AdminAction_AddItem" "itemName" ItemName "quantity" Quantity "price" Price
     -> ClientM ItemKey
 adminRemoveItem :: NF1 "AdminAction_RemoveItem" "item" ItemKey -> ClientM NoContent
---
-listItems :<|> search :<|> itemBuy :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
-    = client (flatten $ Proxy @StoreActionApi)
+
+
+listItems :<|> search :<|> itemStuff :<|> (adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem)
+    = client (Proxy @StoreActionApi)
+
+
 --
 --
 type ExpectedReverseText
     = "ReverseText" :> ReqBody '[JSON] (NF1 "a" "text" Text) :> Post '[JSON] Text
-
---type ExpectedConcatText
---    = "ConcatText"
---    :> QueryParam' '[Strict, Required] "Text" Text
---    :> QueryParam' '[Strict, Required] "Text_1" Text
---    :> Get '[JSON] Text
 
 type ExpectedIntersperse
     = "Sub"

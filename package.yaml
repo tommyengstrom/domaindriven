@@ -71,7 +71,6 @@ library:
     - openapi3
     - postgresql-simple
     - random
-    - servant-flatten
     - servant-server
     - streamly
     - template-haskell
@@ -117,7 +116,6 @@ tests:
     - quickcheck-arbitrary-adt
     - quickcheck-classes
     - servant-client
-    - servant-flatten
     - servant-server
     - text
     - unliftio

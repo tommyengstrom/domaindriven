@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1bd5719ffb0e65bc9131f5fa24b6846367a6901579854e9a311ebfbe2468d30c
+-- hash: 320ebcde8c871e1f2bd6c409fb21b0a2a5ff506d011fb1dec00823a3853a136c
 
 name:           domain-driven
 version:        0.1.0.0
@@ -94,7 +94,6 @@ library
     , openapi3
     , postgresql-simple
     , random
-    , servant-flatten
     , servant-server
     , streamly
     , template-haskell
@@ -353,7 +352,6 @@ test-suite domain-driven-test
     , quickcheck-arbitrary-adt
     , quickcheck-classes
     , servant-client
-    , servant-flatten
     , servant-server
     , streamly
     , text
