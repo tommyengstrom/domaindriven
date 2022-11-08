@@ -189,19 +189,3 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 $(mkServerConfig "storeActionConfig")
-
--- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
---
--- apiOptionsMap :: M.Map String ApiOptions
--- apiOptionsMap = $(getApiOptionsMap)
-
---
--- app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
--- app port wm = do
---     putStrLn $ "Starting server on port: " <> show port
---     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
---     run port $ serve (Proxy @StoreActionApi)
---                      (storeActionServer $ runAction wm handleStoreAction)
---
--- forgetfulApp :: Port -> IO ()
--- forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty

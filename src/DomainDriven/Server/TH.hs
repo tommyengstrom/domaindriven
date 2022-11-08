@@ -47,7 +47,7 @@ mkServer cfg (GadtName -> gadtName) = do
                   (mkServerFromSpec spec)
 
 getApiOptions :: ServerConfig -> GadtName -> Q ApiOptions
-getApiOptions cfg (GadtName n) = case M.lookup (nameBase n) (allApiOptions cfg) of
+getApiOptions cfg (GadtName n) = case M.lookup (show n) (allApiOptions cfg) of
     Just o -> pure o
     Nothing ->
         fail

@@ -49,7 +49,7 @@ getApiOptionsMap = reify ''HasApiOptions >>= \case
     nameAndCfg :: Dec -> Q Exp
     nameAndCfg = \case
         InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
-             [e| ( $(stringE $ nameBase n), apiOptions @($(pure ty)))|]
+             [e| ( $(stringE $ show n), apiOptions @($(pure ty)))|]
         d -> fail $ "Expected instance InstanceD but got: " <> show d
 
 
