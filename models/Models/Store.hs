@@ -29,27 +29,23 @@ import           Prelude
 import           Servant
 import           UnliftIO                       ( MonadUnliftIO )
 
-------------------------------------------------------------------------------------------
--- Defining the types we need                                                           --
--- `HasFieldName` defines the name the type will get in the request body.               --
-------------------------------------------------------------------------------------------
 newtype ItemKey = ItemKey UUID
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema, HasFieldName
-                , ToParamSchema, HasParamName)
+    deriving anyclass (FromJSONKey, ToJSONKey, FromJSON, ToJSON, ToSchema
+                , ToParamSchema)
     deriving newtype (FromHttpApiData, ToHttpApiData)
 newtype Quantity = Quantity Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 newtype ItemName = ItemName Text
     deriving (Show, Eq, Ord, Generic)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
     deriving newtype (IsString)
 newtype Price = Price Int
     deriving (Show, Eq, Ord, Generic)
     deriving newtype (Num)
-    deriving anyclass (FromJSON, ToJSON, ToSchema, HasFieldName)
+    deriving anyclass (FromJSON, ToJSON, ToSchema)
 
 data ItemInfo = ItemInfo
     { key             :: ItemKey
@@ -62,24 +58,39 @@ data ItemInfo = ItemInfo
 
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
-data StoreAction method a where
-    BuyItem    ::ItemKey -> Quantity -> StoreAction Cmd ()
-    ListItems ::StoreAction (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
-    Search ::Text -> StoreAction Query [ItemInfo]
-    ItemAction ::ItemKey -> ItemAction method a -> StoreAction method a
-    AdminAction ::AdminAction method a -> StoreAction method a
+data StoreAction (x :: ParamPart) method a where
+    ListItems ::StoreAction x (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
+    Search ::P x "searchPhrase" Text
+           -> StoreAction x Query [ItemInfo]
+    ItemAction ::P x "item" ItemKey
+               -> ItemAction x method a
+               -> StoreAction x method a
+    AdminAction ::AdminAction x method a
+                -> StoreAction x method a
     deriving HasApiOptions
 
-data ItemAction method a where
-    ItemStockQuantity ::ItemAction Query Quantity
-    ItemPrice ::ItemAction Query Price
-    deriving HasApiOptions
 
-data AdminAction method a where
-    Order    ::ItemKey -> Quantity -> AdminAction CbCmd ()
-    Restock    ::ItemKey -> Quantity -> AdminAction Cmd ()
-    AddItem    ::ItemName -> Quantity -> Price -> AdminAction Cmd ItemKey
-    RemoveItem ::ItemKey -> AdminAction Cmd ()
+data ItemAction (x :: ParamPart) method a where
+    ItemBuy ::P x "quantity" Quantity -> ItemAction x Cmd ()
+    ItemStockQuantity ::ItemAction x Query Quantity
+    ItemPrice ::ItemAction x Query Price
+
+instance HasApiOptions ItemAction where
+    apiOptions = defaultApiOptions { renameConstructor = drop (length @[] "Item") }
+
+data AdminAction x method a where
+    Order      ::P x "item" ItemKey
+               -> P x "quantity" Quantity
+               -> AdminAction x CbCmd ()
+    Restock    ::P x "itemKey" ItemKey
+               -> P x "quantity" Quantity
+               -> AdminAction x Cmd ()
+    AddItem    ::P x "itemName" ItemName
+               -> P x "quantity" Quantity
+               -> P x "price" Price
+               -> AdminAction x Cmd ItemKey
+    RemoveItem ::P x "item" ItemKey
+               -> AdminAction x Cmd ()
     deriving HasApiOptions
 
 -- | The event
@@ -92,7 +103,7 @@ data StoreEvent
     | AddedItem ItemKey ItemName Price
     | RemovedItem ItemKey
     deriving stock (Show, Eq, Generic, Typeable)
-    deriving (FromJSON, ToJSON) via (NamedJsonFields StoreEvent)
+    deriving anyclass (FromJSON, ToJSON)
 
 
 type StoreModel = M.Map ItemKey ItemInfo
@@ -102,12 +113,8 @@ type StoreModel = M.Map ItemKey ItemInfo
 ------------------------------------------------------------------------------------------
 handleStoreAction
     :: (MonadUnliftIO m, MonadThrow m)
-    => MonadThrow m => ActionHandler StoreModel StoreEvent m StoreAction
+    => MonadThrow m => ActionHandler StoreModel StoreEvent m (StoreAction 'ParamType)
 handleStoreAction = \case
-    BuyItem iKey quantity' -> Cmd $ \m -> do
-        let available = maybe 0 quantity $ M.lookup iKey m
-        when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
-        pure (const (), [BoughtItem iKey quantity'])
     ListItems -> Query $ pure . M.elems
     Search t  -> Query $ \m -> do
         let matches :: ItemInfo -> Bool
@@ -120,7 +127,7 @@ handleStoreAction = \case
 handleAdminAction
     :: forall m
      . (MonadUnliftIO m, MonadThrow m)
-    => MonadIO m => ActionHandler StoreModel StoreEvent m AdminAction
+    => MonadIO m => ActionHandler StoreModel StoreEvent m (AdminAction 'ParamType)
 handleAdminAction = \case
     Order iKey q -> CbCmd $ \runTransaction -> do
         m <- runTransaction $ \m -> pure (const m, [])
@@ -152,8 +159,12 @@ handleItemAction
     :: forall m
      . (MonadUnliftIO m, MonadThrow m)
     => ItemKey
-    -> ActionHandler StoreModel StoreEvent m ItemAction
+    -> ActionHandler StoreModel StoreEvent m (ItemAction 'ParamType)
 handleItemAction iKey = \case
+    ItemBuy quantity' -> Cmd $ \m -> do
+        let available = maybe 0 quantity $ M.lookup iKey m
+        when (available < quantity') $ throwM err422 { errBody = "Out of stock" }
+        pure (const (), [BoughtItem iKey quantity'])
     ItemStockQuantity -> Query $ \m -> do
         i <- getItem m
         pure $ quantity i
@@ -177,24 +188,4 @@ applyStoreEvent m (Stored e _ _) = case e of
 
 
 
-------------------------------------------------------------------------------------------
--- Grab the config for each GADT
-------------------------------------------------------------------------------------------
-
 $(mkServerConfig "storeActionConfig")
-
--- $(pure []) -- Avoid a strange TH bug. Remove it and the apiOptionsMap will be empty
---
--- apiOptionsMap :: M.Map String ApiOptions
--- apiOptionsMap = $(getApiOptionsMap)
-
---
--- app :: (WriteModel p, Model p ~ StoreModel, Event p ~ StoreEvent) => Port -> p -> IO ()
--- app port wm = do
---     putStrLn $ "Starting server on port: " <> show port
---     BL.writeFile "/tmp/store_schema.json" . encode . toOpenApi $ Proxy @StoreActionApi
---     run port $ serve (Proxy @StoreActionApi)
---                      (storeActionServer $ runAction wm handleStoreAction)
---
--- forgetfulApp :: Port -> IO ()
--- forgetfulApp p = app p =<< createForgetful applyStoreEvent mempty

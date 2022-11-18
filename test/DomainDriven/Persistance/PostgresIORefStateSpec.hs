@@ -234,7 +234,7 @@ storeModelSpec = describe "Test basic functionality" $ do
 
     it "Can buy item" $ \p -> do
         iKey <- head . M.keys <$> getModel p
-        runAction p Store.handleStoreAction $ Store.BuyItem iKey 7
+        runAction p Store.handleStoreAction $ Store.ItemAction iKey $ Store.ItemBuy 7
         m    <- getModel p
         item <- maybe (fail $ show iKey <> " is not part of:\n" <> show m) pure
             $ M.lookup iKey m
@@ -256,7 +256,7 @@ storeModelSpec = describe "Test basic functionality" $ do
     it "Concurrent commands work" $ \p -> do
         -- This test relies on the postgres max connections being reasonably high.
         c0 <- runAction p Store.handleStoreAction Store.ListItems
-        let newItems :: [Store.StoreAction Cmd Store.ItemKey]
+        let newItems :: [Store.StoreAction 'ParamType Cmd Store.ItemKey]
             newItems = replicate
                 n
                 ( Store.AdminAction
@@ -290,4 +290,4 @@ storeModelSpec = describe "Test basic functionality" $ do
               )
             , (key2, now, encode $ Store.Restocked iKey (Store.Quantity 10))
             ]
-        runAction p Store.handleStoreAction $ Store.BuyItem iKey (Store.Quantity 1)
+        runAction p Store.handleStoreAction $ Store.ItemAction iKey (Store.ItemBuy 1)

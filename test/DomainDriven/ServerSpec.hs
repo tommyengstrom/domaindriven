@@ -6,8 +6,6 @@ import           Control.Concurrent
 import           Control.Concurrent.Async
 import           Control.Monad.Catch            ( try )
 import           Control.Monad.Except
-import           Data.Aeson                     ( encode )
-import qualified Data.ByteString.Lazy.Char8                   as BL
 import           Data.Text                      ( Text )
 import           DomainDriven
 import           DomainDriven.Persistance.ForgetfulInMemory
@@ -20,61 +18,62 @@ import           Network.HTTP.Client            ( defaultManagerSettings
 import           Network.Wai.Handler.Warp       ( run )
 import           Prelude
 import           Servant
-import           Servant.API.Flatten
 import           Servant.Client
-import           Servant.OpenApi                ( toOpenApi )
 import           Test.Hspec
 -- import           Test.Hspec.Core.Hooks
 
 $(mkServer storeActionConfig ''StoreAction)
+--
 
-buyItem :: NamedFields2 "StoreAction_BuyItem" ItemKey Quantity -> ClientM NoContent
+itemStuff :: ItemKey -> (NF1 "ItemAction_Buy" "quantity" Quantity -> ClientM NoContent)
+                    :<|> ClientM Quantity
+                    :<|> ClientM Price
+
 listItems :: ClientM [ItemInfo]
 search :: Text -> ClientM [ItemInfo]
-itemPrice :: ItemKey -> ClientM Price
-itemStockQuantity :: ItemKey -> ClientM Quantity
 
-adminOrder :: NamedFields2 "AdminAction_Order" ItemKey Quantity -> ClientM NoContent
-adminRestock :: NamedFields2 "AdminAction_Restock" ItemKey Quantity -> ClientM NoContent
+adminOrder
+    :: NF2 "AdminAction_Order" "item" ItemKey "quantity" Quantity -> ClientM NoContent
+adminRestock
+    :: NF2 "AdminAction_Restock" "itemKey" ItemKey "quantity" Quantity
+    -> ClientM NoContent
 adminAddItem
-    :: NamedFields3 "AdminAction_AddItem" ItemName Quantity Price -> ClientM ItemKey
-adminRemoveItem :: NamedFields1 "AdminAction_RemoveItem" ItemKey -> ClientM NoContent
-
-buyItem :<|> listItems :<|> search :<|> itemStockQuantity :<|> itemPrice :<|> adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem
-    = client (flatten $ Proxy @StoreActionApi)
+    :: NF3 "AdminAction_AddItem" "itemName" ItemName "quantity" Quantity "price" Price
+    -> ClientM ItemKey
+adminRemoveItem :: NF1 "AdminAction_RemoveItem" "item" ItemKey -> ClientM NoContent
 
 
+listItems :<|> search :<|> itemStuff :<|> (adminOrder :<|> adminRestock :<|> adminAddItem :<|> adminRemoveItem)
+    = client (Proxy @StoreActionApi)
+
+
+--
+--
 type ExpectedReverseText
-    = "ReverseText" :> ReqBody '[PlainText] Text :> Post '[JSON] Text
-
--- type ExpectedConcatText
---     = "ConcatText"
---     :> QueryParam' '[Strict, Required] "Text" Text
---     :> QueryParam' '[Strict, Required] "Text_1" Text
---     :> Get '[JSON] Text
+    = "ReverseText" :> ReqBody '[JSON] (NF1 "a" "text" Text) :> Post '[JSON] Text
 
 type ExpectedIntersperse
-    = "SubAction"
+    = "Sub"
     :> QueryParam' '[Strict, Required] "text" Text
     :> "Intersperse"
-    :> QueryParam' '[Strict, Required] "char" Char
+    :> QueryParam' '[Strict, Required] "intersperse_text" Text
     :> Get '[JSON] Text
 
 $(mkServer testActionConfig ''TestAction)
 
-expectedReverseText :: Text -> ClientM Text
+expectedReverseText :: NF1 "a" "text" Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
 
 -- expectedConcatText :: Text -> Text -> ClientM Text
 -- expectedConcatText = client (Proxy @ExpectedConcatText)
 
-expectedIntersperseText :: Text -> Char -> ClientM Text
+expectedIntersperseText :: Text -> Text -> ClientM Text
 expectedIntersperseText = client (Proxy @ExpectedIntersperse)
 
-writeOpenApi :: IO ()
-writeOpenApi =
-    BL.writeFile "/tmp/store_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
-
+--writeOpenApi :: IO ()
+--writeOpenApi =
+--    BL.writeFile "/tmp/store_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
+--
 withStoreServer :: IO () -> IO ()
 withStoreServer runTests = do
     p      <- createForgetful applyStoreEvent mempty
@@ -93,10 +92,19 @@ withTestServer runTests = do
     server <- async . run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
         (Proxy @TestActionApi)
         (Handler . ExceptT . try)
-        (testActionServer $ runAction p handleTestAction)
+        (testActionServer $ runAction p handleAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
     cancel server
+
+
+kuken :: IO ()
+kuken = do
+    p <- createForgetful (\m _ -> m) ()
+    run 9898 $ serve (Proxy @TestActionApi) $ hoistServer
+        (Proxy @TestActionApi)
+        (Handler . ExceptT . try)
+        (testActionServer $ runAction p handleAction)
 
 spec :: Spec
 spec = do
@@ -107,7 +115,7 @@ spec = do
 
         describe "Server endpoint renaming" $ do
             it "Can add item" $ do
-                r <- runClientM (adminAddItem $ NamedFields3 "Test item" 10 99) clientEnv
+                r <- runClientM (adminAddItem $ NF3 "Test item" 10 99) clientEnv
                 r `shouldSatisfy` not . null
             it "The new item shows up when listing items" $ do
                 r <- runClientM listItems clientEnv
@@ -117,8 +125,8 @@ spec = do
     aroundAll_ withTestServer $ do
         describe "Endpoints generated as expected" $ do
             it "Plaintext endpoint works" $ do
-                r <- runClientM (expectedReverseText "Hej") clientEnv
+                r <- runClientM (expectedReverseText $ NF1 "Hej") clientEnv
                 r `shouldBe` Right "jeH"
             it "Produces the expected parameters for subserver" $ do
-                r <- runClientM (expectedIntersperseText "hello" '-') clientEnv
-                r `shouldBe` Right "h-e-l-l-o"
+                r <- runClientM (expectedIntersperseText "hello" "-=") clientEnv
+                r `shouldBe` Right "h=-=e=-=l=-=l=-=o"

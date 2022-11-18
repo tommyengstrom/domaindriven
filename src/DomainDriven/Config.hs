@@ -2,7 +2,6 @@
 
 module DomainDriven.Config
     ( module DomainDriven.Config
-    , HasParamName(..)
     , Name
     ) where
 
@@ -12,10 +11,10 @@ import qualified Data.Map                                     as M
 import           Data.Maybe
 import           Data.Text                      ( Text )
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.HasParamName
 import           GHC.Generics                   ( Generic )
 import           Language.Haskell.TH
 import           Prelude
+import           System.IO.Unsafe
 
 
 -- | Configuration used to generate server
@@ -24,19 +23,18 @@ import           Prelude
 data ServerConfig = ServerConfig
     { allApiOptions :: M.Map String ApiOptions
         -- ^ Map of API options for all action GADTs used in the API
-    , allParamNames :: M.Map String Text
-        -- ^ Map of param names for all types translated into Servant `QueryParam`s
     }
     deriving (Show, Generic)
 
 defaultServerConfig :: ServerConfig
-defaultServerConfig = ServerConfig M.empty M.empty
+defaultServerConfig = ServerConfig M.empty
 
+-- | Generate a server configuration and give it the specified name
 mkServerConfig :: String -> Q [Dec]
 mkServerConfig (mkName -> cfgName) = do
     sig'  <- sigD cfgName (conT ''ServerConfig)
     body' <-
-        [d| $(varP cfgName) = ServerConfig $(getApiOptionsMap) $(getParamNameMap) |]
+        [d| $(varP cfgName) = ServerConfig $(getApiOptionsMap) |]
     pure $ sig' : body'
 
 -- | Generates `Map String ApiOptions`
@@ -45,31 +43,16 @@ getApiOptionsMap :: Q Exp
 getApiOptionsMap = reify ''HasApiOptions >>= \case
     ClassI _ instances -> do
         cfgs <- traverse nameAndCfg instances
-
         [e| M.fromList  $(pure $ ListE cfgs) |]
     i -> fail $ "Expected ClassI but got: " <> show i
   where
     nameAndCfg :: Dec -> Q Exp
     nameAndCfg = \case
         InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
-             [e| ( $(stringE $ nameBase n), apiOptions @($(pure ty)))|]
+             [e| ( $(stringE $ show n), apiOptions @($(pure ty)))|]
         d -> fail $ "Expected instance InstanceD but got: " <> show d
 
 
--- | Generates `Map String Text`
-getParamNameMap :: Q Exp
-getParamNameMap = reify ''HasParamName >>= \case
-    ClassI _ instances -> do
-        cfgs <- catMaybes <$> traverse typeAndParamName instances
-        [e| M.fromList $(pure $ ListE cfgs) |]
-    i -> fail $ "Expected ClassI but got: " <> show i
-  where
-    typeAndParamName :: Dec -> Q (Maybe Exp)
-    typeAndParamName = \case
-        InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
-            Just <$> [e| ($(stringE $ nameBase n), paramName @($(pure ty)))|]
-        InstanceD _ _ _ _ -> pure Nothing
-        d                 -> fail $ "Expected instance InstanceD but got: " <> show d
 
 ------------------------------------------------------------------------------------------
 -- Some utility functions that can be useful when remapping names

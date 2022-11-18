@@ -2,34 +2,39 @@
 module DomainDriven.ServerSpecModel where
 
 import           Control.Monad.Catch
+import qualified Data.List                                    as L
 import qualified Data.Text                                    as T
 import           Data.Text                      ( Text )
 import           DomainDriven
 import           DomainDriven.Config
 import           Prelude
-import           Servant
 
-data TestAction method a where
-    ReverseText ::Text -> TestAction (RequestType 'Callback '[PlainText] (Verb 'POST 200 '[JSON])) Text
-    ConcatText ::Text -> String -> TestAction Query Text
-    SubAction ::Text -> SubAction method a -> TestAction method a
+
+data TestAction x method a where
+    ReverseText ::P x "text" Text
+                -> TestAction x CbCmd Text
+    ConcatText  ::P x "text" Text
+                -> P x "string" String
+                -> TestAction x Query Text
+    SubAction   ::P x "text" Text
+                -> SubAction x method a
+                -> TestAction x method a
     deriving HasApiOptions
 
-data SubAction method a where
-    -- Intersperse ::Text -> SubAction Query Text -- Duplicate endpoint
-    Intersperse ::Char -> SubAction Query Text
-    deriving HasApiOptions
 
-handleTestAction :: MonadThrow m => ActionHandler () () m TestAction
-handleTestAction = \case
+handleAction :: MonadThrow m => ActionHandler () () m (TestAction 'ParamType)
+handleAction = \case
     ReverseText t       -> CbCmd $ \_runTransaction -> pure (T.reverse t)
     ConcatText a b      -> Query $ \() -> pure $ a <> T.pack b
     SubAction  t action -> handleSubAction t action
 
+data SubAction x method a where
+    Intersperse ::P x "intersperse_text" Text -> SubAction x Query Text
+    deriving HasApiOptions
 
-handleSubAction :: MonadThrow m => Text -> ActionHandler () () m SubAction
+
+handleSubAction :: MonadThrow m => Text -> ActionHandler () () m (SubAction 'ParamType)
 handleSubAction t1 = \case
-    Intersperse c -> Query $ \() -> pure $ T.intersperse c t1
-
+    Intersperse c -> Query $ \() -> pure $ L.foldl' (flip T.intersperse) t1 (T.unpack c)
 
 $(mkServerConfig "testActionConfig")

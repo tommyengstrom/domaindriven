@@ -13,15 +13,16 @@ module DomainDriven
     , mapModel
     , mapResult
     , mkId
-    , module X
     , NamedJsonFields(..)
     , Query
+    , ParamPart(..)
     , ModelAccess(..)
     , ReadModel(..)
     , RequestType
     , runAction
     , ServerConfig(..)
     , Stored(..)
+    , P(..)
     , UUID
     , WriteModel(..)
     ) where
@@ -29,6 +30,5 @@ module DomainDriven
 import           Data.UUID
 import           DomainDriven.Config
 import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.HasFieldName           as X
 import           DomainDriven.Internal.NamedJsonFields
                                                 ( NamedJsonFields(..) )

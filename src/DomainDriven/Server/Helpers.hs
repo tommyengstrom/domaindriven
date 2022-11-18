@@ -29,22 +29,18 @@ withLocalState fs m = ServerGenM $ do
 
 
 
-mkUrlSegments :: ConstructorName -> ServerGenM [UrlSegment]
-mkUrlSegments n = do
-    opts <- gets (^. field @"info" . typed)
+mkUrlSegment :: ConstructorName -> ServerGenM UrlSegment
+mkUrlSegment n = do
+    opts <- gets (^. field @"info" . field @"options")
     pure
-        $   n
-        ^.. typed
-        .   unqualifiedString
-        .   to (renameConstructor opts)
-        .   folded
-        .   to UrlSegment
-
-
+        $  n
+        ^. typed
+        .  unqualifiedString
+        .  to (opts ^. field @"renameConstructor")
+        .  to UrlSegment
 
 unqualifiedString :: Lens' Name String
 unqualifiedString = typed @OccName . typed
-
 
 askTypeName :: ServerGenM Name
 askTypeName = do
@@ -85,8 +81,8 @@ askHandlerName =
 
 askBodyTag :: ConstructorName -> ServerGenM TyLit
 askBodyTag cName = do
-    constructorSegments <- mkUrlSegments cName
-    gadtSegment         <-
+    constructorSegment <- mkUrlSegment cName
+    gadtSegment        <-
         gets (^. field @"info" . field @"options" . field @"bodyNameBase") >>= \case
             Just n -> pure $ UrlSegment n
             Nothing ->
@@ -102,7 +98,7 @@ askBodyTag cName = do
     pure
         .   StrTyLit
         .   L.intercalate separator
-        $   (gadtSegment : constructorSegments)
+        $   (gadtSegment : [constructorSegment])
         ^.. folded
         .   typed
 
@@ -117,31 +113,13 @@ enterApi spec m = withLocalState (field @"info" %~ extendServerInfo) m
 
 enterApiPiece :: ApiPiece -> ServerGenM a -> ServerGenM a
 enterApiPiece p m = do
-    newSegments <- mkUrlSegments (p ^. typed)
+    newSegment <- mkUrlSegment (p ^. typed @ConstructorName)
     let extendServerInfo :: ServerInfo -> ServerInfo
         extendServerInfo i =
             i
-                & (typed @[UrlSegment] <>~ newSegments)
+                & (typed @[UrlSegment] <>~ [newSegment])
                 & (typed @[ConstructorName] <>~ p ^. typed . to pure)
     withLocalState (field @"info" %~ extendServerInfo) m
-
---enterApi :: ApiSpec -> ServerGenM a -> ServerGenM a
---enterApi s = local extendServerInfo
---  where
---    extendServerInfo :: ServerInfo -> ServerInfo
---    extendServerInfo i =
---        i & typed .~ s ^. typed @ApiOptions & field @"currentGadt" .~ s ^. typed
---
---enterApiPiece :: ApiPiece -> ServerGenM a -> ServerGenM a
---enterApiPiece p m = do
---    newSegments <- mkUrlSegments (p ^. typed)
---    let extendServerInfo :: ServerInfo -> ServerInfo
---        extendServerInfo i =
---            i
---                & (typed @[UrlSegment] <>~ newSegments)
---                & (typed @[ConstructorName] <>~ p ^. typed . to pure)
---    local extendServerInfo m
-
 
 
 hasJsonContentType :: HandlerSettings -> Bool

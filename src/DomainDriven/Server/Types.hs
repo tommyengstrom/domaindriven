@@ -38,7 +38,7 @@ newtype EpReturnType    = EpReturnType Type             deriving (Show, Generic,
 newtype GadtName        = GadtName Name                 deriving (Show, Generic, Eq)
 newtype GadtType        = GadtType {unGadtType :: Type} deriving (Show, Generic, Eq)
 newtype UrlSegment      = UrlSegment String             deriving (Show, Generic, Eq)
-newtype ConstructorArgs = ConstructorArgs [Type]        deriving (Show, Generic, Eq)
+newtype ConstructorArgs = ConstructorArgs [(String,Type)] deriving (Show, Generic, Eq)
 newtype Runner          = Runner Type                   deriving (Show, Generic, Eq)
 
 -- | Carries information regarding how the API looks at the place we're currently at.
@@ -54,7 +54,6 @@ data ServerInfo = ServerInfo
 data ServerGenState = ServerGenState
     { info           :: ServerInfo
     , usedParamNames :: Set String
-    , allParamNames  :: M.Map String Text
     }
     deriving (Show, Generic)
 

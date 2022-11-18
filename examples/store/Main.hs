@@ -19,6 +19,9 @@ import           Servant.OpenApi
 
 $(mkServer storeActionConfig ''StoreAction)
 
+writeSchema :: IO ()
+writeSchema =
+    BL.writeFile "/tmp/counter_schema.json" $ encode $ toOpenApi (Proxy @StoreActionApi)
 main :: IO ()
 main = do
     -- Pick a persistance model to create the domain model
