@@ -204,7 +204,7 @@ instance Show ApiOptions  where
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
 type ActionHandler model event m cmd
-    = forall method a . cmd method a -> HandlerType method model event m a
+    = forall method a . cmd 'ParamType method a -> HandlerType method model event m a
 
 type ActionRunner m c = forall method a . c method a -> m a
 
