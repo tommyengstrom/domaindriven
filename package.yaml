@@ -55,6 +55,18 @@ default-extensions:
 - TypeSynonymInstances
 - ViewPatterns
 
+ghc-options:
+- -Werror
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wpartial-fields
+- -Wredundant-constraints
+- -Wincomplete-record-updates
+- -Wincomplete-patterns
+
 library:
   source-dirs: src
   dependencies:
@@ -118,7 +130,6 @@ tests:
     - servant-client
     - servant-server
     - text
-    - unliftio
     - warp
 
 
@@ -137,7 +148,6 @@ executables:
     - deepseq
     - containers
     - openapi3
-    - unliftio
     - text
     - servant-server
     - servant-openapi3
@@ -166,7 +176,6 @@ executables:
     - servant-openapi3
     - servant-server
     - text
-    - unliftio
     - warp
     ghc-options:
     - -threaded
@@ -202,4 +211,3 @@ executables:
     - servant-server
     - streamly
     - text
-    - unliftio

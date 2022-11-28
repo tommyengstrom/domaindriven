@@ -1,28 +1,28 @@
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module DomainDriven.Internal.Class where
 
-import           Control.DeepSeq (NFData)
-import           Control.Monad.Reader
-import           Data.Aeson
-import           Data.Generics.Product
-import           Data.Kind
-import           Data.Time
-import           Data.UUID                      ( UUID )
-import           GHC.Generics                   ( Generic )
-import           GHC.TypeLits
-import           Lens.Micro                   (  (^.))
-import qualified Data.List as L
+import Control.DeepSeq (NFData)
+import Control.Monad.Reader
+import Data.Aeson
 import Data.Function (on)
-import           Prelude
-import           Servant
-import           Streamly.Prelude (SerialT)
-import           System.Random
-import           UnliftIO
+import Data.Generics.Product
+import Data.Kind
+import qualified Data.List as L
+import Data.Time
+import Data.UUID (UUID)
+import GHC.Generics (Generic)
+import GHC.TypeLits
+import Lens.Micro ((^.))
+import Servant
+import Streamly.Prelude (SerialT)
+import System.Random
+import UnliftIO
+import Prelude
 
 data RequestType (accessType :: ModelAccess) (contentTypes :: [Type]) (verb :: Type -> Type)
 
@@ -59,25 +59,28 @@ type family P (b :: ParamPart) (name :: Symbol) (a :: Type) where
     P 'ParamType name ty = ty
 
 data HandlerType method model event m a where
-    Query :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Direct)
-          => (model -> m a)
-          -> HandlerType method model event m a
-    CbQuery :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Callback)
-          => ((m model) -> m a)
-          -> HandlerType method model event m a
-    Cmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)
+    Query
+        :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Direct)
+        => (model -> m a)
+        -> HandlerType method model event m a
+    CbQuery
+        :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Callback)
+        => ((m model) -> m a)
+        -> HandlerType method model event m a
+    Cmd
+        :: (CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)
         => (model -> m (model -> a, [event]))
         -> HandlerType method model event m a
-    CbCmd :: ( CanMutate method ~ 'True, GetModelAccess method ~ 'Callback)
+    CbCmd
+        :: (CanMutate method ~ 'True, GetModelAccess method ~ 'Callback)
         => ((forall x. (model -> m (model -> x, [event])) -> m x) -> m a)
         -> HandlerType method model event m a
 
-
-type CmdCallback model event (m :: Type -> Type) =  (forall a. model -> m (a, [event]))
+type CmdCallback model event (m :: Type -> Type) = (forall a. model -> m (a, [event]))
 
 mapModel
-    :: forall m event model0 model1 method a.
-        Monad m
+    :: forall m event model0 model1 method a
+     . Monad m
     => (model0 -> model1)
     -> HandlerType method model1 event m a
     -> HandlerType method model0 event m a
@@ -85,7 +88,7 @@ mapModel f = \case
     Query h -> Query (h . f)
     CbQuery withModel -> CbQuery \fetchModel ->
         withModel (fmap f fetchModel)
-    Cmd   h -> Cmd $ \m -> do
+    Cmd h -> Cmd $ \m -> do
         (fm, evs) <- h $ f m
         pure (fm . f, evs)
     CbCmd withTrans -> CbCmd $ \runTrans ->
@@ -94,19 +97,19 @@ mapModel f = \case
         -- trans     :: model -> m (x, [event])
         withTrans $ \(trans :: model -> m (x, [e0])) -> do
             runTrans $ \model -> do
-                (r, evs ) <- trans (f model)
+                (r, evs) <- trans (f model)
                 pure (r . f, evs)
 
 mapEvent
-    :: forall m e0 e1 a method model.
-        Monad m
+    :: forall m e0 e1 a method model
+     . Monad m
     => (e0 -> e1)
     -> HandlerType method model e0 m a
     -> HandlerType method model e1 m a
 mapEvent f = \case
     Query h -> Query h
     CbQuery h -> CbQuery h
-    Cmd   h -> Cmd $ \m -> do
+    Cmd h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (ret, fmap f evs)
     CbCmd withTrans -> CbCmd $ \runTrans ->
@@ -115,7 +118,7 @@ mapEvent f = \case
         -- trans     :: model -> m (x, [event])
         withTrans $ \(trans :: model -> m (x, [e0])) -> do
             runTrans $ \model -> do
-                (r, evs ) <- trans model
+                (r, evs) <- trans model
                 pure (r, fmap f evs)
 
 mapResult
@@ -126,11 +129,12 @@ mapResult
 mapResult f = \case
     Query h -> Query $ fmap f . h
     CbQuery h -> CbQuery $ fmap f . h
-    Cmd   h -> Cmd $ \m -> do
+    Cmd h -> Cmd $ \m -> do
         (ret, evs) <- h m
         pure (f . ret, evs)
     CbCmd withTrans -> CbCmd $ \transact -> f <$> withTrans transact
-    -- CbCmd withTrans -> CbCmd $ ( fmap f . withTrans) -- Doesn't work as it contains a forall?
+
+-- CbCmd withTrans -> CbCmd $ ( fmap f . withTrans) -- Doesn't work as it contains a forall?
 
 class ReadModel p where
     type Model p :: Type
@@ -140,27 +144,26 @@ class ReadModel p where
     getEventList :: p -> IO [Stored (Event p)] -- TODO: Make it p stream!
     getEventStream :: p -> SerialT IO (Stored (Event p))
 
-class ReadModel p  => WriteModel p where
-    transactionalUpdate :: forall m a. MonadUnliftIO m
-                        => p
-                        -> (Model p -> m (Model p -> a, [Event p]))
-                        -> m a
-
+class ReadModel p => WriteModel p where
+    transactionalUpdate
+        :: forall m a
+         . MonadUnliftIO m
+        => p
+        -> (Model p -> m (Model p -> a, [Event p]))
+        -> m a
 
 runAction
     :: (MonadUnliftIO m, WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -> (forall a . cmd method a -> HandlerType method model event m a)
+    -> (forall a. cmd method a -> HandlerType method model event m a)
     -> cmd method ret
     -> m ret
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
     CbQuery m -> m (liftIO (getModel p))
-    Cmd   m -> transactionalUpdate p m
+    Cmd m -> transactionalUpdate p m
     CbCmd withTrans -> withTrans $ \runTrans -> do
         transactionalUpdate p runTrans
-
-
 
 class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
     apiOptions :: ApiOptions
@@ -169,27 +172,27 @@ class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> String
     , typenameSeparator :: String
-    , bodyNameBase      :: Maybe String
+    , bodyNameBase :: Maybe String
     }
-    deriving Generic
+    deriving (Generic)
 
 defaultApiOptions :: ApiOptions
-defaultApiOptions = ApiOptions { renameConstructor =
-    \s -> case L.splitAt (on (-) L.length s "Action") s of
-        (x, "Action") -> x
-        _ -> s
+defaultApiOptions =
+    ApiOptions
+        { renameConstructor =
+            \s -> case L.splitAt (on (-) L.length s "Action") s of
+                (x, "Action") -> x
+                _ -> s
+        , typenameSeparator = "_"
+        , bodyNameBase = Nothing
+        }
 
-                               , typenameSeparator = "_"
-                               , bodyNameBase      = Nothing
-                               }
-
-instance Show ApiOptions  where
+instance Show ApiOptions where
     show o =
         "ApiOptions {renameConstructor = ***, typenameSeparator = \""
             <> o
-            ^. field @"typenameSeparator"
+                ^. field @"typenameSeparator"
             <> "\"}"
-
 
 -- | Command handler
 --
@@ -203,21 +206,31 @@ instance Show ApiOptions  where
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type ActionHandler model event m cmd
-    = forall method a . cmd 'ParamType method a -> HandlerType method model event m a
+type ActionHandler model event m cmd =
+    forall method a. cmd 'ParamType method a -> HandlerType method model event m a
 
-type ActionRunner m c = forall method a . c method a -> m a
+type ActionRunner m c = forall method a. MonadUnliftIO m => c method a -> m a
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
 -- that when implementing the model.
 data Stored a = Stored
-    { storedEvent     :: a
+    { storedEvent :: a
     , storedTimestamp :: UTCTime
-    , storedUUID      :: UUID
+    , storedUUID :: UUID
     }
-    deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, Functor, Foldable, Traversable
-              , NFData)
+    deriving
+        ( Show
+        , Eq
+        , Ord
+        , Generic
+        , FromJSON
+        , ToJSON
+        , Functor
+        , Foldable
+        , Traversable
+        , NFData
+        )
 
 mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO

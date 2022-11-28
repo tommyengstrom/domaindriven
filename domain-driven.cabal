@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 320ebcde8c871e1f2bd6c409fb21b0a2a5ff506d011fb1dec00823a3853a136c
+-- hash: 43eb3ad9366b68d382dd3b46d7366d9d28a8bbf8b3798107b0ca4f9bcfc6ef28
 
 name:           domain-driven
 version:        0.1.0.0
@@ -79,6 +79,7 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns
   build-depends:
       aeson
     , async
@@ -110,7 +111,6 @@ executable bench
   main-is: Main.hs
   other-modules:
       Action
-      Benchmark.PostgresIORefState
       Models.Counter
       Models.Store
       Paths_domain_driven
@@ -149,7 +149,7 @@ executable bench
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-s -Wunused-packages -Werror
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-s -Wunused-packages -Werror
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -165,7 +165,6 @@ executable bench
     , servant-server
     , streamly
     , text
-    , unliftio
   default-language: Haskell2010
 
 executable example-simple
@@ -209,7 +208,7 @@ executable example-simple
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -223,7 +222,6 @@ executable example-simple
     , servant-openapi3
     , servant-server
     , text
-    , unliftio
     , warp
   default-language: Haskell2010
 
@@ -268,7 +266,7 @@ executable example-store
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Werror -Wunused-packages
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Werror -Wunused-packages
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -282,7 +280,6 @@ executable example-store
     , servant-openapi3
     , servant-server
     , text
-    , unliftio
     , warp
   default-language: Haskell2010
 
@@ -332,7 +329,7 @@ test-suite domain-driven-test
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
+  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
   build-depends:
       QuickCheck
     , aeson
@@ -356,7 +353,6 @@ test-suite domain-driven-test
     , streamly
     , text
     , time
-    , unliftio
     , uuid
     , warp
   default-language: Haskell2010

@@ -3,23 +3,21 @@
 
 module DomainDriven.Internal.HasFieldName where
 
-import           Data.Aeson
-import qualified Data.HashMap.Strict                          as HM
-import qualified Data.Map                                     as M
-import           Data.OpenApi
-import           Data.Set                       ( Set )
-import qualified Data.Text                                    as T
-import           Data.Text                      ( Text )
-import           Data.Time
-import           Data.Vector                    ( Vector )
-import           DomainDriven.Internal.Text
-import           GHC.Generics
-import           Prelude
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Map as M
+import Data.Set (Set)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time
+import Data.Vector (Vector)
+import DomainDriven.Internal.Text
+import GHC.Generics
+import Prelude
 
 class HasFieldName t where
-  fieldName :: Text
-  default fieldName :: (Generic t, GHasFieldName (Rep t)) => Text
-  fieldName = gfieldName $ from (undefined :: t)
+    fieldName :: Text
+    default fieldName :: (Generic t, GHasFieldName (Rep t)) => Text
+    fieldName = gfieldName $ from (undefined :: t)
 
 instance HasFieldName Int where
     fieldName = "int"
@@ -40,18 +38,18 @@ instance HasFieldName UTCTime where
     fieldName = "utcTime"
 
 instance
-  ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
-  HasFieldName (M.Map k v)
-  where
+    HasFieldName v
+    => HasFieldName (M.Map k v)
+    where
     fieldName = "mapOf" `camelAppendT` fieldName @v
 
 instance
-  ( FromJSONKey k,ToJSONKey k,Ord k,HasFieldName v,ToSchema k) =>
-  HasFieldName (HM.HashMap k v)
-  where
+    HasFieldName v
+    => HasFieldName (HM.HashMap k v)
+    where
     fieldName = "mapOf" `camelAppendT` fieldName @v
 
-instance (Ord v, HasFieldName v) => HasFieldName (Set v) where
+instance HasFieldName v => HasFieldName (Set v) where
     fieldName = "setOf" `camelAppendT` fieldName @v
 
 instance {-# OVERLAPPABLE #-} HasFieldName v => HasFieldName [v] where
@@ -67,7 +65,7 @@ instance HasFieldName v => HasFieldName (Maybe v) where
     fieldName = fieldName @v
 
 class GHasFieldName t where
-  gfieldName :: t x -> Text
+    gfieldName :: t x -> Text
 
 instance Datatype c => GHasFieldName (M1 i c f) where
     gfieldName = T.pack . lowerFirst . datatypeName
