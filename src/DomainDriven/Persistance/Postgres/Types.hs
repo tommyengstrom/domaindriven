@@ -51,9 +51,10 @@ data NumberedEvent e = NumberedEvent
     deriving (Show, Generic)
 
 data OngoingTransaction = OngoingTransaction
-    { fromTrans :: Connection
+    { connection :: Connection
     , localPool :: LocalPool Connection
     }
+    deriving (Generic)
 
 data EventRowOut = EventRowOut
     { key :: UUID

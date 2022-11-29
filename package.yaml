@@ -212,3 +212,5 @@ executables:
     - servant-server
     - streamly
     - text
+    - unliftio
+    - unliftio-pool

@@ -43,7 +43,7 @@ migrate1toMany conn prevTName tName f = do
     S.mapM_ (liftIO . writeIt)
         . S.unfoldMany Unfold.fromList
         $ S.map (f . fst)
-        $ mkEventStream 1 (OngoingTransaction conn) (mkEventQuery prevTName)
+        $ mkEventStream 1 conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =

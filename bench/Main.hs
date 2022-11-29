@@ -26,6 +26,8 @@ import qualified Streamly.Prelude as Stream
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import Prelude
+import UnliftIO.Pool
+import UnliftIO (liftIO)
 
 -- import           Text.Pretty.Simple             ( pPrint )
 
@@ -48,7 +50,8 @@ setupDbQuick mChunkSize = do
     conn <- getConn
     [PG.Only count] <- PG.query_ conn "select count(*) from benchmark_events_v1"
     putStrLn $ "Database contains: " <> show (count :: Int64) <> " events"
-    pg <- postgresWriteModel getConn eventTable applyCounterEvent 0
+    pool <- createPool (liftIO getConn) PG.close 1 5 1
+    pg <- postgresWriteModel pool eventTable applyCounterEvent 0
     pure $ case mChunkSize of
         Just s -> pg & field @"chunkSize" .~ s
         Nothing -> pg
@@ -57,7 +60,8 @@ setupDbFull :: Int -> IO (PostgresEvent CounterModel CounterEvent)
 setupDbFull nrEvents = do
     conn <- getConn
     _ <- PG.execute_ conn "drop table if exists benchmark_events_v1"
-    _ <- postgresWriteModel getConn eventTable applyCounterEvent 0
+    pool <- createPool (liftIO getConn) PG.close 1 5 1
+    _ <- postgresWriteModel pool eventTable applyCounterEvent 0
     events <- traverse toStored (take nrEvents $ cycle [CounterIncreased])
     _ <- writeEvents conn (getEventTableName eventTable) events
     setupDbQuick Nothing

@@ -79,7 +79,7 @@ createEventTable pgt = do
                     let etName = pgt ^. field @"eventTableName"
                     _ <-
                         createEventTable'
-                            (pgt ^. field @"transaction" . to fromTrans)
+                            (pgt ^. field @"transaction" . to connection)
                             etName
                     void $ refreshModel pgt
                 )
@@ -164,7 +164,7 @@ runMigrations trans et = do
         (_, r) -> fail $ "Unexpected table query result: " <> show r
   where
     conn :: Connection
-    conn = fromTrans trans
+    conn = connection trans
 
     createTable :: IO ()
     createTable = do
@@ -287,7 +287,7 @@ getEventStream' pgt =
     S.map fst $
         mkEventStream
             (pgt ^. field @"chunkSize")
-            (pgt ^. field @"transaction")
+            (pgt ^. field @"transaction" . field @"connection")
             (pgt ^. field @"eventTableName" . to mkEventQuery)
 
 -- | A transaction that is always rolled back at the end.
@@ -300,28 +300,26 @@ withStreamReadTransaction
     -> t m a
 withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
   where
-    startTrans :: m (PostgresEventTrans model event, LocalPool Connection)
+    startTrans :: m (PostgresEventTrans model event)
     startTrans = liftIO $ do
         (conn, localPool) <- takeResource (connectionPool pg)
         PG.begin conn
         pure $
-            ( PostgresEventTrans
-                { transaction = OngoingTransaction conn
+             PostgresEventTrans
+                { transaction = OngoingTransaction conn localPool
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
                 , app = pg ^. field @"app"
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
                 }
-            , localPool
-            )
 
-    rollbackTrans :: (PostgresEventTrans model event, LocalPool Connection) -> m ()
-    rollbackTrans (pgt, lpool) = liftIO $ do
+    rollbackTrans :: PostgresEventTrans model event -> m ()
+    rollbackTrans pgt = liftIO $ do
         -- Nothing changes. We just need the transaction to be able to stream events.
-        let conn = pgt ^. field @"transaction" . to fromTrans
+        let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
         PG.rollback conn
-        putResource lpool conn
+        putResource localPool conn
 
 withIOTrans
     :: forall a model event
@@ -330,24 +328,26 @@ withIOTrans
     -> IO a
 withIOTrans pg f = do
     transactionCompleted <- newIORef False
-    withResource (connectionPool pg) $ \conn ->
-        bracket (prepareTransaction conn) (cleanup transactionCompleted) $ \pgt -> do
+    (conn, localPool) <- takeResource(connectionPool pg)
+    bracket (prepareTransaction conn localPool) (cleanup transactionCompleted) $ \pgt -> do
             a <- f pgt
             writeIORef transactionCompleted True
             pure a
   where
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
-    cleanup transactionCompleted ((^. field @"transaction" . to fromTrans) -> conn) =
+    cleanup transactionCompleted pgt = do
+        let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
         readIORef transactionCompleted >>= \case
             True -> PG.commit conn
             False -> PG.rollback conn
+        putResource localPool conn
 
-    prepareTransaction :: Connection -> IO (PostgresEventTrans model event)
-    prepareTransaction conn = do
+    prepareTransaction :: Connection -> LocalPool Connection ->  IO (PostgresEventTrans model event)
+    prepareTransaction conn localPool = do
         PG.begin conn
         pure $
             PostgresEventTrans
-                { transaction = OngoingTransaction conn
+                { transaction = OngoingTransaction conn localPool
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
                 , app = pg ^. field @"app"
@@ -358,10 +358,10 @@ withIOTrans pg f = do
 mkEventStream
     :: FromJSON event
     => ChunkSize
-    -> OngoingTransaction
+    -> Connection
     -> EventQuery
     -> S.SerialT IO (Stored event, EventNumber)
-mkEventStream chunkSize (OngoingTransaction conn) q = do
+mkEventStream chunkSize conn  q = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
             r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
@@ -382,7 +382,7 @@ getModel' pgt = do
     NumberedModel model lastEventNo <- readIORef (pgt ^. field @"modelIORef")
     hasNewEvents <-
         queryHasEventsAfter
-            (pgt ^. field @"transaction" . to fromTrans)
+            (pgt ^. field @"transaction" . to connection)
             (pgt ^. field @"eventTableName")
             lastEventNo
     if hasNewEvents then fst <$> refreshModel pgt else pure model
@@ -400,7 +400,7 @@ refreshModel pg = do
         eventStream =
             mkEventStream
                 (pg ^. field @"chunkSize")
-                (pg ^. field @"transaction")
+                (pg ^. field @"transaction" . field @"connection")
                 (mkEventsAfterQuery (pg ^. field @"eventTableName") lastEventNo)
 
         applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
@@ -417,7 +417,7 @@ refreshModel pg = do
     pure (newModel, lastNewEventNo)
 
 exclusiveLock :: OngoingTransaction -> EventTableName -> IO ()
-exclusiveLock (OngoingTransaction conn) etName =
+exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
@@ -432,7 +432,7 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
             let newM = foldl' (pg ^. field @"app") m' storedEvs
             lastEventNo <-
                 writeEvents
-                    (pgt ^. field @"transaction" . to fromTrans)
+                    (pgt ^. field @"transaction" . to connection)
                     eventTable
                     storedEvs
             _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newM lastEventNo

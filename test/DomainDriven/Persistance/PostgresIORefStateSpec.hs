@@ -32,6 +32,7 @@ import qualified Models.Store as Store
 import qualified Streamly.Prelude as S
 import Test.Hspec
 import Prelude
+import UnliftIO.Pool
 
 -- import           Text.Pretty.Simple
 
@@ -58,11 +59,14 @@ spec = do
         -- make sure migrationSpec is run last!
         migrationSpec
 
-setupPersistance :: (PostgresEvent Store.StoreModel Store.StoreEvent -> IO ()) -> IO ()
+setupPersistance
+    :: ((PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection) -> IO ())
+        -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
-    p <- postgresWriteModel mkTestConn eventTable Store.applyStoreEvent mempty
-    test p{chunkSize = 2}
+    pool <- createPool (mkTestConn) close 1 5 1
+    p <- postgresWriteModel pool eventTable Store.applyStoreEvent mempty
+    test (p{chunkSize = 2}, pool)
 
 mkTestConn :: IO Connection
 mkTestConn =
@@ -84,29 +88,35 @@ tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
 
-writeEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+withPool :: (Pool Connection -> IO a) -> IO a
+withPool f = do
+    pool <- createPool (mkTestConn) close 1 5 1
+    r <- f pool
+    destroyAllResources pool
+    pure r
+
+writeEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
-    it "Can write event to database" $ \p -> do
+    it "Can write event to database" $ \(_p, pool) -> withResource pool $ \conn -> do
         let ev =
                 Stored
                     (Store.RemovedItem $ Store.ItemKey nil)
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     nil
-        conn <- getConnection p
         i <- writeEvents conn (getEventTableName eventTable) [ev]
         i `shouldBe` 1
 
-    it "Writing the same event again fails" $ \p -> do
+    it "Writing the same event again fails" $ \(_p, pool) -> withResource pool $ \conn -> do
         let ev =
                 Stored
                     (Store.RemovedItem $ Store.ItemKey nil)
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     nil
-        conn <- getConnection p
         writeEvents conn (getEventTableName eventTable) [ev]
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
-    it "Writing multiple events at once works" $ \p -> do
+    it "Writing multiple events at once works" $ \(p, pool) ->
+       withResource pool $ \conn -> do
         let evs =
                 [ Store.AddedItem (Store.ItemKey nil) "Test item" 220
                 , Store.BoughtItem (Store.ItemKey nil) 2
@@ -115,37 +125,34 @@ writeEventsSpec = describe "queryEvents" $ do
             traverse
                 (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
                 evs
-        conn <- getConnection p
         _ <- writeEvents conn (getEventTableName eventTable) storedEvs
         evs' <- getEventList p
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
-streaming :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+streaming :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 streaming = describe "steaming" $ do
-    it "getEventList and getEventStream yields the same result" $ \p -> do
-        conn <- getConnection p
-        storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
-            enKey <- mkId
-            let e = Store.BoughtItem (Store.ItemKey nil) (Store.Quantity i)
-            pure $ Stored e (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
-        _ <- writeEvents conn (getEventTableName eventTable) storedEvs
-        evList <- getEventList p
-        evStream <- S.toList $ getEventStream p
-        -- pPrint evList
-        evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
-        fmap storedEvent evStream `shouldBe` fmap storedEvent evList
-        evStream `shouldBe` evList
+    it "getEventList and getEventStream yields the same result" $ \(p, pool) ->
+        withResource pool $ \conn -> do
+         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
+             enKey <- mkId
+             let e = Store.BoughtItem (Store.ItemKey nil) (Store.Quantity i)
+             pure $ Stored e (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
+         _ <- writeEvents conn (getEventTableName eventTable) storedEvs
+         evList <- getEventList p
+         evStream <- S.toList $ getEventStream p
+         -- pPrint evList
+         evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
+         fmap storedEvent evStream `shouldBe` fmap storedEvent evList
+         evStream `shouldBe` evList
 
-queryEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+queryEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 queryEventsSpec = describe "queryEvents" $ do
-    it "Can query events" $ \p -> do
-        conn <- getConnection p
+    it "Can query events" $ \(_p, pool) -> withResource pool $ \conn -> do
         evs <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (>= 1) . length
-    it "Events come out in the right order" $ \p -> do
+    it "Events come out in the right order" $ \(_p, pool) -> withResource pool $ \conn -> do
         -- write few more events before
         --
-        conn <- getConnection p
         _ <- do
             id1 <- mkId
             let ev1 = Store.Restocked (Store.ItemKey nil) 4
@@ -167,45 +174,44 @@ queryEventsSpec = describe "queryEvents" $ do
         let event_numbers = fmap snd evs
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
-migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
-    it "Keeps all events when using `id` to update" $ \p -> do
-        conn <- getConnection p
-        evs <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
-        evs `shouldSatisfy` (>= 1) . length
+    it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
+        withResource pool $ \conn -> do
+          evs <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
+          evs `shouldSatisfy` (>= 1) . length
 
-        _ <- postgresWriteModel mkTestConn eventTable2 Store.applyStoreEvent mempty
-        evs' <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
+          _ <- postgresWriteModel pool eventTable2 Store.applyStoreEvent mempty
+          evs' <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
 
-        fmap fst evs' `shouldBe` fmap fst evs
-    it "Can no longer write new events to old table after migration" $ \p -> do
+          fmap fst evs' `shouldBe` fmap fst evs
+    it "Can no longer write new events to old table after migration" $ \(_p, pool) -> do
         uuid <- V4.nextRandom
         let ev =
                 Stored
                     (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
-        conn <- getConnection p
-        writeEvents conn (getEventTableName eventTable) [ev]
+        withResource pool (\conn -> writeEvents conn (getEventTableName eventTable) [ev])
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
-    it "But can write to the new table" $ \p -> do
+    it "But can write to the new table" $ \(_p, pool) -> do
         uuid <- V4.nextRandom
         let ev =
                 Stored
                     (Store.AddedItem (Store.ItemKey uuid) "Test item" 220)
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
-        conn <- getConnection p
-        void $ writeEvents conn (getEventTableName eventTable2) [ev]
 
-    it "Broken migration throws and rollbacks transaction" $ \_ -> do
+        void . withResource pool $ \conn -> writeEvents conn (getEventTableName eventTable2) [ev]
+
+    it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
         let eventTable3 :: EventTable
             eventTable3 = MigrateUsing undefined eventTable2
 
         print $ tableNames eventTable3
 
-        postgresWriteModel mkTestConn eventTable3 Store.applyStoreEvent mempty
+        postgresWriteModel pool eventTable3 Store.applyStoreEvent mempty
             `shouldThrow` const @_ @SomeException True
         conn <- mkTestConn
 
@@ -225,9 +231,9 @@ migrationSpec = describe "migrate1to1" $ do
                 brokenExists `shouldBe` False
             _ -> fail "Unexpectedly lacking table versions!"
 
-storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent)
+storeModelSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 storeModelSpec = describe "Test basic functionality" $ do
-    it "Can add item" $ \p -> do
+    it "Can add item" $ \(p, _pool) -> do
         iKey <-
             runAction p Store.handleStoreAction $
                 Store.AdminAction $
@@ -242,7 +248,7 @@ storeModelSpec = describe "Test basic functionality" $ do
         Store.price item `shouldBe` 99
         Store.quantity item `shouldBe` 10
 
-    it "Can buy item" $ \p -> do
+    it "Can buy item" $ \(p, _pool) -> do
         iKey <- head . M.keys <$> getModel p
         runAction p Store.handleStoreAction $ Store.ItemAction iKey $ Store.ItemBuy 7
         m <- getModel p
@@ -252,7 +258,7 @@ storeModelSpec = describe "Test basic functionality" $ do
         Store.price item `shouldBe` 99
         Store.quantity item `shouldBe` 3
 
-    it "Can run Query" $ \p -> do
+    it "Can run Query" $ \(p, _pool) -> do
         items <- runAction p Store.handleStoreAction Store.ListItems
         items `shouldSatisfy` (== 1) . length
 
@@ -266,7 +272,7 @@ storeModelSpec = describe "Test basic functionality" $ do
 
         items' <- runAction p Store.handleStoreAction Store.ListItems
         items' `shouldSatisfy` (== 2) . length
-    it "Concurrent commands work" $ \p -> do
+    it "Concurrent commands work" $ \(p, _pool) -> do
         -- This test relies on the postgres max connections being reasonably high.
         c0 <- runAction p Store.handleStoreAction Store.ListItems
         let newItems :: [Store.StoreAction 'ParamType Cmd Store.ItemKey]
@@ -284,8 +290,8 @@ storeModelSpec = describe "Test basic functionality" $ do
         c1 <- runAction p Store.handleStoreAction Store.ListItems
         (length c1, length c0)
             `shouldSatisfy` (\(after', before') -> after' - before' == n)
-    it "Running a command where there are unevaliated events" $ \p -> do
-        conn <- getConnection p
+    it "Running a command where there are unevaliated events" $ \(p, _pool) -> do
+        conn <- mkTestConn
         key1 <- mkId
         key2 <- mkId
         let iKey = Store.ItemKey nil
