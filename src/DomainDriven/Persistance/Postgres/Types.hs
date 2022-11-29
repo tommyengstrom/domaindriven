@@ -11,6 +11,7 @@ import qualified Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.FromField as FF
 import DomainDriven.Internal.Class
 import GHC.Generics (Generic)
+import UnliftIO.Pool (LocalPool)
 import Prelude
 
 data PersistanceError
@@ -51,6 +52,7 @@ data NumberedEvent e = NumberedEvent
 
 data OngoingTransaction = OngoingTransaction
     { fromTrans :: Connection
+    , localPool :: LocalPool Connection
     }
 
 data EventRowOut = EventRowOut

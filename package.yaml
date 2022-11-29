@@ -90,6 +90,7 @@ library:
     - time
     - transformers
     - unliftio
+    - unliftio-pool
     - unordered-containers
     - uuid
     - vector

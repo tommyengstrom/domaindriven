@@ -24,10 +24,11 @@ import Lens.Micro
 import qualified Streamly.Data.Unfold as Unfold
 import qualified Streamly.Prelude as S
 import UnliftIO (MonadUnliftIO (..))
+import UnliftIO.Pool (LocalPool, Pool, putResource, takeResource, withResource)
 import Prelude
 
 data PostgresEvent model event = PostgresEvent
-    { getConnection :: IO Connection
+    { connectionPool :: Pool Connection
     , eventTableName :: EventTableName
     , modelIORef :: IORef (NumberedModel model)
     , app :: model -> Stored event -> model
@@ -54,8 +55,7 @@ instance (FromJSON e) => ReadModel (PostgresEvent m e) where
     applyEvent pg = pg ^. field @"app"
     getModel pg = withIOTrans pg getModel'
 
-    getEventList pg = do
-        conn <- getConnection pg
+    getEventList pg = withResource (connectionPool pg) $ \conn ->
         fmap fst <$> queryEvents conn (pg ^. field @"eventTableName")
 
     getEventStream pg = withStreamReadTransaction pg getEventStream'
@@ -116,25 +116,25 @@ createRetireFunction conn =
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
     :: (FromJSON e, WriteModel (PostgresEventTrans m e))
-    => IO Connection
+    => Pool Connection
     -> EventTableName
     -> (m -> Stored e -> m)
     -> m
     -> IO (PostgresEvent m e)
-postgresWriteModelNoMigration getConn eventTable app' seed' = do
-    pg <- createPostgresPersistance getConn eventTable app' seed'
+postgresWriteModelNoMigration pool eventTable app' seed' = do
+    pg <- createPostgresPersistance pool eventTable app' seed'
     withIOTrans pg createEventTable
     pure pg
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModel
-    :: IO Connection
+    :: Pool Connection
     -> EventTable
     -> (m -> Stored e -> m)
     -> m
     -> IO (PostgresEvent m e)
-postgresWriteModel getConn eventTable app' seed' = do
-    pg <- createPostgresPersistance getConn (getEventTableName eventTable) app' seed'
+postgresWriteModel pool eventTable app' seed' = do
+    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
     pure pg
 
@@ -173,16 +173,16 @@ runMigrations trans et = do
 
 createPostgresPersistance
     :: forall event model
-     . IO Connection
+     . Pool Connection
     -> EventTableName
     -> (model -> Stored event -> model)
     -> model
     -> IO (PostgresEvent model event)
-createPostgresPersistance getConn eventTable app' seed' = do
+createPostgresPersistance pool eventTable app' seed' = do
     ref <- newIORef $ NumberedModel seed' 0
     pure $
         PostgresEvent
-            { getConnection = getConn
+            { connectionPool = pool
             , eventTableName = eventTable
             , modelIORef = ref
             , app = app'
@@ -300,12 +300,12 @@ withStreamReadTransaction
     -> t m a
 withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
   where
-    startTrans :: m (PostgresEventTrans model event)
+    startTrans :: m (PostgresEventTrans model event, LocalPool Connection)
     startTrans = liftIO $ do
-        conn <- getConnection pg
+        (conn, localPool) <- takeResource (connectionPool pg)
         PG.begin conn
         pure $
-            PostgresEventTrans
+            ( PostgresEventTrans
                 { transaction = OngoingTransaction conn
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
@@ -313,11 +313,15 @@ withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
                 }
+            , localPool
+            )
 
-    rollbackTrans :: PostgresEventTrans model event -> m ()
-    rollbackTrans pgt = liftIO $ do
+    rollbackTrans :: (PostgresEventTrans model event, LocalPool Connection) -> m ()
+    rollbackTrans (pgt, lpool) = liftIO $ do
         -- Nothing changes. We just need the transaction to be able to stream events.
-        PG.rollback $ pgt ^. field @"transaction" . to fromTrans
+        let conn = pgt ^. field @"transaction" . to fromTrans
+        PG.rollback conn
+        putResource lpool conn
 
 withIOTrans
     :: forall a model event
@@ -326,10 +330,11 @@ withIOTrans
     -> IO a
 withIOTrans pg f = do
     transactionCompleted <- newIORef False
-    bracket prepareTransaction (cleanup transactionCompleted) $ \pgt -> do
-        a <- f pgt
-        writeIORef transactionCompleted True
-        pure a
+    withResource (connectionPool pg) $ \conn ->
+        bracket (prepareTransaction conn) (cleanup transactionCompleted) $ \pgt -> do
+            a <- f pgt
+            writeIORef transactionCompleted True
+            pure a
   where
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
     cleanup transactionCompleted ((^. field @"transaction" . to fromTrans) -> conn) =
@@ -337,9 +342,8 @@ withIOTrans pg f = do
             True -> PG.commit conn
             False -> PG.rollback conn
 
-    prepareTransaction :: IO (PostgresEventTrans model event)
-    prepareTransaction = do
-        conn <- getConnection pg
+    prepareTransaction :: Connection -> IO (PostgresEventTrans model event)
+    prepareTransaction conn = do
         PG.begin conn
         pure $
             PostgresEventTrans

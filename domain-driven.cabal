@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 43eb3ad9366b68d382dd3b46d7366d9d28a8bbf8b3798107b0ca4f9bcfc6ef28
+-- hash: 95acf7190ba97705005fc4d59b90f760cd42024a66bf9689da58022ff83389ed
 
 name:           domain-driven
 version:        0.1.0.0
@@ -102,6 +102,7 @@ library
     , time
     , transformers
     , unliftio
+    , unliftio-pool
     , unordered-containers
     , uuid
     , vector
