@@ -31,8 +31,8 @@ import Lens.Micro ((^.))
 import qualified Models.Store as Store
 import qualified Streamly.Prelude as S
 import Test.Hspec
-import Prelude
 import UnliftIO.Pool
+import Prelude
 
 -- import           Text.Pretty.Simple
 
@@ -61,7 +61,7 @@ spec = do
 
 setupPersistance
     :: ((PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection) -> IO ())
-        -> IO ()
+    -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
     pool <- createPool (mkTestConn) close 1 5 1
@@ -115,8 +115,7 @@ writeEventsSpec = describe "queryEvents" $ do
         writeEvents conn (getEventTableName eventTable) [ev]
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
-    it "Writing multiple events at once works" $ \(p, pool) ->
-       withResource pool $ \conn -> do
+    it "Writing multiple events at once works" $ \(p, pool) -> do
         let evs =
                 [ Store.AddedItem (Store.ItemKey nil) "Test item" 220
                 , Store.BoughtItem (Store.ItemKey nil) 2
@@ -125,25 +124,26 @@ writeEventsSpec = describe "queryEvents" $ do
             traverse
                 (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
                 evs
-        _ <- writeEvents conn (getEventTableName eventTable) storedEvs
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) storedEvs
         evs' <- getEventList p
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
 streaming :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 streaming = describe "steaming" $ do
-    it "getEventList and getEventStream yields the same result" $ \(p, pool) ->
-        withResource pool $ \conn -> do
-         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
-             enKey <- mkId
-             let e = Store.BoughtItem (Store.ItemKey nil) (Store.Quantity i)
-             pure $ Stored e (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
-         _ <- writeEvents conn (getEventTableName eventTable) storedEvs
-         evList <- getEventList p
-         evStream <- S.toList $ getEventStream p
-         -- pPrint evList
-         evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
-         fmap storedEvent evStream `shouldBe` fmap storedEvent evList
-         evStream `shouldBe` evList
+    it "getEventList and getEventStream yields the same result" $ \(p, pool) -> do
+        storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
+            enKey <- mkId
+            let e = Store.BoughtItem (Store.ItemKey nil) (Store.Quantity i)
+            pure $ Stored e (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) storedEvs
+        evList <- getEventList p
+        evStream <- S.toList $ getEventStream p
+        -- pPrint evList
+        evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
+        fmap storedEvent evStream `shouldBe` fmap storedEvent evList
+        evStream `shouldBe` evList
 
 queryEventsSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 queryEventsSpec = describe "queryEvents" $ do
@@ -177,14 +177,18 @@ queryEventsSpec = describe "queryEvents" $ do
 migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
     it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
-        withResource pool $ \conn -> do
-          evs <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
-          evs `shouldSatisfy` (>= 1) . length
+        putStrLn "hej 1"
+        evs <- withResource pool $ \conn ->
+            queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
+        evs `shouldSatisfy` (>= 1) . length
 
-          _ <- postgresWriteModel pool eventTable2 Store.applyStoreEvent mempty
-          evs' <- queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
+        putStrLn "hej 2"
+        _ <- postgresWriteModel pool eventTable2 Store.applyStoreEvent mempty
+        evs' <- withResource pool $ \conn ->
+            queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
 
-          fmap fst evs' `shouldBe` fmap fst evs
+        putStrLn "hej 3"
+        fmap fst evs' `shouldBe` fmap fst evs
     it "Can no longer write new events to old table after migration" $ \(_p, pool) -> do
         uuid <- V4.nextRandom
         let ev =

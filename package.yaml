@@ -115,22 +115,23 @@ tests:
     - deepseq
     - domain-driven
     - exceptions
+    - generic-lens
     - hspec
     - http-client
+    - microlens
     - mtl
     - openapi3
-    - QuickCheck
     - postgresql-simple
-    - uuid
-    - generic-lens
-    - microlens
-    - streamly
-    - time
+    - QuickCheck
     - quickcheck-arbitrary-adt
     - quickcheck-classes
     - servant-client
     - servant-server
+    - streamly
     - text
+    - time
+    - unliftio-pool
+    - uuid
     - warp
 
 
@@ -198,7 +199,6 @@ executables:
     - -Wunused-packages
     - -Werror
     dependencies:
-    - aeson
     - aeson
     - containers
     - criterion

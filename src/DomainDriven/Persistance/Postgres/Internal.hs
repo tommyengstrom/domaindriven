@@ -305,7 +305,7 @@ withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
         (conn, localPool) <- takeResource (connectionPool pg)
         PG.begin conn
         pure $
-             PostgresEventTrans
+            PostgresEventTrans
                 { transaction = OngoingTransaction conn localPool
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
@@ -328,11 +328,11 @@ withIOTrans
     -> IO a
 withIOTrans pg f = do
     transactionCompleted <- newIORef False
-    (conn, localPool) <- takeResource(connectionPool pg)
+    (conn, localPool) <- takeResource (connectionPool pg)
     bracket (prepareTransaction conn localPool) (cleanup transactionCompleted) $ \pgt -> do
-            a <- f pgt
-            writeIORef transactionCompleted True
-            pure a
+        a <- f pgt
+        writeIORef transactionCompleted True
+        pure a
   where
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
     cleanup transactionCompleted pgt = do
@@ -342,7 +342,7 @@ withIOTrans pg f = do
             False -> PG.rollback conn
         putResource localPool conn
 
-    prepareTransaction :: Connection -> LocalPool Connection ->  IO (PostgresEventTrans model event)
+    prepareTransaction :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
     prepareTransaction conn localPool = do
         PG.begin conn
         pure $
@@ -361,7 +361,7 @@ mkEventStream
     -> Connection
     -> EventQuery
     -> S.SerialT IO (Stored event, EventNumber)
-mkEventStream chunkSize conn  q = do
+mkEventStream chunkSize conn q = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
             r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
