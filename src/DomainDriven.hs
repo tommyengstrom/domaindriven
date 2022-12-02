@@ -1,34 +1,37 @@
 module DomainDriven
-    ( ActionHandler
+    ( Action
+    , ActionHandler
     , ActionRunner
-    , ApiOptions(..)
+    , ApiOptions (..)
     , CanMutate
-    , Cmd
     , CbCmd
+    , Cmd
     , defaultApiOptions
     , defaultServerConfig
-    , HandlerType(..)
-    , HasApiOptions(..)
+    , HandlerType (..)
+    , HasApiOptions (..)
     , mapEvent
     , mapModel
     , mapResult
     , mkId
-    , NamedJsonFields(..)
+    , ModelAccess (..)
+    , NamedJsonFields (..)
+    , P
+    , ParamPart (..)
     , Query
-    , ParamPart(..)
-    , ModelAccess(..)
-    , ReadModel(..)
+    , ReadModel (..)
     , RequestType
     , runAction
-    , ServerConfig(..)
-    , Stored(..)
-    , P(..)
+    , ServerConfig (..)
+    , Stored (..)
     , UUID
-    , WriteModel(..)
-    ) where
+    , WriteModel (..)
+    )
+where
 
-import           Data.UUID
-import           DomainDriven.Config
-import           DomainDriven.Internal.Class
-import           DomainDriven.Internal.NamedJsonFields
-                                                ( NamedJsonFields(..) )
+import Data.UUID
+import DomainDriven.Config
+import DomainDriven.Internal.Class
+import DomainDriven.Internal.NamedJsonFields
+    ( NamedJsonFields (..)
+    )

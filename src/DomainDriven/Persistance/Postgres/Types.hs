@@ -1,17 +1,18 @@
 module DomainDriven.Persistance.Postgres.Types where
 
-import           Control.Monad.Catch
-import           Data.Aeson
-import           Data.Int
-import           Data.Time
-import           Data.Typeable
-import           Data.UUID                      ( UUID )
-import           Database.PostgreSQL.Simple     ( Connection )
-import qualified Database.PostgreSQL.Simple                   as PG
-import qualified Database.PostgreSQL.Simple.FromField         as FF
-import           DomainDriven.Internal.Class
-import           GHC.Generics                   ( Generic )
-import           Prelude
+import Control.Monad.Catch
+import Data.Aeson
+import Data.Int
+import Data.Time
+import Data.Typeable
+import Data.UUID (UUID)
+import Database.PostgreSQL.Simple (Connection)
+import qualified Database.PostgreSQL.Simple as PG
+import qualified Database.PostgreSQL.Simple.FromField as FF
+import DomainDriven.Internal.Class
+import GHC.Generics (Generic)
+import UnliftIO.Pool (LocalPool)
+import Prelude
 
 data PersistanceError
     = EncodingError String
@@ -38,27 +39,28 @@ instance FF.FromField EventNumber where
     fromField f bs = EventNumber <$> FF.fromField f bs
 
 data NumberedModel m = NumberedModel
-    { model       :: !m
+    { model :: !m
     , eventNumber :: !EventNumber
     }
     deriving (Show, Generic)
 
 data NumberedEvent e = NumberedEvent
-    { event       :: !(Stored e)
+    { event :: !(Stored e)
     , eventNumber :: !EventNumber
     }
     deriving (Show, Generic)
 
 data OngoingTransaction = OngoingTransaction
-    { fromTrans :: Connection
+    { connection :: Connection
+    , localPool :: LocalPool Connection
     }
-
+    deriving (Generic)
 
 data EventRowOut = EventRowOut
-    { key          :: UUID
+    { key :: UUID
     , commitNumber :: EventNumber
-    , timestamp    :: UTCTime
-    , event        :: Value
+    , timestamp :: UTCTime
+    , event :: Value
     }
     deriving (Show, Eq, Generic, PG.FromRow)
 
@@ -67,10 +69,10 @@ fromEventRow (EventRowOut evKey no ts ev) = case fromJSON ev of
     Success a -> pure (Stored a ts evKey, no)
     Error err ->
         throwM
-            .  EncodingError
-            $  "Failed to parse event "
-            <> show evKey
-            <> ": "
-            <> err
-            <> "\nWhen trying to parse:\n"
-            <> show ev
+            . EncodingError
+            $ "Failed to parse event "
+                <> show evKey
+                <> ": "
+                <> err
+                <> "\nWhen trying to parse:\n"
+                <> show ev

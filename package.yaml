@@ -55,6 +55,18 @@ default-extensions:
 - TypeSynonymInstances
 - ViewPatterns
 
+ghc-options:
+- -Werror
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wpartial-fields
+- -Wredundant-constraints
+- -Wincomplete-record-updates
+- -Wincomplete-patterns
+
 library:
   source-dirs: src
   dependencies:
@@ -78,6 +90,7 @@ library:
     - time
     - transformers
     - unliftio
+    - unliftio-pool
     - unordered-containers
     - uuid
     - vector
@@ -102,23 +115,23 @@ tests:
     - deepseq
     - domain-driven
     - exceptions
+    - generic-lens
     - hspec
     - http-client
+    - microlens
     - mtl
     - openapi3
-    - QuickCheck
     - postgresql-simple
-    - uuid
-    - generic-lens
-    - microlens
-    - streamly
-    - time
+    - QuickCheck
     - quickcheck-arbitrary-adt
     - quickcheck-classes
     - servant-client
     - servant-server
+    - streamly
     - text
-    - unliftio
+    - time
+    - unliftio-pool
+    - uuid
     - warp
 
 
@@ -137,7 +150,6 @@ executables:
     - deepseq
     - containers
     - openapi3
-    - unliftio
     - text
     - servant-server
     - servant-openapi3
@@ -166,7 +178,6 @@ executables:
     - servant-openapi3
     - servant-server
     - text
-    - unliftio
     - warp
     ghc-options:
     - -threaded
@@ -189,7 +200,6 @@ executables:
     - -Werror
     dependencies:
     - aeson
-    - aeson
     - containers
     - criterion
     - deepseq
@@ -203,3 +213,4 @@ executables:
     - streamly
     - text
     - unliftio
+    - unliftio-pool
