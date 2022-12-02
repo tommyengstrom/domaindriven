@@ -502,7 +502,7 @@ mkServerDec spec = do
             [t|
                 forall m
                  . MonadUnliftIO m
-                => ActionRunner m $(pure $ unGadtType gadtType `AppT` PromotedT (mkName "ParamType"))
+                => ActionRunner m $(pure $ unGadtType gadtType)
                 -> ServerT $(pure $ ConT apiTypeName) m
                 |]
 
@@ -537,7 +537,7 @@ actionRunner :: Type -> Type
 actionRunner runnerGADT =
     ConT ''ActionRunner
         `AppT` VarT runnerMonadName
-        `AppT` (runnerGADT `AppT` PromotedT (mkName "ParamType"))
+        `AppT` runnerGADT
 
 runnerMonadName :: Name
 runnerMonadName = mkName "m"
