@@ -35,6 +35,8 @@ type CbCmd = RequestType 'Callback '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
 type CbQuery = RequestType 'Callback '[JSON] (Verb 'GET 200 '[JSON])
 
+type Action = ParamPart -> Type -> Type -> Type
+
 type family CanMutate method :: Bool where
     CanMutate (RequestType a c (Verb 'GET code cts)) = 'False
     CanMutate (RequestType a c (Verb 'POST code cts)) = 'True

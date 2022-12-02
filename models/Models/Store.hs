@@ -67,7 +67,7 @@ data ItemInfo = ItemInfo
 
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
-data StoreAction (x :: ParamPart) method a where
+data StoreAction :: Action where
     ListItems :: StoreAction x (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
     Search
         :: P x "searchPhrase" Text
@@ -81,7 +81,7 @@ data StoreAction (x :: ParamPart) method a where
         -> StoreAction x method a
     deriving (HasApiOptions)
 
-data ItemAction (x :: ParamPart) method a where
+data ItemAction :: Action where
     ItemBuy :: P x "quantity" Quantity -> ItemAction x Cmd ()
     ItemStockQuantity :: ItemAction x Query Quantity
     ItemPrice :: ItemAction x Query Price

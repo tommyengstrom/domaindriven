@@ -10,7 +10,7 @@ import DomainDriven
 import DomainDriven.Config
 import Prelude
 
-data TestAction x method a where
+data TestAction :: Action where
     ReverseText
         :: P x "text" Text
         -> TestAction x CbCmd Text
