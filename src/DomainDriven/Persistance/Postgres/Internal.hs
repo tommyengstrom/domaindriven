@@ -24,7 +24,14 @@ import Lens.Micro
 import qualified Streamly.Data.Unfold as Unfold
 import qualified Streamly.Prelude as S
 import UnliftIO (MonadUnliftIO (..))
-import UnliftIO.Pool (LocalPool, Pool, putResource, takeResource, withResource)
+import UnliftIO.Pool
+    ( LocalPool
+    , Pool
+    , createPool
+    , putResource
+    , takeResource
+    , withResource
+    )
 import Prelude
 
 data PostgresEvent model event = PostgresEvent
@@ -112,6 +119,10 @@ createRetireFunction conn =
         $ "create or replace function retired_table() returns trigger as \
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
+
+simplePool :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
+simplePool connInfo =
+    createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
