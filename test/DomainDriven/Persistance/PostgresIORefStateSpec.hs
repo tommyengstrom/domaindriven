@@ -177,17 +177,14 @@ queryEventsSpec = describe "queryEvents" $ do
 migrationSpec :: SpecWith (PostgresEvent Store.StoreModel Store.StoreEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
     it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
-        putStrLn "hej 1"
         evs <- withResource pool $ \conn ->
             queryEvents @Store.StoreEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (>= 1) . length
 
-        putStrLn "hej 2"
         _ <- postgresWriteModel pool eventTable2 Store.applyStoreEvent mempty
         evs' <- withResource pool $ \conn ->
             queryEvents @Store.StoreEvent conn (getEventTableName eventTable2)
 
-        putStrLn "hej 3"
         fmap fst evs' `shouldBe` fmap fst evs
     it "Can no longer write new events to old table after migration" $ \(_p, pool) -> do
         uuid <- V4.nextRandom

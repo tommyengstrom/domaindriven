@@ -55,3 +55,32 @@ migrate1toMany conn prevTName tName f = do
                    \values (?, ?, ?)"
             )
             (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+
+migrate1toManyWithState
+    :: forall a b state
+     . (FromJSON a, ToJSON b)
+    => Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (state -> Stored a -> (state, [Stored b]))
+    -> state
+    -> IO ()
+migrate1toManyWithState conn prevTName tName f initialState = do
+    _ <- createEventTable' conn tName
+    S.mapM_ (liftIO . writeIt)
+        . S.unfoldMany Unfold.fromList
+        . S.map snd
+        $ S.scanl' (\b -> f (fst b)) (initialState, [])
+        $ S.map fst
+        $ mkEventStream 1 conn (mkEventQuery prevTName)
+  where
+    writeIt :: Stored b -> IO Int64
+    writeIt event =
+        PG.executeMany
+            conn
+            ( "insert into \""
+                <> fromString tName
+                <> "\" (id, timestamp, event) \
+                   \values (?, ?, ?)"
+            )
+            (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])

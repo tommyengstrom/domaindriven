@@ -120,9 +120,13 @@ createRetireFunction conn =
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
 
-simplePool :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
-simplePool connInfo =
+simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
+simplePool' connInfo =
     createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
+
+simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
+simplePool getConn =
+    createPool (liftIO getConn) (liftIO . PG.close) 1 5 5
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
