@@ -157,7 +157,7 @@ class ReadModel p => WriteModel p where
 runAction
     :: (MonadUnliftIO m, WriteModel p, model ~ Model p, event ~ Event p)
     => p
-    -> (forall a. cmd 'ParamType method a -> HandlerType method model event m a)
+    -> ActionHandler model event m cmd
     -> cmd 'ParamType method ret
     -> m ret
 runAction p handleCmd cmd = case handleCmd cmd of
@@ -208,8 +208,8 @@ instance Show ApiOptions where
 --
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
-type ActionHandler model event m cmd =
-    forall method a. cmd 'ParamType method a -> HandlerType method model event m a
+type ActionHandler model event m c =
+    forall method a. c 'ParamType method a -> HandlerType method model event m a
 
 type ActionRunner m c =
     forall method a

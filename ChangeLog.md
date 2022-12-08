@@ -1,3 +1,5 @@
 # Changelog for domain-driven
 
-## Unreleased changes
+## 0.5.0
+
+First release published on hackage.

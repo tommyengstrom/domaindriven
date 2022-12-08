@@ -1,24 +1,28 @@
 # DomainDriven
 
-DomainDriven is a batteries included synchronous eventsourcing and CQRS library. The goal of this library is to allow you to implement DDD principles without focusing on the boilerplate. Using `Template Haskell` we generate a Servant server from the specification and we keep the specification succinct.
+DomainDriven is a batteries included synchronous event sourcing and CQRS library. The goal of this library is to allow you to implement DDD principles without focusing on the boilerplate. 
+
+It uses `Template Haskell` we generate a Servant server from the specification and we aim to keep the specification as succinct as we can.
 
 ## The idea
 
 - Use a GADT to specify the actions, what will be translated into `GET`s and `POST`s.
-- Make each event update run in a transaction, thereby avoiding the eventual consistency issues commonly associated with eventsourcing.
+- Make each event update run in a transaction, thereby avoiding the eventual consistency issues commonly associated with event sourcing.
 
 ## How it works
 
 In order to implement a model in `domain-driven` you have to define:
 - The model (current state)
 - The events
-- How to handle events
+- How to update the model when new events come in
 - The actions (queries and commands)
-- How to handle actions
+- How to handle actions 
 
 ### Model
 
-The model is the current state of the system. This is what you normally would keep in a database, but as this is an eventsources system the state is not fundamental as it can be recalculated.
+The model is the current state of the system. This is what you normally would keep in a database, but as this is an event sourced system the state is not fundamental as it can be recalculated.
+
+Currently all implemented persistence strategies all keep the state in memory.
 
 ### Events
 
@@ -51,50 +55,57 @@ data Stored a = Stored
 
 ### Commands
 
-Commands are defined using a GADT with one type parameter represending the return type. For example:
+Commands are defined using a GADT with one type parameter representing the return type. For example:
 
 ``` haskell
-data StorageAction method a where
-    GetFile :: UUID -> StorageAction Query ByteString
-    AddFile :: ByteString -> StorageAction Cmd UUID
-    RemoveFile :: UUID -> StorageAction Cmd ()
+-- Same as: data StorageAction (x :: ParamPart) method a where
+data StorageAction :: Action where
+    GetFile
+        :: P x "fileId" UUID 
+        -> StorageAction x Query ByteString
+    AddFile
+        :: P x "fileContent" ByteString 
+        -> StorageAction Cmd UUID
+    RemoveFile 
+        :: P x "fileId" UUID 
+        -> StorageAction Cmd ()
 ```
 
-### Command handler
+### Action handler
 
-Commands, in contrast to events, are allowed to fail. If a command succeeds we need to return a value of the type specified by the constructor and a list of events. The command handler do not update the state.
+Actions, in contrast to events, are allowed to fail. If an action succeeds we need to return a value of the type specified by the constructor and, if it was a command, a list of events. The action handler do not update the state.
 
 In addition you may need to make requests, read from disk, or perform other side effects in order to calculate the result.
 
 `ActionHandler` is defined as:
 
 ``` haskell
-type ActionHandler model event m cmd
-    = forall method a . cmd method a -> HandlerType method model event m a
+type ActionHandler model event m c =
+    forall method a. c 'ParamType method a -> HandlerType method model event m a
 ```
 
 In practice this means you specify actions as
 
 ```haskell
 
-data CounterAction method return where
-   GetCounter ::CounterAction Query Int
-   IncreaseCounter ::CounterAction Cmd Int
-   DecreaseCounter ::CounterAction Cmd Int
+data CounterAction x method return where
+   GetCounter ::CounterAction x Query Int
+   IncreaseCounter ::CounterAction x Cmd Int
+   DecreaseCounter ::CounterAction x Cmd Int
 ```
 
 and the corresponding handler as
 
 ```haskell
-handleAction
-    :: CounterAction method a -> HandlerType method CounterModel CounterEvent IO a
+handleAction :: ActionHandler CounterAction CounterEvent IO a 
 handleAction = \case
-    GetCounter      -> Query $ pure
-    IncreaseCounter -> Cmd $ \_ -> pure (id, [CounterIncreased])
+    GetCounter      -> Query $ pure -- Query is just `model -> IO a`
+    IncreaseCounter -> Cmd $ \_ ->  `model -> IO (model -> a, [CounterEvent])`
+        pure (id -- return state as is, after the event is applied
+             , [CounterIncreased])
     DecreaseCounter -> Cmd $ \counter -> do
         when (counter < 1) (throwM NegativeNotSupported)
         pure (id, [CounterDecreased])
-
 ```
 
 A `Query` takes a `model -> m a`, i.e. you get access to the model and the ability to run monadic efficts. `Query`s will be translates into `GET` in the generated API.
@@ -112,6 +123,6 @@ The `ServerConfig`, `storeActionConfig` in this example, contains the API option
 
 ### Simple example
 
-Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs).
+Minimal example can be found in [examples/simple/Main.hs](examples/simple/Main.hs), this uses the model defined in [models/Models/Counter.hs](models/Models/Counter.hs)
 
-For a slightly more realistic example check out [examples/store/Main.hs](examples/hierarchical/Main.hs).
+
