@@ -6,7 +6,9 @@ cabal-version: 1.12
 
 name:           domain-driven
 version:        0.5.0
+synopsis:       Batteries included event sourcing and CQRS
 description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domain-driven#readme>
+category:       Web
 homepage:       https://github.com/tommyengstrom/domain-driven#readme
 bug-reports:    https://github.com/tommyengstrom/domain-driven/issues
 author:         Tommy Engström
@@ -77,7 +79,7 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns
   build-depends:
       aeson >=2.0.3.0
     , async >=2.2.4
@@ -148,7 +150,7 @@ executable bench
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-s -Wunused-packages -Werror
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-s -Wunused-packages
   build-depends:
       aeson >=2.0.3.0
     , base >=4.7 && <5
@@ -209,7 +211,7 @@ executable example-simple
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -267,7 +269,7 @@ executable example-store
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Werror -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
   build-depends:
       aeson
     , base >=4.7 && <5
@@ -330,7 +332,7 @@ test-suite domain-driven-test
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Werror -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Werror -Wall -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
   build-depends:
       QuickCheck >=2.14.2
     , aeson >=2.0.3.0

@@ -11,8 +11,8 @@ extra-source-files:
 - ChangeLog.md
 
 # Metadata used when publishing your package
-# synopsis: Batteries included event sourcing and CQRS
-# category: Web
+synopsis: Batteries included event sourcing and CQRS
+category: Web
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
@@ -64,7 +64,6 @@ default-extensions:
 - ViewPatterns
 
 ghc-options:
-- -Werror
 - -Wall
 - -Wcompat
 - -Widentities
@@ -106,7 +105,6 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -Werror
     - -Wall
     - -Wunused-packages
     dependencies:
@@ -151,7 +149,6 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -Werror
     - -Wall
     - -Wunused-packages
   example-store:
@@ -176,9 +173,7 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    - -Werror
     - -Wall
-    - -Werror
     - -Wunused-packages
   bench:
     main:                Main.hs
@@ -190,7 +185,6 @@ executables:
     - -rtsopts
     - -with-rtsopts=-s
     - -Wunused-packages
-    - -Werror
     dependencies:
     - criterion >= 1.5.13.0
     - deepseq >= 1.4.6.1
