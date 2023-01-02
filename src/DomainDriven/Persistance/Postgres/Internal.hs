@@ -28,6 +28,7 @@ import UnliftIO.Pool
     ( LocalPool
     , Pool
     , createPool
+    , destroyResource
     , putResource
     , takeResource
     , withResource
@@ -333,8 +334,13 @@ withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
     rollbackTrans pgt = liftIO $ do
         -- Nothing changes. We just need the transaction to be able to stream events.
         let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
-        PG.rollback conn
-        putResource localPool conn
+
+            giveBackConn :: IO ()
+            giveBackConn = do
+                PG.rollback conn
+                putResource localPool conn
+        giveBackConn `catchAll` \_ ->
+            destroyResource (connectionPool pg) localPool conn
 
 withIOTrans
     :: forall a model event
@@ -352,10 +358,15 @@ withIOTrans pg f = do
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
     cleanup transactionCompleted pgt = do
         let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
-        readIORef transactionCompleted >>= \case
-            True -> PG.commit conn
-            False -> PG.rollback conn
-        putResource localPool conn
+
+            giveBackConn :: IO ()
+            giveBackConn = do
+                readIORef transactionCompleted >>= \case
+                    True -> PG.commit conn
+                    False -> PG.rollback conn
+                putResource localPool conn
+        giveBackConn `catchAll` \_ ->
+            destroyResource (connectionPool pg) localPool conn
 
     prepareTransaction :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
     prepareTransaction conn localPool = do
