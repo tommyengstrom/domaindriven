@@ -11,7 +11,7 @@ It uses `Template Haskell` we generate a Servant server from the specification a
 
 ## How it works
 
-In order to implement a model in `domain-driven` you have to define:
+In order to implement a model in `domaindriven` you have to define:
 - The model (current state)
 - The events
 - How to update the model when new events come in

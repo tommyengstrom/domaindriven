@@ -6,8 +6,6 @@ module DomainDriven
     , CanMutate
     , CbCmd
     , Cmd
-    , defaultApiOptions
-    , defaultServerConfig
     , HandlerType (..)
     , HasApiOptions (..)
     , mapEvent
@@ -22,7 +20,6 @@ module DomainDriven
     , ReadModel (..)
     , RequestType
     , runAction
-    , ServerConfig (..)
     , Stored (..)
     , UUID
     , WriteModel (..)
@@ -30,7 +27,6 @@ module DomainDriven
 where
 
 import Data.UUID
-import DomainDriven.Config
 import DomainDriven.Internal.Class
 import DomainDriven.Internal.NamedJsonFields
     ( NamedJsonFields (..)

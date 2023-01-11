@@ -1,4 +1,4 @@
-# Changelog for domain-driven
+# Changelog for domaindriven
 
 ## 0.5.0
 

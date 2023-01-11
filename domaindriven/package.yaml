@@ -1,6 +1,6 @@
-name:                domain-driven
+name:                domaindriven
 version:             0.5.0
-github:              "tommyengstrom/domain-driven"
+github:              "tommyengstrom/domaindriven"
 license:             BSD3
 author:              "Tommy Engström"
 maintainer:          "tommy@tommyengstrom.com"
@@ -17,7 +17,7 @@ category: Web
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/tommyengstrom/domain-driven#readme>
+description:         Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 
 dependencies:
 - aeson >= 2.0.3.0
@@ -96,11 +96,10 @@ library:
     - uuid >= 1.3.15
     - mtl >= 2.2.2
 tests:
-  domain-driven-test:
+  domaindriven-test:
     main:                Spec.hs
     source-dirs:
       - test
-      - models
     ghc-options:
     - -threaded
     - -rtsopts
@@ -109,7 +108,7 @@ tests:
     - -Wunused-packages
     dependencies:
     - async >= 2.2.4
-    - domain-driven
+    - domaindriven
     - generic-lens >= 2.2.1.0
     - hspec >= 2.9.7
     - http-client >= 0.7.13.1
@@ -126,72 +125,3 @@ tests:
     - uuid >= 1.3.15
     - warp >= 3.3.23
 
-executables:
-  example-simple:
-    main:                Main.hs
-    source-dirs:
-      - examples/simple
-      - models
-    dependencies:
-    - aeson
-    - bytestring
-    - domain-driven
-    - exceptions
-    - mtl
-    - deepseq
-    - containers
-    - openapi3
-    - text
-    - servant-server
-    - servant-openapi3
-    - warp
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -Wall
-    - -Wunused-packages
-  example-store:
-    main:                Main.hs
-    source-dirs:
-      - examples/store
-      - models
-    dependencies:
-    - aeson
-    - bytestring
-    - domain-driven
-    - exceptions
-    - mtl
-    - deepseq
-    - containers
-    - openapi3
-    - text
-    - servant-server
-    - servant-openapi3
-    - warp
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -Wall
-    - -Wunused-packages
-  bench:
-    main:                Main.hs
-    source-dirs:
-      - bench
-      - models
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-s
-    - -Wunused-packages
-    dependencies:
-    - criterion >= 1.5.13.0
-    - deepseq >= 1.4.6.1
-    - domain-driven
-    - generic-lens >= 2.2.1.0
-    - microlens >= 0.4.12.0
-    - postgresql-simple >= 0.6.4
-    - streamly >= 0.8.1.1
-    - unliftio-pool >= 0.2.2.0
-    - unliftio >= 0.2.0.1
