@@ -29,6 +29,7 @@ library
       DomainDriven.Server
       DomainDriven.Server.Config
       DomainDriven.Server.Helpers
+      DomainDriven.Server.Param
       DomainDriven.Server.TH
       DomainDriven.Server.Types
   other-modules:

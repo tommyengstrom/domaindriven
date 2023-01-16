@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedLists #-}
-{-# LANGUAGE TypeApplications #-}
-
 module DomainDriven.Persistance.PostgresIORefStateSpec where
 
 import Control.Concurrent.Async

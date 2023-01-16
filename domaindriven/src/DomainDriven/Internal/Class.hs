@@ -152,31 +152,6 @@ runAction p handleCmd cmd = case handleCmd cmd of
     CbCmd withTrans -> withTrans $ \runTrans -> do
         transactionalUpdate p runTrans
 
-data ApiOptions = ApiOptions
-    { renameConstructor :: String -> String
-    , typenameSeparator :: String
-    , bodyNameBase :: Maybe String
-    }
-    deriving (Generic)
-
-defaultApiOptions :: ApiOptions
-defaultApiOptions =
-    ApiOptions
-        { renameConstructor =
-            \s -> case L.splitAt (on (-) L.length s "Action") s of
-                (x, "Action") -> x
-                _ -> s
-        , typenameSeparator = "_"
-        , bodyNameBase = Nothing
-        }
-
-instance Show ApiOptions where
-    show o =
-        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
-            <> o
-                ^. field @"typenameSeparator"
-            <> "\"}"
-
 -- | Command handler
 --
 -- Expects a command, specified using a one-parameter GADT where the parameter specifies
