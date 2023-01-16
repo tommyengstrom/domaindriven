@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module DomainDriven.Server.Config
@@ -22,6 +23,10 @@ data ServerConfig = ServerConfig
     -- ^ Map of API options for all action GADTs used in the API
     }
     deriving (Show, Generic)
+
+class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
+    apiOptions :: ApiOptions
+    apiOptions = defaultApiOptions
 
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty

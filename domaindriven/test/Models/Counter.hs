@@ -28,7 +28,6 @@ data CounterAction x method return where
         :: P x "numberToAdd" Int
         -> CounterAction x Cmd Int
         -- ^ Add a positive number to the counter
-    deriving (HasApiOptions)
 
 handleAction
     :: CounterAction 'ParamType method a

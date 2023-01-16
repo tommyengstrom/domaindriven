@@ -7,7 +7,6 @@ module DomainDriven
     , CbCmd
     , Cmd
     , HandlerType (..)
-    , HasApiOptions (..)
     , mapEvent
     , mapModel
     , mapResult

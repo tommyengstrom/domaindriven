@@ -167,10 +167,6 @@ runAction p handleCmd cmd = case handleCmd cmd of
     CbCmd withTrans -> withTrans $ \runTrans -> do
         transactionalUpdate p runTrans
 
-class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
-    apiOptions :: ApiOptions
-    apiOptions = defaultApiOptions
-
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> String
     , typenameSeparator :: String
