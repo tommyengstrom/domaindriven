@@ -4,13 +4,9 @@
 
 module DomainDriven.Server
     ( mkServer
-    , module DomainDriven.Internal.NamedFields
-    , HasFieldName (..)
+    , module DomainDriven.Server.Config
     )
 where
 
-import DomainDriven.Internal.HasFieldName
-    ( HasFieldName (..)
-    )
-import DomainDriven.Internal.NamedFields
+import DomainDriven.Server.Config
 import DomainDriven.Server.TH

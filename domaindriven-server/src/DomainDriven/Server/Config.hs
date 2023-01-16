@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module DomainDriven.Config
-    ( module DomainDriven.Config
+module DomainDriven.Server.Config
+    ( module DomainDriven.Server.Config
     , Name
     )
 where

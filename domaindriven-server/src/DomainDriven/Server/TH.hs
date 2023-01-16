@@ -13,8 +13,8 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable (for)
-import DomainDriven.Config (ServerConfig (..))
 import DomainDriven.Internal.Class
+import DomainDriven.Server.Config (ServerConfig (..))
 import DomainDriven.Server.Helpers
 import DomainDriven.Server.Types
 import GHC.Generics (Generic)
