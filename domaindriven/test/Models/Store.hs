@@ -67,40 +67,40 @@ data ItemInfo = ItemInfo
 -- | The store actions
 -- `method` is `Verb` from servant without the returntype, `a`, applied
 data StoreAction :: Action where
-    ListItems :: StoreAction x (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
+    ListItems :: StoreAction (RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])) [ItemInfo]
     Search
-        :: P x "searchPhrase" Text
-        -> StoreAction x Query [ItemInfo]
+        :: Text
+        -> StoreAction Query [ItemInfo]
     ItemAction
-        :: P x "item" ItemKey
-        -> ItemAction x method a
-        -> StoreAction x method a
+        :: ItemKey
+        -> ItemAction method a
+        -> StoreAction method a
     AdminAction
-        :: AdminAction x method a
-        -> StoreAction x method a
+        :: AdminAction method a
+        -> StoreAction method a
 
 data ItemAction :: Action where
-    ItemBuy :: P x "quantity" Quantity -> ItemAction x Cmd ()
-    ItemStockQuantity :: ItemAction x Query Quantity
-    ItemPrice :: ItemAction x Query Price
+    ItemBuy :: Quantity -> ItemAction Cmd ()
+    ItemStockQuantity :: ItemAction Query Quantity
+    ItemPrice :: ItemAction Query Price
 
-data AdminAction x method a where
+data AdminAction :: Action where
     Order
-        :: P x "item" ItemKey
-        -> P x "quantity" Quantity
-        -> AdminAction x CbCmd ()
+        :: ItemKey
+        -> Quantity
+        -> AdminAction CbCmd ()
     Restock
-        :: P x "itemKey" ItemKey
-        -> P x "quantity" Quantity
-        -> AdminAction x Cmd ()
+        :: ItemKey
+        -> Quantity
+        -> AdminAction Cmd ()
     AddItem
-        :: P x "itemName" ItemName
-        -> P x "quantity" Quantity
-        -> P x "price" Price
-        -> AdminAction x Cmd ItemKey
+        :: ItemName
+        -> Quantity
+        -> Price
+        -> AdminAction Cmd ItemKey
     RemoveItem
-        :: P x "item" ItemKey
-        -> AdminAction x Cmd ()
+        :: ItemKey
+        -> AdminAction Cmd ()
 
 -- | The event
 -- Store state of the store is fully defined by

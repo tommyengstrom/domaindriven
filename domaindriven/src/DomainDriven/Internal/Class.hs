@@ -1,4 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -16,7 +15,6 @@ import qualified Data.List as L
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
-import GHC.TypeLits
 import Lens.Micro ((^.))
 import Servant
 import Streamly.Prelude (SerialT)
@@ -35,7 +33,7 @@ type CbCmd = RequestType 'Callback '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
 type CbQuery = RequestType 'Callback '[JSON] (Verb 'GET 200 '[JSON])
 
-type Action = ParamPart -> Type -> Type -> Type
+type Action = Type -> Type -> Type
 
 type family CanMutate method :: Bool where
     CanMutate (RequestType a c (Verb 'GET code cts)) = 'False
@@ -46,19 +44,6 @@ type family CanMutate method :: Bool where
 
 type family GetModelAccess method :: ModelAccess where
     GetModelAccess (RequestType a b c) = a
-
--- | Used as a parameter to the `P` type family on order to determine the focus.
-data ParamPart
-    = ParamName
-    | ParamType
-    deriving (Show)
-
--- | P is used for specifying the parameters of the model.
--- The name will be used as the name in the JSON encoding or the query parameter of the
--- generated server.
-type family P (b :: ParamPart) (name :: Symbol) (a :: Type) where
-    P 'ParamName name ty = Proxy name
-    P 'ParamType name ty = ty
 
 data HandlerType method model event m a where
     Query
@@ -158,7 +143,7 @@ runAction
     :: (MonadUnliftIO m, WriteModel p, model ~ Model p, event ~ Event p)
     => p
     -> ActionHandler model event m cmd
-    -> cmd 'ParamType method ret
+    -> cmd method ret
     -> m ret
 runAction p handleCmd cmd = case handleCmd cmd of
     Query m -> m =<< liftIO (getModel p)
@@ -205,12 +190,12 @@ instance Show ApiOptions where
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
 type ActionHandler model event m c =
-    forall method a. c 'ParamType method a -> HandlerType method model event m a
+    forall method a. c method a -> HandlerType method model event m a
 
 type ActionRunner m c =
     forall method a
      . MonadUnliftIO m
-    => c 'ParamType method a
+    => c method a
     -> m a
 
 -- | Wrapper for stored data

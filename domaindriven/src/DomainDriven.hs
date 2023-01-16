@@ -13,8 +13,6 @@ module DomainDriven
     , mkId
     , ModelAccess (..)
     , NamedJsonFields (..)
-    , P
-    , ParamPart (..)
     , Query
     , ReadModel (..)
     , RequestType

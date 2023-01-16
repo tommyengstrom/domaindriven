@@ -276,7 +276,7 @@ storeModelSpec = describe "Test basic functionality" $ do
     it "Concurrent commands work" $ \(p, _pool) -> do
         -- This test relies on the postgres max connections being reasonably high.
         c0 <- runAction p Store.handleStoreAction Store.ListItems
-        let newItems :: [Store.StoreAction 'ParamType Cmd Store.ItemKey]
+        let newItems :: [Store.StoreAction Cmd Store.ItemKey]
             newItems =
                 replicate
                     n
