@@ -35,7 +35,8 @@ jobs:
         run: echo 'ACTIONS_ALLOW_UNSECURE_COMMANDS=true' >> $GITHUB_ENV
       - name: Update stack
         run: stack update
-
+      - name: Deal with libtinfow issue
+        run: ln -s /lib/x86_64-linux-gnu/libtic.so.6.2 /lib/x86_64-linux-gnu/libtinfow.so.6
       - uses: actions/cache@v2
         name: Cache ~/.stack
         with:
