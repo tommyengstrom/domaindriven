@@ -1,6 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use newtype instead of data" #-}
 
 module DomainDriven.Server.Config
     ( module DomainDriven.Server.Config
@@ -9,18 +12,12 @@ module DomainDriven.Server.Config
 where
 
 import Data.Char (isLower)
-import Data.Function (on)
-import Data.Generics.Product
 import qualified Data.List as L
 import qualified Data.Map as M
-import Data.Proxy
-import DomainDriven.Internal.Class
 import DomainDriven.Server.Param
+import DomainDriven.Server.Types
 import GHC.Generics (Generic)
-import GHC.TypeLits
 import Language.Haskell.TH
-import Lens.Micro ((^.))
-import UnliftIO (MonadUnliftIO)
 import Prelude
 
 -- | Configuration used to generate server
@@ -35,31 +32,6 @@ data ServerConfig = ServerConfig
 class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
     apiOptions :: ApiOptions
     apiOptions = defaultApiOptions
-
-data ApiOptions = ApiOptions
-    { renameConstructor :: String -> String
-    , typenameSeparator :: String
-    , bodyNameBase :: Maybe String
-    }
-    deriving (Generic)
-
-defaultApiOptions :: ApiOptions
-defaultApiOptions =
-    ApiOptions
-        { renameConstructor =
-            \s -> case L.splitAt (on (-) L.length s "Action") s of
-                (x, "Action") -> x
-                _ -> s
-        , typenameSeparator = "_"
-        , bodyNameBase = Nothing
-        }
-
-instance Show ApiOptions where
-    show o =
-        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
-            <> o
-                ^. field @"typenameSeparator"
-            <> "\"}"
 
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig M.empty

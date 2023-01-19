@@ -14,8 +14,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable (for)
 import DomainDriven.Internal.Class
-import DomainDriven.Server.Config (ServerConfig (..))
+import DomainDriven.Server.Config
 import DomainDriven.Server.Helpers
+import DomainDriven.Server.Param
 import DomainDriven.Server.Types
 import GHC.Generics (Generic)
 import Language.Haskell.TH
@@ -350,7 +351,7 @@ mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     eps <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
     opts <- getApiOptions cfg n
-    pure ApiSpec{gadtName = n, endpoints = eps, apiOptions = opts}
+    pure ApiSpec{gadtName = n, endpoints = eps, options = opts}
 
 ------------------------------------------------------------------------------------------
 

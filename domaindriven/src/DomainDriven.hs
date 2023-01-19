@@ -2,7 +2,6 @@ module DomainDriven
     ( Action
     , ActionHandler
     , ActionRunner
-    , ApiOptions (..)
     , CanMutate
     , CbCmd
     , Cmd

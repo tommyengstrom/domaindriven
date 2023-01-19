@@ -1,10 +1,13 @@
 module DomainDriven.Server.Types where
 
 import Control.Monad.State
+import Data.Function (on)
+import Data.Generics.Product
+import qualified Data.List as L
 import Data.Set (Set)
-import DomainDriven.Internal.Class
 import GHC.Generics (Generic)
 import Language.Haskell.TH
+import Lens.Micro ((^.))
 import Prelude
 
 -- Contains infromatiotion of how the API should look, gathered from the Action GADT.
@@ -13,10 +16,35 @@ data ApiSpec = ApiSpec
     -- ^ Name of the GADT representing the command
     , endpoints :: [ApiPiece]
     -- ^ Endpoints created from the constructors of the GADT
-    , apiOptions :: ApiOptions
+    , options :: ApiOptions
     -- ^ The setting to use when generating part of the API
     }
     deriving (Show, Generic)
+
+data ApiOptions = ApiOptions
+    { renameConstructor :: String -> String
+    , typenameSeparator :: String
+    , bodyNameBase :: Maybe String
+    }
+    deriving (Generic)
+
+defaultApiOptions :: ApiOptions
+defaultApiOptions =
+    ApiOptions
+        { renameConstructor =
+            \s -> case L.splitAt (on (-) L.length s "Action") s of
+                (x, "Action") -> x
+                _ -> s
+        , typenameSeparator = "_"
+        , bodyNameBase = Nothing
+        }
+
+instance Show ApiOptions where
+    show o =
+        "ApiOptions {renameConstructor = ***, typenameSeparator = \""
+            <> o
+                ^. field @"typenameSeparator"
+            <> "\"}"
 
 data ActionType
     = Mutable
