@@ -113,9 +113,6 @@ tests:
     - hspec >= 2.9.7
     - microlens >= 0.4.12.0
     - postgresql-simple >= 0.6.4
-    - QuickCheck >= 2.14.2
-    - quickcheck-arbitrary-adt >= 0.3.1.0
-    - quickcheck-classes >= 0.6.5.0
     - streamly >= 0.8.1.1
     - time >=  1.11.1.1
     - unliftio-pool >= 0.2.2.0
