@@ -33,6 +33,9 @@ jobs:
       - name: ACTIONS_ALLOW_UNSECURE_COMMANDS
         id: ACTIONS_ALLOW_UNSECURE_COMMANDS
         run: echo 'ACTIONS_ALLOW_UNSECURE_COMMANDS=true' >> $GITHUB_ENV
+      - name: install packages
+        run: sudo apt install libtinfo6 libtinfo-dev
+
       - name: Update stack
         run: stack update
       - name: Deal with libtinfow issue
