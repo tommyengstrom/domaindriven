@@ -36,7 +36,7 @@ jobs:
       - name: install packages
         run: sudo apt install libtinfo6 libtinfo-dev
       - name: Deal with libtinfow issue
-        run: ln -s /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfow.so.6
+        run: sudo ln -s /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfow.so.6
 
       - name: Update stack
         run: stack update
