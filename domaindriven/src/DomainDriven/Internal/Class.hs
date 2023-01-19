@@ -8,14 +8,10 @@ module DomainDriven.Internal.Class where
 import Control.DeepSeq (NFData)
 import Control.Monad.Reader
 import Data.Aeson
-import Data.Function (on)
-import Data.Generics.Product
 import Data.Kind
-import qualified Data.List as L
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
-import Lens.Micro ((^.))
 import Servant
 import Streamly.Prelude (SerialT)
 import System.Random

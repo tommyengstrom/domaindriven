@@ -4,7 +4,6 @@ import Control.Monad
 import Control.Monad.State
 import Data.Generics.Product
 import qualified Data.List as L
-import DomainDriven.Internal.Class
 import DomainDriven.Internal.Text
 import DomainDriven.Server.Types
 import Language.Haskell.TH
