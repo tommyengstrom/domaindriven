@@ -106,11 +106,12 @@ test-suite domaindriven-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Action.Counter
+      Action.ExtraParam
+      Action.ServerTest
+      Action.Store
       DomainDriven.Internal.NamedJsonFieldsSpec
       DomainDriven.ServerSpec
-      DomainDriven.ServerSpecModel
-      Models.Counter
-      Models.Store
       Paths_domaindriven
   hs-source-dirs:
       test

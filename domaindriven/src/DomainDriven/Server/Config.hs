@@ -56,9 +56,22 @@ getApiOptionsMap =
   where
     nameAndCfg :: Dec -> Q Exp
     nameAndCfg = \case
-        InstanceD _ _ (AppT _ ty@(ConT n)) _ ->
-            [e|($(stringE $ show n), apiOptions @($(pure ty)))|]
+        InstanceD _ _ (AppT klass ty') _ | klass == ConT ''HasApiOptions -> do
+            name <- getActionName ty'
+            [e|
+                ( $(stringE $ show name)
+                , apiOptions @($(appT (pure (ConT name)) (pure WildCardT)))
+                )
+                |]
         d -> fail $ "Expected instance InstanceD but got: " <> show d
+
+    getActionName :: Type -> Q Name
+    getActionName = \case
+        ConT n -> pure n
+        AppT ty _ -> getActionName ty
+        ForallT _ _ ty -> getActionName ty
+        ForallVisT _ ty -> getActionName ty
+        ty -> fail $ "stipExtraParams: Expected to find constructor, got: " <> show ty
 
 ------------------------------------------------------------------------------------------
 -- Some utility functions that can be useful when remapping names

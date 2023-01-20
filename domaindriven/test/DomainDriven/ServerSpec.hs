@@ -2,6 +2,8 @@
 
 module DomainDriven.ServerSpec where
 
+import Action.ServerTest
+import Action.Store
 import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Monad.Catch (try)
@@ -10,8 +12,6 @@ import Data.Text (Text)
 import DomainDriven
 import DomainDriven.Internal.NamedFields
 import DomainDriven.Persistance.ForgetfulInMemory
-import DomainDriven.ServerSpecModel
-import Models.Store
 import Network.HTTP.Client
     ( defaultManagerSettings
     , newManager
@@ -59,7 +59,7 @@ type ExpectedIntersperse =
         :> QueryParam' '[Strict, Required] "intersperse_text" Text
         :> Get '[JSON] Text
 
-$(mkServer testActionConfig ''TestAction)
+$(mkServer testActionConfig ''ServerTestAction)
 
 expectedReverseText :: NF1 "a" "text" Text -> ClientM Text
 expectedReverseText = client (Proxy @ExpectedReverseText)
@@ -94,24 +94,14 @@ withTestServer runTests = do
     -- server <- async . run 9898 $ serve (Proxy @StoreActionApi) undefined
     server <-
         async . run 9898 $
-            serve (Proxy @TestActionApi) $
+            serve (Proxy @ServerTestActionApi) $
                 hoistServer
-                    (Proxy @TestActionApi)
+                    (Proxy @ServerTestActionApi)
                     (Handler . ExceptT . try)
-                    (testActionServer $ runAction p handleAction)
+                    (serverTestActionServer $ runAction p handleAction)
     threadDelay 10000 -- Ensure the server is live when the tests run
     runTests
     cancel server
-
-kuken :: IO ()
-kuken = do
-    p <- createForgetful (\m _ -> m) ()
-    run 9898 $
-        serve (Proxy @TestActionApi) $
-            hoistServer
-                (Proxy @TestActionApi)
-                (Handler . ExceptT . try)
-                (testActionServer $ runAction p handleAction)
 
 spec :: Spec
 spec = do

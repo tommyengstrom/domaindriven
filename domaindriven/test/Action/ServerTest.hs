@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module DomainDriven.ServerSpecModel where
+module Action.ServerTest where
 
 import Control.Monad.Catch
 import qualified Data.List as L
@@ -9,21 +9,21 @@ import qualified Data.Text as T
 import DomainDriven
 import Prelude
 
-data TestAction :: Action where
+data ServerTestAction :: Action where
     ReverseText
         :: P x "text" Text
-        -> TestAction x CbCmd Text
+        -> ServerTestAction x CbCmd Text
     ConcatText
         :: P x "text" Text
         -> P x "string" String
-        -> TestAction x Query Text
+        -> ServerTestAction x Query Text
     SubAction
         :: P x "text" Text
         -> SubAction x method a
-        -> TestAction x method a
+        -> ServerTestAction x method a
     deriving (HasApiOptions)
 
-handleAction :: MonadThrow m => ActionHandler () () m TestAction
+handleAction :: MonadThrow m => ActionHandler () () m ServerTestAction
 handleAction = \case
     ReverseText t -> CbCmd $ \_runTransaction -> pure (T.reverse t)
     ConcatText a b -> Query $ \() -> pure $ a <> T.pack b
