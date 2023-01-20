@@ -2,7 +2,7 @@
 
 module DomainDriven.ServerSpec where
 
-import Action.ExtraParam (extraParamConfig)
+import Action.ExtraParam
 import Action.ServerTest
 import Action.Store
 import Control.Concurrent
@@ -27,6 +27,7 @@ import Prelude
 
 -- import           Test.Hspec.Core.Hooks
 
+$(mkServer extraParamConfig ''ExtraParamAction)
 $(mkServer storeActionConfig ''StoreAction)
 
 --

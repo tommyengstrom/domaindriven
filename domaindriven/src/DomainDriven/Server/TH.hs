@@ -9,9 +9,9 @@ import Control.Monad
 -- import           Control.Monad.Catch            ( MonadThrow(..) )
 import Control.Monad.State
 import Data.Generics.Product
-import qualified Data.List as L
-import qualified Data.Map as M
-import qualified Data.Set as S
+import Data.List qualified as L
+import Data.Map qualified as M
+import Data.Set qualified as S
 import Data.Traversable (for)
 import DomainDriven.Server.Class
 import DomainDriven.Server.Config
@@ -67,9 +67,9 @@ getApiOptions cfg (GadtName n) = case M.lookup (show n) (allApiOptions cfg) of
 getActionDec :: GadtName -> Q Dec
 getActionDec (GadtName n) = do
     cmdType <- reify n
-    let errMsg = fail "Must be GADT with two parameters, HandlerType and return type"
+    let errMsg = fail $ "Expected " <> show n <> "to be a GADT"
     case cmdType of
-        TyConI dec -> pure dec
+        TyConI dec@(DataD _ctx _name params _ _ _) -> fail $ show dec
         ClassI{} -> errMsg
         ClassOpI{} -> errMsg
         FamilyI{} -> errMsg
@@ -112,12 +112,47 @@ guardReturnVar = \case
 
 getConstructors :: Dec -> Q [Con]
 getConstructors = \case
-    DataD _ _ [_x, method, ret] _ cs _ -> do
+    DataD _ _ (last3 -> Just (_x, method, ret)) _ cs _ -> do
         guardMethodVar method
         guardReturnVar ret
         pure cs
     d@DataD{} -> fail $ "Unexpected Action data type: " <> show d
     d -> fail $ "Expected a GADT with two parameters but got: " <> show d
+
+last3 :: [a] -> Maybe (a, a, a)
+last3 = \case
+    [a, b, c] -> Just (a, b, c)
+    [_, _] -> Nothing
+    [_] -> Nothing
+    [] -> Nothing
+    l -> last3 $ tail l
+
+data VarBindings = VarBindings
+    { paramPart :: Name
+    , method :: Name
+    , return :: Name
+    , extra :: [Name]
+    }
+    deriving (Show, Generic, Eq)
+
+getVarBindings :: [TyVarBndr flag] -> Either String VarBindings
+getVarBindings = \case
+    [KindedTV x _ kind, KindedTV method _ StarT, KindedTV ret _ StarT]
+        | kind == ConT (mkName "DomainDriven.Server.Class.ParamPart") ->
+            Right
+                VarBindings
+                    { paramPart = x
+                    , method = method
+                    , return = ret
+                    , extra = []
+                    }
+    [_, _] -> Left errMsg
+    [_] -> Left errMsg
+    [] -> Left errMsg
+    KindedTV n _ _ : l -> over (field @"extra") (n :) <$> getVarBindings l
+    PlainTV n _ : l -> over (field @"extra") (n :) <$> getVarBindings l
+  where
+    errMsg = "getVarBindings: Expected parameters `(x :: ParamPart) method return`"
 
 data Pmatch = Pmatch
     { paramPart :: Name
@@ -176,9 +211,19 @@ matchNormalConstructor con = do
             , finalType = finalType
             }
   where
+    getParamPartVar :: Show a => [TyVarBndr a] -> Either String Name
+    getParamPartVar = \case
+        KindedTV x _spec kind : _ | kind == ConT ''ParamPart -> Right x
+        a : l -> case getParamPartVar l of
+            r@Right{} -> r
+            Left e -> Left $ e <> show a
+        [] -> Left "Expected a constrctor parameterized by `(x :: ParamPart)`, got: "
+
     unconsForall :: Con -> Either String (Name, Con)
     unconsForall = \case
-        ForallC [KindedTV x _spec _kind] _ctx con' -> Right (x, con')
+        ForallC bindings _ctx con' -> do
+            x <- getParamPartVar bindings
+            Right (x, con')
         con' ->
             Left $
                 "Expected a constrctor parameterized by `(x :: ParamPart)`, got: "
@@ -329,7 +374,13 @@ mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     eps <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
     opts <- getApiOptions cfg n
-    pure ApiSpec{gadtName = n, endpoints = eps, options = opts}
+    pure
+        ApiSpec
+            { gadtName = n
+            , extraParamNames = undefined
+            , endpoints = eps
+            , options = opts
+            }
 
 ------------------------------------------------------------------------------------------
 
@@ -475,11 +526,17 @@ mkServerDec spec = do
     let runnerName = mkName "runner"
 
     let gadtType :: GadtType
-        gadtType = GadtType $ spec ^. field @"gadtName" . typed @Name . to ConT
+        gadtType =
+            GadtType $
+                spec
+                    ^. field @"gadtName"
+                        . typed @Name
+                        . to ConT
+                        . to (`AppT` VarT (mkName "kuken"))
     serverType <-
         liftQ
             [t|
-                forall m
+                forall m kuken
                  . MonadUnliftIO m
                 => ActionRunner m $(pure $ unGadtType gadtType)
                 -> ServerT $(pure $ ConT apiTypeName) m
@@ -538,11 +595,16 @@ mkNamedFieldsType cName = \case
         pure . Just $ foldl addNFxParam nfType args
 
 mkQueryHandlerSignature :: GadtType -> ConstructorArgs -> EpReturnType -> Type
-mkQueryHandlerSignature (GadtType actionType) (ConstructorArgs args) (EpReturnType retType) =
-    withForall $ mkFunction $ actionRunner actionType : fmap snd args <> [ret]
-  where
-    ret :: Type
-    ret = AppT (VarT runnerMonadName) retType
+mkQueryHandlerSignature
+    (GadtType actionType)
+    (ConstructorArgs args)
+    (EpReturnType retType) =
+        withForall $
+            mkFunction $
+                actionRunner actionType : fmap snd args <> [ret]
+      where
+        ret :: Type
+        ret = AppT (VarT runnerMonadName) retType
 
 -- | Makes command handler, e.g.
 --  counterCmd_AddToCounterHandler ::

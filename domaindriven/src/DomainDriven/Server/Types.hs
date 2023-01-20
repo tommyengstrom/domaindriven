@@ -3,7 +3,7 @@ module DomainDriven.Server.Types where
 import Control.Monad.State
 import Data.Function (on)
 import Data.Generics.Product
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.Set (Set)
 import GHC.Generics (Generic)
 import Language.Haskell.TH
@@ -14,6 +14,7 @@ import Prelude
 data ApiSpec = ApiSpec
     { gadtName :: GadtName
     -- ^ Name of the GADT representing the command
+    , extraParamNames :: [Name]
     , endpoints :: [ApiPiece]
     -- ^ Endpoints created from the constructors of the GADT
     , options :: ApiOptions
