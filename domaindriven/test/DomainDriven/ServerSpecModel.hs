@@ -7,7 +7,6 @@ import qualified Data.List as L
 import Data.Text (Text)
 import qualified Data.Text as T
 import DomainDriven
-import DomainDriven.Config
 import Prelude
 
 data TestAction :: Action where

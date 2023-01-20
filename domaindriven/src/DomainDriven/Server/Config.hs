@@ -29,7 +29,7 @@ data ServerConfig = ServerConfig
     }
     deriving (Show, Generic)
 
-class HasApiOptions (action :: ParamPart -> Type -> Type -> Type) where
+class HasApiOptions (action :: Action) where
     apiOptions :: ApiOptions
     apiOptions = defaultApiOptions
 

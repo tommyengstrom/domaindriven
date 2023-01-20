@@ -9,7 +9,6 @@ import Control.Monad.Catch
 import Data.Aeson
 import Data.Typeable (Typeable)
 import DomainDriven
-import DomainDriven.Config
 import GHC.Generics (Generic)
 import Prelude
 
@@ -21,7 +20,7 @@ data CounterEvent
     | CounterDecreased
     deriving (Show, Generic, ToJSON, FromJSON, NFData)
 
-data CounterAction x method return where
+data CounterAction :: Action where
     GetCounter :: CounterAction x Query Int
     IncreaseCounter :: CounterAction x Cmd Int
     DecreaseCounter :: CounterAction x Cmd Int

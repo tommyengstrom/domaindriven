@@ -17,6 +17,8 @@ import DomainDriven.Server.Class as X
     , Cmd
     , HandlerType (..)
     , ModelAccess (..)
+    , P
+    , ParamPart (..)
     , Query
     , RequestType
     , mapEvent
@@ -25,7 +27,8 @@ import DomainDriven.Server.Class as X
     , runAction
     )
 import DomainDriven.Server.Config as X
-    ( ServerConfig
+    ( HasApiOptions (..)
+    , ServerConfig
     , mkServerConfig
     )
 import DomainDriven.Server.TH as X (mkServer)

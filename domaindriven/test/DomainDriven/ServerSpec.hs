@@ -8,8 +8,8 @@ import Control.Monad.Catch (try)
 import Control.Monad.Except
 import Data.Text (Text)
 import DomainDriven
+import DomainDriven.Internal.NamedFields
 import DomainDriven.Persistance.ForgetfulInMemory
-import DomainDriven.Server
 import DomainDriven.ServerSpecModel
 import Models.Store
 import Network.HTTP.Client

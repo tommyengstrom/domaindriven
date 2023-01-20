@@ -26,7 +26,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable
 import DomainDriven
-import DomainDriven.Config
 import GHC.Generics (Generic)
 import Servant
 import Prelude
