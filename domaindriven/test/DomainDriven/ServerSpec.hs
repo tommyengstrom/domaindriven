@@ -2,16 +2,19 @@
 
 module DomainDriven.ServerSpec where
 
+import Action.ExtraParam (extraParamConfig)
 import Action.ServerTest
 import Action.Store
 import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Monad.Catch (try)
 import Control.Monad.Except
+import Data.Map qualified as M
 import Data.Text (Text)
 import DomainDriven
 import DomainDriven.Internal.NamedFields
 import DomainDriven.Persistance.ForgetfulInMemory
+import DomainDriven.Server.Config (ServerConfig (..))
 import Network.HTTP.Client
     ( defaultManagerSettings
     , newManager
@@ -126,3 +129,7 @@ spec = do
             it "Produces the expected parameters for subserver" $ do
                 r <- runClientM (expectedIntersperseText "hello" "-=") clientEnv
                 r `shouldBe` Right "h=-=e=-=l=-=l=-=o"
+    describe "Supports extra parameters on Actions" $ do
+        it "Can get apiOptions with one extra paramter" $ do
+            M.lookup "Action.ExtraParam.ExtraParamAction" (allApiOptions extraParamConfig)
+                `shouldSatisfy` not . null

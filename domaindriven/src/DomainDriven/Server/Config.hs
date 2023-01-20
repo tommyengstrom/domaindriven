@@ -18,6 +18,7 @@ import DomainDriven.Server.Class
 import DomainDriven.Server.Types
 import GHC.Generics (Generic)
 import Language.Haskell.TH
+import Lens.Micro ((%~), _2)
 import Prelude
 
 -- | Configuration used to generate server
@@ -57,20 +58,18 @@ getApiOptionsMap =
     nameAndCfg :: Dec -> Q Exp
     nameAndCfg = \case
         InstanceD _ _ (AppT klass ty') _ | klass == ConT ''HasApiOptions -> do
-            name <- getActionName ty'
+            (name, ty) <- getNameAndTypePattern ty'
             [e|
                 ( $(stringE $ show name)
-                , apiOptions @($(appT (pure (ConT name)) (pure WildCardT)))
+                , apiOptions @($(pure ty))
                 )
                 |]
         d -> fail $ "Expected instance InstanceD but got: " <> show d
 
-    getActionName :: Type -> Q Name
-    getActionName = \case
-        ConT n -> pure n
-        AppT ty _ -> getActionName ty
-        ForallT _ _ ty -> getActionName ty
-        ForallVisT _ ty -> getActionName ty
+    getNameAndTypePattern :: Type -> Q (Name, Type)
+    getNameAndTypePattern = \case
+        ty@(ConT n) -> pure (n, ty)
+        AppT ty _ -> (_2 %~ (`AppT` WildCardT)) <$> getNameAndTypePattern ty
         ty -> fail $ "stipExtraParams: Expected to find constructor, got: " <> show ty
 
 ------------------------------------------------------------------------------------------

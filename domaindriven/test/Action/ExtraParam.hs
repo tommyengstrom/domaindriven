@@ -25,4 +25,4 @@ handleExtraParamAction = \case
     ReverseText t -> CbCmd $ \_runTransaction -> pure (T.reverse t)
     ConcatText a b -> Query $ \() -> pure $ a <> T.pack b
 
-$(mkServerConfig "testActionConfig")
+$(mkServerConfig "extraParamConfig")
