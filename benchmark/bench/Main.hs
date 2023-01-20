@@ -7,7 +7,7 @@ import Criterion.Main
 import Data.Generics.Product
 import qualified Database.PostgreSQL.Simple as PG
 import DomainDriven
-import DomainDriven.Internal.Class (toStored)
+import DomainDriven.Persistance.Class (toStored)
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
     ( getEventTableName
@@ -25,9 +25,9 @@ import Models.Counter as Counter
 import qualified Streamly.Prelude as Stream
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
-import Prelude
-import UnliftIO.Pool
 import UnliftIO (liftIO)
+import UnliftIO.Pool
+import Prelude
 
 -- import           Text.Pretty.Simple             ( pPrint )
 

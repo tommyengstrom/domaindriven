@@ -9,7 +9,7 @@ import Data.Traversable
 import Data.UUID (nil)
 import qualified Data.UUID.V4 as V4
 import Database.PostgreSQL.Simple
-import DomainDriven.Internal.Class
+import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
     ( getEventTableName

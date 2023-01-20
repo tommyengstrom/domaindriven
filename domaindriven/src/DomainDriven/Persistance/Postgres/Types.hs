@@ -9,7 +9,7 @@ import Data.UUID (UUID)
 import Database.PostgreSQL.Simple (Connection)
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.FromField as FF
-import DomainDriven.Internal.Class
+import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import UnliftIO.Pool (LocalPool)
 import Prelude

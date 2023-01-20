@@ -4,7 +4,7 @@ import Data.Aeson
 import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
-import DomainDriven.Internal.Class
+import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal
     ( createEventTable'
     , mkEventQuery

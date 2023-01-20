@@ -14,7 +14,7 @@ where
 import Data.Char (isLower)
 import qualified Data.List as L
 import qualified Data.Map as M
-import DomainDriven.Server.Param
+import DomainDriven.Server.Class
 import DomainDriven.Server.Types
 import GHC.Generics (Generic)
 import Language.Haskell.TH

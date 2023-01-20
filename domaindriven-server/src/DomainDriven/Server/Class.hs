@@ -3,18 +3,13 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DomainDriven.Internal.Class where
+module DomainDriven.Server.Class where
 
-import Control.DeepSeq (NFData)
 import Control.Monad.Reader
-import Data.Aeson
 import Data.Kind
-import Data.Time
-import Data.UUID (UUID)
-import GHC.Generics (Generic)
+import DomainDriven.Persistance.Class
+import GHC.TypeLits
 import Servant
-import Streamly.Prelude (SerialT)
-import System.Random
 import UnliftIO
 import Prelude
 
@@ -33,7 +28,11 @@ type CbCmd = RequestType 'Callback '[JSON] (Verb 'POST 200 '[JSON])
 type Query = RequestType 'Direct '[JSON] (Verb 'GET 200 '[JSON])
 type CbQuery = RequestType 'Callback '[JSON] (Verb 'GET 200 '[JSON])
 
-type Action = Type -> Type -> Type
+-- | The kind of an Action, defined with a GADT as:
+-- data MyAction :: Action where
+--    ThisAction :: P x "count" Int -> MyAction x 'Cmd Int
+--    ThatAction :: P x "description" Text -> MyAction x 'Cmd ()
+type Action = ParamPart -> Type -> Type -> Type
 
 type family CanMutate method :: Bool where
     CanMutate (RequestType a c (Verb 'GET code cts)) = 'False
@@ -41,6 +40,19 @@ type family CanMutate method :: Bool where
     CanMutate (RequestType a c (Verb 'PUT code cts)) = 'True
     CanMutate (RequestType a c (Verb 'PATCH code cts)) = 'True
     CanMutate (RequestType a c (Verb 'DELETE code cts)) = 'True
+
+-- | Used as a parameter to the `P` type family on order to determine the focus.
+data ParamPart
+    = ParamName
+    | ParamType
+    deriving (Show)
+
+-- | P is used for specifying the parameters of the model.
+-- The name will be used as the name in the JSON encoding or the query parameter of the
+-- generated server.
+type family P (x :: ParamPart) (name :: Symbol) (a :: Type) where
+    P 'ParamName name ty = Proxy name
+    P 'ParamType name ty = ty
 
 type family GetModelAccess method :: ModelAccess where
     GetModelAccess (RequestType a b c) = a
@@ -116,20 +128,7 @@ mapResult f = \case
         pure (f . ret, evs)
     CbCmd withTrans -> CbCmd $ \transact -> f <$> withTrans transact
 
-runAction
-    :: (MonadUnliftIO m, WriteModel p, model ~ Model p, event ~ Event p)
-    => p
-    -> ActionHandler model event m cmd
-    -> cmd method ret
-    -> m ret
-runAction p handleCmd cmd = case handleCmd cmd of
-    Query m -> m =<< liftIO (getModel p)
-    CbQuery m -> m (liftIO (getModel p))
-    Cmd m -> transactionalUpdate p m
-    CbCmd withTrans -> withTrans $ \runTrans -> do
-        transactionalUpdate p runTrans
-
--- | Command handler
+-- | Action handler
 --
 -- Expects a command, specified using a one-parameter GADT where the parameter specifies
 -- the return type.
@@ -142,10 +141,23 @@ runAction p handleCmd cmd = case handleCmd cmd of
 -- The resulting events will be applied to the current state so that no other command can
 -- run and generate events on the same state.
 type ActionHandler model event m c =
-    forall method a. c method a -> HandlerType method model event m a
+    forall method a. c 'ParamType method a -> HandlerType method model event m a
 
 type ActionRunner m c =
     forall method a
      . MonadUnliftIO m
-    => c method a
+    => c 'ParamType method a
     -> m a
+
+runAction
+    :: (MonadUnliftIO m, WriteModel p, model ~ Model p, event ~ Event p)
+    => p
+    -> ActionHandler model event m cmd
+    -> cmd 'ParamType method ret
+    -> m ret
+runAction p handleCmd cmd = case handleCmd cmd of
+    Query m -> m =<< liftIO (getModel p)
+    CbQuery m -> m (liftIO (getModel p))
+    Cmd m -> transactionalUpdate p m
+    CbCmd withTrans -> withTrans $ \runTrans -> do
+        transactionalUpdate p runTrans

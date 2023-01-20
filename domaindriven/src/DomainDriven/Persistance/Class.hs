@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DomainDriven.Internal.Class where
+module DomainDriven.Persistance.Class where
 
 import Control.DeepSeq (NFData)
 import Control.Monad.Reader

@@ -27,11 +27,13 @@ source-repository head
 library
   exposed-modules:
       DomainDriven
-      DomainDriven.Server
+      DomainDriven.Internal.HasFieldName
+      DomainDriven.Internal.NamedFields
+      DomainDriven.Internal.NamedJsonFields
+      DomainDriven.Internal.Text
+      DomainDriven.Server.Class
       DomainDriven.Server.Config
       DomainDriven.Server.Helpers
-      DomainDriven.Server.Internal.Class
-      DomainDriven.Server.Param
       DomainDriven.Server.TH
       DomainDriven.Server.Types
   other-modules:

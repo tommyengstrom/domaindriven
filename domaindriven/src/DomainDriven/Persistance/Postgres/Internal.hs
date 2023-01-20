@@ -14,7 +14,7 @@ import qualified Data.Sequence as Seq
 import Data.String
 import Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.Cursor as Cursor
-import DomainDriven.Internal.Class
+import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
 import Lens.Micro

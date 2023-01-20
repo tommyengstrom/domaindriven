@@ -13,10 +13,9 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Traversable (for)
-import DomainDriven.Internal.Class
+import DomainDriven.Server.Class
 import DomainDriven.Server.Config
 import DomainDriven.Server.Helpers
-import DomainDriven.Server.Param
 import DomainDriven.Server.Types
 import GHC.Generics (Generic)
 import Language.Haskell.TH
@@ -126,27 +125,6 @@ data Pmatch = Pmatch
     , paramType :: Type
     }
     deriving (Show, Generic)
-
-sampleP :: Type
-sampleP =
-    AppT
-        ( AppT
-            ( AppT
-                (ConT (mkName "DomainDriven.Internal.Class.P"))
-                (VarT (mkName "x_7566047373983226774"))
-            )
-            (LitT (StrTyLit "something_more"))
-        )
-        ( AppT
-            ( AppT
-                ( AppT
-                    (ConT (mkName "DomainDriven.ServerSpecModel.SubAction"))
-                    (VarT (mkName "x_7566047373983226774"))
-                )
-                (VarT (mkName "method_7566047373983226775"))
-            )
-            (VarT (mkName "a_7566047373983226776"))
-        )
 
 data ConstructorMatch = ConstructorMatch
     { xParam :: Name
