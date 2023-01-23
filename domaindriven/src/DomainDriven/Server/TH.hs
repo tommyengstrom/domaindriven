@@ -7,6 +7,7 @@ module DomainDriven.Server.TH where
 import Control.Monad
 
 import Control.Monad.State
+import Data.Bifunctor
 import Data.Generics.Product
 import Data.List qualified as L
 import Data.Map qualified as M
@@ -258,7 +259,10 @@ matchSubActionConstructor con = do
   where
     unconsForall :: Con -> Either String (VarBindings, Con)
     unconsForall = \case
-        ForallC params _ctx con' -> (,con') <$> getVarBindings params
+        ForallC params _ctx con' ->
+            first (("unconsForall: " <> show params) <>) $
+                (,con')
+                    <$> getVarBindings params
         con' ->
             Left $
                 "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
@@ -392,7 +396,7 @@ mkServerSpec cfg n = do
 
 mkSubServerSpec :: ServerConfig -> SubActionMatch -> Q ApiSpec
 mkSubServerSpec cfg subAction = do
-    (dec, _) <- getActionDec name
+    (dec, _) <- getActionDec name -- We must not use the bindings or we'd end up with different names
     eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
     opts <- getApiOptions cfg name
     pure
