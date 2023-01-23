@@ -28,7 +28,7 @@ import Prelude
 -- import           Test.Hspec.Core.Hooks
 
 $(mkServer extraParamConfig ''ExtraParamAction)
-$(mkServer storeActionConfig ''StoreAction)
+-- $(mkServer storeActionConfig ''StoreAction)
 
 --
 
