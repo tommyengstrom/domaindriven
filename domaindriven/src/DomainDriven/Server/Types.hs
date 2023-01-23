@@ -14,13 +14,21 @@ import Prelude
 data ApiSpec = ApiSpec
     { gadtName :: GadtName
     -- ^ Name of the GADT representing the command
-    , extraParamNames :: [Name]
+    , varBindings :: VarBindings
     , endpoints :: [ApiPiece]
     -- ^ Endpoints created from the constructors of the GADT
     , options :: ApiOptions
     -- ^ The setting to use when generating part of the API
     }
     deriving (Show, Generic)
+
+data VarBindings = VarBindings
+    { paramPart :: Name
+    , method :: Name
+    , return :: Name
+    , extra :: [TyVarBndr ()]
+    }
+    deriving (Show, Generic, Eq)
 
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> String
@@ -66,7 +74,13 @@ data HandlerSettings = HandlerSettings
 newtype ConstructorName = ConstructorName Name deriving (Show, Generic, Eq)
 newtype EpReturnType = EpReturnType Type deriving (Show, Generic, Eq)
 newtype GadtName = GadtName Name deriving (Show, Generic, Eq)
-newtype GadtType = GadtType {unGadtType :: Type} deriving (Show, Generic, Eq)
+
+data GadtType = GadtType
+    { getGadtType :: Type
+    , extraParams :: [TyVarBndr ()]
+    }
+    deriving (Show, Generic, Eq)
+
 newtype UrlSegment = UrlSegment String deriving (Show, Generic, Eq)
 newtype ConstructorArgs = ConstructorArgs [(String, Type)] deriving (Show, Generic, Eq)
 newtype Runner = Runner Type deriving (Show, Generic, Eq)

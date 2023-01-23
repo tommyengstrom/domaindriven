@@ -6,7 +6,6 @@ module DomainDriven.Server.TH where
 
 import Control.Monad
 
--- import           Control.Monad.Catch            ( MonadThrow(..) )
 import Control.Monad.State
 import Data.Generics.Product
 import Data.List qualified as L
@@ -64,12 +63,16 @@ getApiOptions cfg (GadtName n) = case M.lookup (show n) (allApiOptions cfg) of
                 <> "\n - The instance is not visible from where `mkServerConfig` is run."
                 <> "\n - The `ServerConfig` instance was manually defined and not complete."
 
-getActionDec :: GadtName -> Q Dec
+getActionDec :: GadtName -> Q (Dec, VarBindings)
 getActionDec (GadtName n) = do
     cmdType <- reify n
     let errMsg = fail $ "Expected " <> show n <> "to be a GADT"
     case cmdType of
-        TyConI dec@(DataD _ctx _name params _ _ _) -> fail $ show dec
+        TyConI dec@(DataD _ctx _name params _ _ _) ->
+            case getVarBindings params of
+                Right b -> pure (dec, b)
+                Left err -> fail $ "getActionDec: " <> err
+        TyConI{} -> errMsg
         ClassI{} -> errMsg
         ClassOpI{} -> errMsg
         FamilyI{} -> errMsg
@@ -127,18 +130,10 @@ last3 = \case
     [] -> Nothing
     l -> last3 $ tail l
 
-data VarBindings = VarBindings
-    { paramPart :: Name
-    , method :: Name
-    , return :: Name
-    , extra :: [Name]
-    }
-    deriving (Show, Generic, Eq)
-
-getVarBindings :: [TyVarBndr flag] -> Either String VarBindings
-getVarBindings = \case
+getVarBindings :: [TyVarBndr ()] -> Either String VarBindings
+getVarBindings varBinds = case varBinds of
     [KindedTV x _ kind, KindedTV method _ StarT, KindedTV ret _ StarT]
-        | kind == ConT (mkName "DomainDriven.Server.Class.ParamPart") ->
+        | kind == ConT ''ParamPart ->
             Right
                 VarBindings
                     { paramPart = x
@@ -146,13 +141,18 @@ getVarBindings = \case
                     , return = ret
                     , extra = []
                     }
+        | otherwise ->
+            Left $
+                "getVarBindings: Expected parameter of kind ParamPart, got: "
+                    <> show varBinds
     [_, _] -> Left errMsg
     [_] -> Left errMsg
     [] -> Left errMsg
-    KindedTV n _ _ : l -> over (field @"extra") (n :) <$> getVarBindings l
-    PlainTV n _ : l -> over (field @"extra") (n :) <$> getVarBindings l
+    p : l -> over (field @"extra") (p :) <$> getVarBindings l
   where
-    errMsg = "getVarBindings: Expected parameters `(x :: ParamPart) method return`"
+    errMsg =
+        "getVarBindings: Expected parameters `(x :: ParamPart) method return`, got: "
+            <> show varBinds
 
 data Pmatch = Pmatch
     { paramPart :: Name
@@ -372,12 +372,13 @@ mkApiPiece cfg con = do
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
-    eps <- traverse (mkApiPiece cfg) =<< getConstructors =<< getActionDec n
+    (dec, varBindings) <- getActionDec n
+    eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
         ApiSpec
             { gadtName = n
-            , extraParamNames = undefined
+            , varBindings = varBindings
             , endpoints = eps
             , options = opts
             }
@@ -523,24 +524,50 @@ mkServerDec spec = do
     apiTypeName <- askApiTypeName
     serverName <- askServerName
 
-    let runnerName = mkName "runner"
+    let runnerName :: Name
+        runnerName = mkName "runner"
 
-    let gadtType :: GadtType
+        gadtType :: GadtType
         gadtType =
-            GadtType $
-                spec
-                    ^. field @"gadtName"
-                        . typed @Name
-                        . to ConT
-                        . to (`AppT` VarT (mkName "kuken"))
-    serverType <-
-        liftQ
-            [t|
-                forall m kuken
-                 . MonadUnliftIO m
-                => ActionRunner m $(pure $ unGadtType gadtType)
-                -> ServerT $(pure $ ConT apiTypeName) m
-                |]
+            GadtType
+                { getGadtType =
+                    L.foldl'
+                        AppT
+                        ( spec
+                            ^. field @"gadtName"
+                                . typed @Name
+                                . to ConT
+                        )
+                        ( spec
+                            ^.. field @"varBindings"
+                                . field @"extra"
+                                . folded
+                                . typed @Name
+                                . to VarT
+                        )
+                , extraParams =
+                    spec
+                        ^. field @"varBindings"
+                            . field @"extra"
+                }
+
+        actionRunner' :: Type
+        actionRunner' =
+            ConT ''ActionRunner
+                `AppT` VarT runnerMonadName
+                `AppT` getGadtType gadtType
+
+        server :: Type
+        server =
+            ConT ''ServerT
+                `AppT` ConT apiTypeName
+                `AppT` VarT runnerMonadName
+
+        serverType :: Type
+        serverType =
+            withForall
+                (spec ^. field' @"varBindings" . field' @"extra")
+                (ArrowT `AppT` actionRunner' `AppT` server)
 
     -- ret <- liftQ [t| Server $(pure $ ConT apiTypeName) |]
     let serverSigDec :: Dec
@@ -563,11 +590,23 @@ mkServerDec spec = do
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
-withForall :: Type -> Type
-withForall =
+withForall :: [TyVarBndr ()] -> Type -> Type
+withForall extra =
     ForallT
-        [PlainTV runnerMonadName SpecifiedSpec]
-        [ConT ''MonadUnliftIO `AppT` VarT runnerMonadName]
+        bindings
+        varConstraints
+  where
+    bindings :: [TyVarBndr Specificity]
+    bindings =
+        KindedTV runnerMonadName SpecifiedSpec (ArrowT `AppT` StarT `AppT` StarT)
+            : ( extra
+                    & traversed %~ \case
+                        PlainTV n _ -> PlainTV n SpecifiedSpec
+                        KindedTV n _ k -> KindedTV n SpecifiedSpec k
+              )
+
+    varConstraints :: [Type]
+    varConstraints = [ConT ''MonadUnliftIO `AppT` VarT runnerMonadName]
 
 actionRunner :: Type -> Type
 actionRunner runnerGADT =
@@ -596,10 +635,10 @@ mkNamedFieldsType cName = \case
 
 mkQueryHandlerSignature :: GadtType -> ConstructorArgs -> EpReturnType -> Type
 mkQueryHandlerSignature
-    (GadtType actionType)
+    (GadtType actionType extraParams)
     (ConstructorArgs args)
     (EpReturnType retType) =
-        withForall $
+        withForall extraParams $
             mkFunction $
                 actionRunner actionType : fmap snd args <> [ret]
       where
@@ -610,13 +649,13 @@ mkQueryHandlerSignature
 --  counterCmd_AddToCounterHandler ::
 --    ActionRunner m CounterCmd -> NamedFields1 "CounterCmd_AddToCounter" Int -> m Int
 mkCmdHandlerSignature
-    :: Type -> ConstructorName -> ConstructorArgs -> EpReturnType -> ServerGenM Type
-mkCmdHandlerSignature actionType cName cArgs (EpReturnType retType) = do
+    :: GadtType -> ConstructorName -> ConstructorArgs -> EpReturnType -> ServerGenM Type
+mkCmdHandlerSignature gadt cName cArgs (EpReturnType retType) = do
     nfArgs <- mkNamedFieldsType cName cArgs
     pure $
-        withForall $
+        withForall (gadt ^. field @"extraParams") $
             mkFunction $
-                [actionRunner actionType]
+                [actionRunner (gadt ^. field @"getGadtType")]
                     <> maybe [] pure nfArgs
                     <> [ret]
   where
@@ -631,140 +670,141 @@ mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
 mkApiPieceHandler :: GadtType -> ApiPiece -> ServerGenM [Dec]
-mkApiPieceHandler gadtType@(GadtType actionType') apiPiece = enterApiPiece apiPiece $ do
-    case apiPiece of
-        Endpoint _cName cArgs _hs Immutable ty -> do
-            let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[(String, Type)]
-            varNames <- liftQ $ replicateM nrArgs (newName "arg")
-            handlerName <- askHandlerName
-            runnerName <- liftQ $ newName "runner"
+mkApiPieceHandler gadt apiPiece =
+    enterApiPiece apiPiece $ do
+        case apiPiece of
+            Endpoint _cName cArgs _hs Immutable ty -> do
+                let nrArgs :: Int
+                    nrArgs = length $ cArgs ^. typed @[(String, Type)]
+                varNames <- liftQ $ replicateM nrArgs (newName "arg")
+                handlerName <- askHandlerName
+                runnerName <- liftQ $ newName "runner"
 
-            let funSig :: Dec
-                funSig =
-                    SigD handlerName $
-                        mkQueryHandlerSignature gadtType cArgs ty
+                let funSig :: Dec
+                    funSig =
+                        SigD handlerName $
+                            mkQueryHandlerSignature gadt cArgs ty
 
-                funBodyBase =
-                    AppE (VarE runnerName) $
-                        foldl
+                    funBodyBase =
+                        AppE (VarE runnerName) $
+                            foldl
+                                AppE
+                                (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                                (fmap VarE varNames)
+
+                    funBody = case ty ^. typed of
+                        TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
+                        _ -> pure $ funBodyBase
+                funClause <-
+                    liftQ $
+                        clause
+                            (fmap (pure . VarP) (runnerName : varNames))
+                            (normalB [|$(funBody)|])
+                            []
+                pure [funSig, FunD handlerName [funClause]]
+            Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
+                let nrArgs :: Int
+                    nrArgs = length $ cArgs ^. typed @[(String, Type)]
+                varNames <- liftQ $ replicateM nrArgs (newName "arg")
+                handlerName <- askHandlerName
+                runnerName <- liftQ $ newName "runner"
+                let varPat :: Pat
+                    varPat = ConP nfName [] (fmap VarP varNames)
+
+                    nfName :: Name
+                    nfName = mkName $ "NF" <> show nrArgs
+
+                funSig <- SigD handlerName <$> mkCmdHandlerSignature gadt cName cArgs ty
+
+                let funBodyBase =
+                        AppE (VarE runnerName) $
+                            foldl
+                                AppE
+                                (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                                (fmap VarE varNames)
+
+                    funBody = case ty ^. typed of
+                        TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
+                        _ -> pure $ funBodyBase
+                funClause <-
+                    liftQ $
+                        clause
+                            (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                            (normalB [|$(funBody)|])
+                            []
+                pure [funSig, FunD handlerName [funClause]]
+            Endpoint _cName cArgs _hs Mutable ty -> do
+                -- FIXME: For non-JSON request bodies we support only one argument.
+                -- Combining JSON with other content types do not work properly at this point.
+                -- It could probably be fixed by adding MimeRender instances to NamedField1
+                -- that just uses the underlying MimeRender.
+                let nrArgs :: Int
+                    nrArgs = length $ cArgs ^. typed @[(String, Type)]
+                unless (nrArgs < 2) $
+                    fail "Only one argument is supported for non-JSON request bodies"
+                varName <- liftQ $ newName "arg"
+                handlerName <- askHandlerName
+                runnerName <- liftQ $ newName "runner"
+                let varPat :: Pat
+                    varPat = VarP varName
+
+                let funSig :: Dec
+                    funSig = SigD handlerName $ mkQueryHandlerSignature gadt cArgs ty
+
+                    funBodyBase =
+                        AppE (VarE runnerName) $
                             AppE
-                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                            (fmap VarE varNames)
+                                (ConE $ apiPiece ^. typed @ConstructorName . typed)
+                                (VarE varName)
 
-                funBody = case ty ^. typed of
-                    TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
-                    _ -> pure $ funBodyBase
-            funClause <-
-                liftQ $
-                    clause
-                        (fmap (pure . VarP) (runnerName : varNames))
-                        (normalB [|$(funBody)|])
-                        []
-            pure [funSig, FunD handlerName [funClause]]
-        Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
-            let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[(String, Type)]
-            varNames <- liftQ $ replicateM nrArgs (newName "arg")
-            handlerName <- askHandlerName
-            runnerName <- liftQ $ newName "runner"
-            let varPat :: Pat
-                varPat = ConP nfName [] (fmap VarP varNames)
+                    funBody = case ty ^. typed of
+                        TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
+                        _ -> pure $ funBodyBase
+                funClause <-
+                    liftQ $
+                        clause
+                            (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                            (normalB [|$(funBody)|])
+                            []
+                pure [funSig, FunD handlerName [funClause]]
+            SubApi cName cArgs spec -> do
+                -- Apply the arguments to the constructor before referencing the subserver
+                varNames <- liftQ $ replicateM (length (cArgs ^. typed @[(String, Type)])) (newName "arg")
+                handlerName <- askHandlerName
+                targetApiTypeName <- enterApi spec askApiTypeName
+                targetServer <- enterApi spec askServerName
+                runnerName <- liftQ $ newName "runner"
 
-                nfName :: Name
-                nfName = mkName $ "NF" <> show nrArgs
+                funSig <- liftQ $ do
+                    let params =
+                            withForall (spec ^. field @"varBindings" . field @"extra") $
+                                mkFunction $
+                                    [actionRunner (gadt ^. field @"getGadtType")]
+                                        <> cArgs ^.. typed @[(String, Type)] . folded . _2
+                                        <> [ ConT ''ServerT
+                                                `AppT` (ConT targetApiTypeName)
+                                                `AppT` (VarT runnerMonadName)
+                                           ]
+                    SigD handlerName <$> pure params
 
-            funSig <- SigD handlerName <$> mkCmdHandlerSignature actionType' cName cArgs ty
-
-            let funBodyBase =
-                    AppE (VarE runnerName) $
-                        foldl
-                            AppE
-                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                            (fmap VarE varNames)
-
-                funBody = case ty ^. typed of
-                    TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
-                    _ -> pure $ funBodyBase
-            funClause <-
-                liftQ $
-                    clause
-                        (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                        (normalB [|$(funBody)|])
-                        []
-            pure [funSig, FunD handlerName [funClause]]
-        Endpoint _cName cArgs _hs Mutable ty -> do
-            -- FIXME: For non-JSON request bodies we support only one argument.
-            -- Combining JSON with other content types do not work properly at this point.
-            -- It could probably be fixed by adding MimeRender instances to NamedField1
-            -- that just uses the underlying MimeRender.
-            let nrArgs :: Int
-                nrArgs = length $ cArgs ^. typed @[(String, Type)]
-            unless (nrArgs < 2) $
-                fail "Only one argument is supported for non-JSON request bodies"
-            varName <- liftQ $ newName "arg"
-            handlerName <- askHandlerName
-            runnerName <- liftQ $ newName "runner"
-            let varPat :: Pat
-                varPat = VarP varName
-
-            let funSig :: Dec
-                funSig = SigD handlerName $ mkQueryHandlerSignature gadtType cArgs ty
-
-                funBodyBase =
-                    AppE (VarE runnerName) $
-                        AppE
-                            (ConE $ apiPiece ^. typed @ConstructorName . typed)
-                            (VarE varName)
-
-                funBody = case ty ^. typed of
-                    TupleT 0 -> [|fmap (const NoContent) $(pure funBodyBase)|]
-                    _ -> pure $ funBodyBase
-            funClause <-
-                liftQ $
-                    clause
-                        (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
-                        (normalB [|$(funBody)|])
-                        []
-            pure [funSig, FunD handlerName [funClause]]
-        SubApi cName cArgs spec -> do
-            -- Apply the arguments to the constructor before referencing the subserver
-            varNames <- liftQ $ replicateM (length (cArgs ^. typed @[(String, Type)])) (newName "arg")
-            handlerName <- askHandlerName
-            targetApiTypeName <- enterApi spec askApiTypeName
-            targetServer <- enterApi spec askServerName
-            runnerName <- liftQ $ newName "runner"
-
-            funSig <- liftQ $ do
-                let params =
-                        withForall $
-                            mkFunction $
-                                [actionRunner actionType']
-                                    <> cArgs ^.. typed @[(String, Type)] . folded . _2
-                                    <> [ ConT ''ServerT
-                                            `AppT` (ConT targetApiTypeName)
-                                            `AppT` (VarT runnerMonadName)
-                                       ]
-                SigD handlerName <$> pure params
-
-            funClause <- liftQ $ do
-                let cmd =
-                        foldl
-                            (\b a -> AppE b a)
-                            (ConE $ cName ^. typed)
-                            (fmap VarE varNames)
-                 in clause
-                        (varP <$> runnerName : varNames)
-                        ( fmap
-                            NormalB
-                            [e|
-                                $(varE targetServer)
-                                    ($(varE runnerName) . $(pure cmd))
-                                |]
-                        )
-                        []
-            let funDef = FunD handlerName [funClause]
-            pure [funSig, funDef]
+                funClause <- liftQ $ do
+                    let cmd =
+                            foldl
+                                (\b a -> AppE b a)
+                                (ConE $ cName ^. typed)
+                                (fmap VarE varNames)
+                     in clause
+                            (varP <$> runnerName : varNames)
+                            ( fmap
+                                NormalB
+                                [e|
+                                    $(varE targetServer)
+                                        ($(varE runnerName) . $(pure cmd))
+                                    |]
+                            )
+                            []
+                let funDef = FunD handlerName [funClause]
+                pure [funSig, funDef]
 
 ---- | This is the only layer of the ReaderT stack where we do not use `local` to update the
 ---- url segments.
