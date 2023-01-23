@@ -12,6 +12,7 @@ import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Set qualified as S
 import Data.Traversable (for)
+import Debug.Trace
 import DomainDriven.Server.Class
 import DomainDriven.Server.Config
 import DomainDriven.Server.Helpers
@@ -130,7 +131,7 @@ last3 = \case
     [] -> Nothing
     l -> last3 $ tail l
 
-getVarBindings :: [TyVarBndr ()] -> Either String VarBindings
+getVarBindings :: Show flag => [TyVarBndr flag] -> Either String VarBindings
 getVarBindings varBinds = case varBinds of
     [KindedTV x _ kind, KindedTV method _ StarT, KindedTV ret _ StarT]
         | kind == ConT ''ParamPart ->
@@ -148,8 +149,13 @@ getVarBindings varBinds = case varBinds of
     [_, _] -> Left errMsg
     [_] -> Left errMsg
     [] -> Left errMsg
-    p : l -> over (field @"extra") (p :) <$> getVarBindings l
+    p : l -> over (field @"extra") (noFlag p :) <$> getVarBindings l
   where
+    noFlag :: TyVarBndr flag -> TyVarBndr ()
+    noFlag = \case
+        KindedTV x _ kind -> KindedTV x () kind
+        PlainTV x _ -> PlainTV x ()
+
     errMsg =
         "getVarBindings: Expected parameters `(x :: ParamPart) method return`, got: "
             <> show varBinds
@@ -171,13 +177,11 @@ data ConstructorMatch = ConstructorMatch
     deriving (Show, Generic)
 
 data SubActionMatch = SubActionMatch
-    { xParam :: Name
-    -- ^ Of kind ParamPart
+    { bindings :: VarBindings
     , constructorName :: Name
     , parameters :: [Pmatch]
     , subActionName :: Name
     , subActionType :: Type
-    , finalType :: SubActionTypeMatch
     }
     deriving (Show, Generic)
 
@@ -199,7 +203,6 @@ data RequestTypeMatch = RequestTypeMatch
 
 matchNormalConstructor :: Con -> Either String ConstructorMatch
 matchNormalConstructor con = do
-    -- Get the `forall (x ::ParamPart)`
     (x, gadtCon) <- unconsForall con
     (conName, params, constructorType) <- unconsGadt gadtCon
     finalType <- matchFinalConstructorType constructorType
@@ -238,27 +241,24 @@ matchNormalConstructor con = do
 
 matchSubActionConstructor :: Con -> Either String SubActionMatch
 matchSubActionConstructor con = do
-    -- Get the `forall (x ::ParamPart)`
-    (x, gadtCon) <- unconsForall con
+    (bindings, gadtCon) <- unconsForall con
     -- Left $ show gadtCon
-    (conName, normalParams, (subActionName, subActionType), constructorType) <-
+    (conName, normalParams, (subActionName, subActionType), _constructorType) <-
         unconsGadt
             gadtCon
-    finalType <- matchSubActionConstructorType constructorType
+    -- finalType <- matchSubActionConstructorType constructorType
     pure
         SubActionMatch
-            { xParam = x
+            { bindings = bindings
             , constructorName = conName
             , parameters = normalParams
             , subActionName = subActionName
             , subActionType = subActionType
-            , finalType = finalType
             }
   where
-    unconsForall :: Con -> Either String (Name, Con)
+    unconsForall :: Con -> Either String (VarBindings, Con)
     unconsForall = \case
-        ForallC [KindedTV x _s1 _kind, KindedTV _method _s2 StarT, KindedTV _a _s3 StarT] _ctx con' ->
-            Right (x, con')
+        ForallC params _ctx con' -> (,con') <$> getVarBindings params
         con' ->
             Left $
                 "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
@@ -266,7 +266,7 @@ matchSubActionConstructor con = do
 
     unconsGadt :: Con -> Either String (Name, [Pmatch], (Name, Type), Type)
     unconsGadt = \case
-        GadtC [actionName] bangArgs ty -> do
+        con'@(GadtC [actionName] bangArgs ty) -> do
             (normalArgs, subActionType) <- do
                 let (normalArgs, subActions) =
                         L.splitAt (length bangArgs - 1) (snd <$> bangArgs)
@@ -274,10 +274,17 @@ matchSubActionConstructor con = do
                     [] -> Left "No arguments"
                     a : _ -> Right (normalArgs, a)
             normalParams <- traverse matchP normalArgs
-            subActionName <- case subActionType of
-                AppT (AppT (AppT (ConT subAction) (VarT _x)) (VarT _method)) (VarT _a) ->
-                    Right subAction
-                err -> Left $ "Expected sub action, got: " <> show err
+            let getActionName :: Type -> Either String Name
+                getActionName = \case
+                    ConT subAction -> Right subAction
+                    (AppT a _) -> getActionName a
+                    ty' ->
+                        Left $
+                            "getActionName: Expected `ConT [action name]` got: "
+                                <> show ty'
+                                <> " from constructor: "
+                                <> show con'
+            subActionName <- getActionName subActionType
             pure (actionName, normalParams, (subActionName, subActionType), ty)
         con' -> Left $ "Expected Gadt constrctor, got: " <> show con'
 
@@ -346,7 +353,7 @@ mkApiPiece cfg con = do
                     actionType
                     (EpReturnType $ c ^. field @"finalType" . field @"returnType")
         (_, Right c) -> do
-            subServerSpec <- mkServerSpec cfg (GadtName $ c ^. field @"subActionName")
+            subServerSpec <- mkSubServerSpec cfg c
             pure $
                 SubApi
                     (c ^. field @"constructorName" . to ConstructorName)
@@ -372,7 +379,7 @@ mkApiPiece cfg con = do
 -- The GADT must have one parameter representing the return type
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
-    (dec, varBindings) <- getActionDec n
+    (dec, varBindings) <- getActionDec n --- AHA, THis is the fucker fucking with me!
     eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
@@ -382,6 +389,22 @@ mkServerSpec cfg n = do
             , endpoints = eps
             , options = opts
             }
+
+mkSubServerSpec :: ServerConfig -> SubActionMatch -> Q ApiSpec
+mkSubServerSpec cfg subAction = do
+    (dec, _) <- getActionDec name
+    eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
+    opts <- getApiOptions cfg name
+    pure
+        ApiSpec
+            { gadtName = name
+            , varBindings = subAction ^. field @"bindings"
+            , endpoints = eps
+            , options = opts
+            }
+  where
+    name :: GadtName
+    name = subAction ^. field @"subActionName" . to GadtName
 
 ------------------------------------------------------------------------------------------
 
@@ -715,6 +738,12 @@ mkApiPieceHandler gadt apiPiece =
                     nfName = mkName $ "NF" <> show nrArgs
 
                 funSig <- SigD handlerName <$> mkCmdHandlerSignature gadt cName cArgs ty
+                traceM $ "----------------------------------------------------------"
+                traceShowM gadt
+                traceShowM cArgs
+                traceShowM ty
+                traceShowM funSig
+                traceM $ "==========================================================="
 
                 let funBodyBase =
                         AppE (VarE runnerName) $
