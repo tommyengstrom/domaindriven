@@ -7,10 +7,10 @@ module DomainDriven.Server.TH where
 import Control.Monad
 
 import Control.Monad.State
-import Data.Bifunctor
 import Data.Generics.Product
 import Data.List qualified as L
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Set qualified as S
 import Data.Traversable (for)
 import Debug.Trace
@@ -24,6 +24,8 @@ import Lens.Micro
 import Servant
 import UnliftIO (MonadUnliftIO (..))
 import Prelude
+
+-- import Data.Bifunctor
 
 -- | Generate a server with granular configuration
 --
@@ -178,8 +180,7 @@ data ConstructorMatch = ConstructorMatch
     deriving (Show, Generic)
 
 data SubActionMatch = SubActionMatch
-    { bindings :: VarBindings
-    , constructorName :: Name
+    { constructorName :: Name
     , parameters :: [Pmatch]
     , subActionName :: Name
     , subActionType :: Type
@@ -242,27 +243,25 @@ matchNormalConstructor con = do
 
 matchSubActionConstructor :: Con -> Either String SubActionMatch
 matchSubActionConstructor con = do
-    (bindings, gadtCon) <- unconsForall con
+    gadtCon <- unconsForall con
     -- Left $ show gadtCon
     (conName, normalParams, (subActionName, subActionType), _constructorType) <-
-        unconsGadt
-            gadtCon
+        unconsGadt gadtCon
     -- finalType <- matchSubActionConstructorType constructorType
     pure
         SubActionMatch
-            { bindings = bindings
-            , constructorName = conName
+            { constructorName = conName
             , parameters = normalParams
             , subActionName = subActionName
             , subActionType = subActionType
             }
   where
-    unconsForall :: Con -> Either String (VarBindings, Con)
+    unconsForall :: Con -> Either String Con
     unconsForall = \case
-        ForallC params _ctx con' ->
-            first (("unconsForall: " <> show params) <>) $
-                (,con')
-                    <$> getVarBindings params
+        ForallC _params _ctx con' -> pure con'
+        --  first (("unconsForall: " <> show params) <>) $
+        --      (,con')
+        --          <$> getVarBindings params
         con' ->
             Left $
                 "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
@@ -322,8 +321,8 @@ matchP = \case
         Right Pmatch{paramPart = x, paramName = pName, paramType = ty}
     ty -> Left $ "Expected type family `P`, got: " <> show ty
 
-mkApiPiece :: ServerConfig -> Con -> Q ApiPiece
-mkApiPiece cfg con = do
+mkApiPiece :: ServerConfig -> VarBindings -> Con -> Q ApiPiece
+mkApiPiece cfg varBindings con = do
     case (matchNormalConstructor con, matchSubActionConstructor con) of
         (Right c, _) -> do
             actionType <-
@@ -357,7 +356,7 @@ mkApiPiece cfg con = do
                     actionType
                     (EpReturnType $ c ^. field @"finalType" . field @"returnType")
         (_, Right c) -> do
-            subServerSpec <- mkSubServerSpec cfg c
+            subServerSpec <- mkSubServerSpec cfg varBindings c
             pure $
                 SubApi
                     (c ^. field @"constructorName" . to ConstructorName)
@@ -384,25 +383,47 @@ mkApiPiece cfg con = do
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     (dec, varBindings) <- getActionDec n --- AHA, THis is the fucker fucking with me!
-    eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
+    eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
         ApiSpec
             { gadtName = n
-            , varBindings = varBindings
+            , gadtType =
+                GadtType $
+                    L.foldl'
+                        AppT
+                        (ConT $ n ^. typed @Name)
+                        ( varBindings
+                            ^.. field @"extra"
+                                . folded
+                                . typed @Name
+                                . to VarT
+                        )
+            , allVarBindings = varBindings
             , endpoints = eps
             , options = opts
             }
 
-mkSubServerSpec :: ServerConfig -> SubActionMatch -> Q ApiSpec
-mkSubServerSpec cfg subAction = do
+mkSubServerSpec :: ServerConfig -> VarBindings -> SubActionMatch -> Q ApiSpec
+mkSubServerSpec cfg varBindings subAction = do
     (dec, _) <- getActionDec name -- We must not use the bindings or we'd end up with different names
-    eps <- traverse (mkApiPiece cfg) =<< getConstructors dec
+    eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg name
     pure
         ApiSpec
             { gadtName = name
-            , varBindings = subAction ^. field @"bindings"
+            , gadtType =
+                GadtType $
+                    L.foldl'
+                        AppT
+                        (ConT $ name ^. typed @Name)
+                        ( varBindings
+                            ^.. field @"extra"
+                                . folded
+                                . typed @Name
+                                . to VarT
+                        )
+            , allVarBindings = varBindings
             , endpoints = eps
             , options = opts
             }
@@ -554,35 +575,14 @@ mkServerDec spec = do
     let runnerName :: Name
         runnerName = mkName "runner"
 
-        gadtType :: GadtType
-        gadtType =
-            GadtType
-                { getGadtType =
-                    L.foldl'
-                        AppT
-                        ( spec
-                            ^. field @"gadtName"
-                                . typed @Name
-                                . to ConT
-                        )
-                        ( spec
-                            ^.. field @"varBindings"
-                                . field @"extra"
-                                . folded
-                                . typed @Name
-                                . to VarT
-                        )
-                , extraParams =
-                    spec
-                        ^. field @"varBindings"
-                            . field @"extra"
-                }
-
         actionRunner' :: Type
         actionRunner' =
             ConT ''ActionRunner
                 `AppT` VarT runnerMonadName
-                `AppT` getGadtType gadtType
+                `AppT` ( spec
+                            ^. field @"gadtType"
+                                . typed
+                       )
 
         server :: Type
         server =
@@ -593,7 +593,7 @@ mkServerDec spec = do
         serverType :: Type
         serverType =
             withForall
-                (spec ^. field' @"varBindings" . field' @"extra")
+                (spec ^. field' @"allVarBindings" . field @"extra")
                 (ArrowT `AppT` actionRunner' `AppT` server)
 
     -- ret <- liftQ [t| Server $(pure $ ConT apiTypeName) |]
@@ -613,7 +613,7 @@ mkServerDec spec = do
         serverFunDec = FunD serverName [Clause [VarP runnerName] (NormalB body) []]
     serverHandlerDecs <-
         mconcat
-            <$> traverse (mkApiPieceHandler gadtType) (spec ^. typed @[ApiPiece])
+            <$> traverse (mkApiPieceHandler (gadtType spec)) (spec ^. typed @[ApiPiece])
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
@@ -662,10 +662,10 @@ mkNamedFieldsType cName = \case
 
 mkQueryHandlerSignature :: GadtType -> ConstructorArgs -> EpReturnType -> Type
 mkQueryHandlerSignature
-    (GadtType actionType extraParams)
+    gadt@(GadtType actionType)
     (ConstructorArgs args)
     (EpReturnType retType) =
-        withForall extraParams $
+        withForall (either (const []) id $ gadtTypeParams gadt) $
             mkFunction $
                 actionRunner actionType : fmap snd args <> [ret]
       where
@@ -680,7 +680,7 @@ mkCmdHandlerSignature
 mkCmdHandlerSignature gadt cName cArgs (EpReturnType retType) = do
     nfArgs <- mkNamedFieldsType cName cArgs
     pure $
-        withForall (gadt ^. field @"extraParams") $
+        withForall (either (const []) id $ gadtTypeParams gadt) $
             mkFunction $
                 [actionRunner (gadt ^. field @"getGadtType")]
                     <> maybe [] pure nfArgs
@@ -693,6 +693,24 @@ mkCmdHandlerSignature gadt cName cArgs (EpReturnType retType) = do
 
 mkFunction :: [Type] -> Type
 mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
+
+sortAndExcludeBindings :: [TyVarBndr Specificity] -> Type -> Either String [TyVarBndr Specificity]
+sortAndExcludeBindings bindings ty = do
+    varOrder <- varNameOrder ty
+    let m :: M.Map Name Int
+        m = M.fromList $ zip varOrder [1 ..]
+
+    Right $ fmap fst . catMaybes $ bindings ^.. folded . to (\a -> (a,) <$> M.lookup (a ^. typed) m)
+
+varNameOrder :: Type -> Either String [Name]
+varNameOrder = \case
+    ConT _ -> Right []
+    VarT n -> Right [n]
+    (AppT a b) -> (<>) <$> varNameOrder a <*> varNameOrder b
+    crap -> Left $ "sortAndExcludeBindings: " <> show crap
+
+gadtTypeParams :: GadtType -> Either String [TyVarBndr ()]
+gadtTypeParams = fmap (fmap (`PlainTV` ())) . varNameOrder . getGadtType
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
@@ -708,9 +726,7 @@ mkApiPieceHandler gadt apiPiece =
                 runnerName <- liftQ $ newName "runner"
 
                 let funSig :: Dec
-                    funSig =
-                        SigD handlerName $
-                            mkQueryHandlerSignature gadt cArgs ty
+                    funSig = SigD handlerName $ mkQueryHandlerSignature gadt cArgs ty
 
                     funBodyBase =
                         AppE (VarE runnerName) $
@@ -810,7 +826,7 @@ mkApiPieceHandler gadt apiPiece =
 
                 funSig <- liftQ $ do
                     let params =
-                            withForall (spec ^. field @"varBindings" . field @"extra") $
+                            withForall (spec ^. field @"allVarBindings" . field @"extra") $
                                 mkFunction $
                                     [actionRunner (gadt ^. field @"getGadtType")]
                                         <> cArgs ^.. typed @[(String, Type)] . folded . _2

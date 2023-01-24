@@ -13,8 +13,9 @@ import Prelude
 -- Contains infromatiotion of how the API should look, gathered from the Action GADT.
 data ApiSpec = ApiSpec
     { gadtName :: GadtName
+    , gadtType :: GadtType
     -- ^ Name of the GADT representing the command
-    , varBindings :: VarBindings
+    , allVarBindings :: VarBindings
     , endpoints :: [ApiPiece]
     -- ^ Endpoints created from the constructors of the GADT
     , options :: ApiOptions
@@ -77,7 +78,7 @@ newtype GadtName = GadtName Name deriving (Show, Generic, Eq)
 
 data GadtType = GadtType
     { getGadtType :: Type
-    , extraParams :: [TyVarBndr ()]
+    -- , extraParams :: [TyVarBndr ()]
     }
     deriving (Show, Generic, Eq)
 
