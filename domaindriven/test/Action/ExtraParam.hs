@@ -25,7 +25,9 @@ data Sub1Action (ep :: ExtraP) :: Action where
     deriving (HasApiOptions)
 
 data Sub2Action :: Action where
-    SaySomething :: Sub2Action x Query Text
+    SaySomething
+        :: P x "number" Int
+        -> Sub2Action x Query String
     deriving (HasApiOptions)
 
 data Sub3Action (ep :: ExtraP) (bool :: Bool) :: Action where
@@ -46,7 +48,7 @@ handleSub1Action = \case
 
 handleSub2Action :: MonadThrow m => ActionHandler () () m Sub2Action
 handleSub2Action = \case
-    SaySomething -> Query $ \_ -> pure "Something"
+    SaySomething i -> Query $ \_ -> pure $ "Something " <> show i
 
 handleSub3Action :: MonadThrow m => ActionHandler () () m (Sub3Action ep bool)
 handleSub3Action = \case

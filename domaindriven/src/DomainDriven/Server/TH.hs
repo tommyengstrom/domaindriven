@@ -412,6 +412,7 @@ mkServerSpec cfg n = do
 -- the child type I need to rename type variables in accordance to the top level bindings
 -- and what variables are applied to this child type.
 
+-- FIXME: This needs to be cleaned up
 gadtToAction :: GadtType -> Either String Type
 gadtToAction (GadtType ty) = case ty of
     AppT (AppT (AppT ty' (VarT _x)) (VarT _method)) (VarT _return) -> Right ty'
@@ -559,16 +560,17 @@ mkQueryParams :: ConstructorArgs -> ServerGenM [QueryParamType]
 mkQueryParams (ConstructorArgs args) = do
     may <- liftQ [t|Maybe|] -- Maybe parameters are optional, others required
     for args $ \case
-        (name, (AppT may' ty@(ConT _))) | may' == may -> do
-            guardUniqueParamName name
-            liftQ
-                [t|
-                    QueryParam'
-                        '[Optional, Servant.Strict]
-                        $(pure . LitT . StrTyLit $ name)
-                        $(pure ty)
-                    |]
-        (name, ty@(ConT _)) -> do
+        (name, (AppT may' ty@(ConT _)))
+            | may' == may -> do
+                guardUniqueParamName name
+                liftQ
+                    [t|
+                        QueryParam'
+                            '[Optional, Servant.Strict]
+                            $(pure . LitT . StrTyLit $ name)
+                            $(pure ty)
+                        |]
+        (name, ty) -> do
             guardUniqueParamName name
             liftQ
                 [t|
@@ -577,7 +579,6 @@ mkQueryParams (ConstructorArgs args) = do
                         $(pure . LitT . StrTyLit $ name)
                         $(pure ty)
                     |]
-        crap -> fail $ "mkQueryParams - unexpected input: " <> show crap
 
 type QueryParamType = Type
 
