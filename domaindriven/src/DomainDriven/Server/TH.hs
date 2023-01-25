@@ -412,18 +412,6 @@ mkServerSpec cfg n = do
 -- the child type I need to rename type variables in accordance to the top level bindings
 -- and what variables are applied to this child type.
 
-getUsedTyVars :: forall flag. [TyVarBndr flag] -> Type -> [TyVarBndr flag]
-getUsedTyVars bindings = \case
-    (AppT a b) -> on (<>) (getUsedTyVars bindings) a b
-    (ConT _) -> []
-    (VarT n) -> bindings ^.. folded . filtered ((== n) . getName)
-    _ -> []
-  where
-    getName :: TyVarBndr flag -> Name
-    getName = \case
-        PlainTV n _ -> n
-        KindedTV n _ _ -> n
-
 gadtToAction :: GadtType -> Either String Type
 gadtToAction (GadtType ty) = case ty of
     AppT (AppT (AppT ty' (VarT _x)) (VarT _method)) (VarT _return) -> Right ty'
@@ -623,13 +611,7 @@ mkServerDec spec = do
         serverType :: Type
         serverType =
             withForall
-                ( getUsedTyVars
-                    (spec ^. field' @"allVarBindings" . field @"extra")
-                    ( spec
-                        ^. field @"gadtType"
-                            . typed
-                    )
-                )
+                (spec ^. field' @"allVarBindings" . field @"extra")
                 (ArrowT `AppT` actionRunner' `AppT` server)
 
     -- ret <- liftQ [t| Server $(pure $ ConT apiTypeName) |]
@@ -652,16 +634,31 @@ mkServerDec spec = do
 
     pure $ serverSigDec : serverFunDec : serverHandlerDecs
 
+-- | Get the subset of type varaibes used ty a type, in the roder they're applied
+-- Used to avoid rendundant type variables in the forall statement of sub-servers
+getUsedTyVars :: forall flag. [TyVarBndr flag] -> Type -> [TyVarBndr flag]
+getUsedTyVars bindings = \case
+    (AppT a b) -> on (<>) (getUsedTyVars bindings) a b
+    (ConT _) -> []
+    (VarT n) -> bindings ^.. folded . filtered ((== n) . getName)
+    _ -> []
+  where
+    getName :: TyVarBndr flag -> Name
+    getName = \case
+        PlainTV n _ -> n
+        KindedTV n _ _ -> n
+
 withForall :: [TyVarBndr ()] -> Type -> Type
-withForall extra =
+withForall extra ty =
     ForallT
         bindings
         varConstraints
+        ty
   where
     bindings :: [TyVarBndr Specificity]
     bindings =
         KindedTV runnerMonadName SpecifiedSpec (ArrowT `AppT` StarT `AppT` StarT)
-            : ( extra
+            : ( getUsedTyVars extra ty
                     & traversed %~ \case
                         PlainTV n _ -> PlainTV n SpecifiedSpec
                         KindedTV n _ k -> KindedTV n SpecifiedSpec k
