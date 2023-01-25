@@ -62,7 +62,13 @@ data Mutability
     deriving (Show, Eq)
 
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs HandlerSettings Mutability EpReturnType
+    = Endpoint
+        ConstructorName
+        ConstructorArgs
+        VarBindings
+        HandlerSettings
+        Mutability
+        EpReturnType
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 

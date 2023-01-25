@@ -177,7 +177,7 @@ getMutabilityOf = \case
     AppT (AppT (AppT _ (PromotedT verbName)) _) _ -> checkVerb verbName
     ConT n ->
         reify n >>= \case
-            TyConI (TySynD _ [] (AppT (AppT (AppT _ (PromotedT verbName)) _) _)) ->
+            TyConI (TySynD _ _ (AppT (AppT (AppT _ (PromotedT verbName)) _) _)) ->
                 checkVerb verbName
             info ->
                 fail $
@@ -374,6 +374,7 @@ mkApiPiece cfg varBindings con = do
                                 . to
                                     (\p -> (p ^. field @"paramName", p ^. field @"paramType"))
                     )
+                    varBindings
                     HandlerSettings
                         { contentTypes =
                             c
@@ -447,13 +448,15 @@ gadtToAction (GadtType ty) = case ty of
 mkSubServerSpec :: ServerConfig -> VarBindings -> SubActionMatch -> Q ApiSpec
 mkSubServerSpec cfg varBindings subAction = do
     (dec, bindings) <- getSubActionDec varBindings subAction -- We must not use the bindings or we'd end up with different names
-    traceM $ "mkSubServerSpec-varBindings: " <> show varBindings
-    traceM $ "mkSubServerSpec-bindings: " <> show bindings
-    traceM $ "mkSubServerSpec-subaction: " <> show subAction
-    eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
+    eps <- traverse (mkApiPiece cfg bindings) =<< getConstructors dec
     opts <- getApiOptions cfg name
 
-    actionTy <- either fail pure $ gadtToAction $ subAction ^. field @"subActionType" . to GadtType
+    actionTy <-
+        either fail pure $
+            subAction
+                ^. field @"subActionType"
+                    . to GadtType
+                    . to gadtToAction
     pure
         ApiSpec
             { gadtName = name
@@ -486,7 +489,18 @@ mkApiTypeDecs spec = do
         t : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
-            TySynD apiTypeName [] <$> liftQ (foldM fish t ts)
+            ty <- liftQ (foldM fish t ts)
+            let tyVars :: [TyVarBndr ()]
+                tyVars =
+                    getUsedTyVars
+                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
+                        ty
+            traceM $ "-------------------------mkApiTypeDecs-------------------------"
+            traceM $ "mkApiTypeDecs: " <> show t
+            traceM $ "mkApiTypeDecs: " <> show ts
+            traceM $ "mkApiTypeDecs: " <> show (TySynD apiTypeName tyVars ty)
+            traceM $ "==============================================================="
+            pure $ TySynD apiTypeName tyVars ty
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
 
@@ -517,7 +531,7 @@ mkEndpointApiType p = enterApiPiece p $ case p of
 mkHandlerTypeDec :: ApiPiece -> ServerGenM [Dec]
 mkHandlerTypeDec p = enterApiPiece p $ do
     case p of
-        Endpoint name args hs Immutable retType -> do
+        Endpoint name args varBindings hs Immutable retType -> do
             -- Get endpoint will use query parameters
             ty <- do
                 queryParams <- mkQueryParams args
@@ -525,12 +539,13 @@ mkHandlerTypeDec p = enterApiPiece p $ do
                 bird <- liftQ [t|(:>)|]
                 let stuff = foldr1 joinUrlParts $ queryParams <> [reqReturn]
                     joinUrlParts :: Type -> Type -> Type
-                    joinUrlParts a b = AppT (AppT bird a) b
+                    joinUrlParts a b = bird `AppT` a `AppT` b
                 urlSegment <- mkUrlSegment name
                 liftQ $ prependServerEndpointName urlSegment stuff
             epTypeName <- askEndpointTypeName
-            pure [TySynD epTypeName [] ty]
-        Endpoint name args hs Mutable retType -> do
+            --- FIXME Pick out the type variables!!!! FIXME
+            pure [TySynD epTypeName (getUsedTyVars (toTyVarBndr varBindings) ty) ty]
+        Endpoint name args varBindings hs Mutable retType -> do
             -- Non-get endpoints use a request body
             ty <- do
                 reqBody <- mkReqBody hs name args
@@ -541,7 +556,7 @@ mkHandlerTypeDec p = enterApiPiece p $ do
                 urlSegment <- mkUrlSegment name
                 liftQ $ prependServerEndpointName urlSegment middle
             epTypeName <- askEndpointTypeName
-            pure [TySynD epTypeName [] ty]
+            pure [TySynD epTypeName (getUsedTyVars (toTyVarBndr varBindings) ty) ty]
         SubApi _name args spec' -> enterApi spec' $ do
             _ <- mkQueryParams args
             -- Make sure we take into account what parameters have already been used.
@@ -663,16 +678,22 @@ mkServerDec spec = do
 -- | Get the subset of type varaibes used ty a type, in the roder they're applied
 -- Used to avoid rendundant type variables in the forall statement of sub-servers
 getUsedTyVars :: forall flag. [TyVarBndr flag] -> Type -> [TyVarBndr flag]
-getUsedTyVars bindings = \case
-    (AppT a b) -> on (<>) (getUsedTyVars bindings) a b
-    (ConT _) -> []
-    (VarT n) -> bindings ^.. folded . filtered ((== n) . getName)
-    _ -> []
+getUsedTyVars bindings ty = getUsedTyVarNames ty ^.. folded . to (`M.lookup` m) . _Just
   where
+    m :: M.Map Name (TyVarBndr flag)
+    m = M.fromList $ zip (fmap getName bindings) bindings
+
     getName :: TyVarBndr flag -> Name
     getName = \case
         PlainTV n _ -> n
         KindedTV n _ _ -> n
+
+getUsedTyVarNames :: Type -> [Name]
+getUsedTyVarNames = \case
+    (AppT a b) -> on (<>) getUsedTyVarNames a b
+    (ConT _) -> []
+    (VarT n) -> [n]
+    _ -> []
 
 withForall :: [TyVarBndr ()] -> Type -> Type
 withForall extra ty =
@@ -776,7 +797,7 @@ mkApiPieceHandler :: GadtType -> ApiPiece -> ServerGenM [Dec]
 mkApiPieceHandler gadt apiPiece =
     enterApiPiece apiPiece $ do
         case apiPiece of
-            Endpoint _cName cArgs _hs Immutable ty -> do
+            Endpoint _cName cArgs varBindings _hs Immutable ty -> do
                 let nrArgs :: Int
                     nrArgs = length $ cArgs ^. typed @[(String, Type)]
                 varNames <- liftQ $ replicateM nrArgs (newName "arg")
@@ -803,7 +824,7 @@ mkApiPieceHandler gadt apiPiece =
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
-            Endpoint cName cArgs hs Mutable ty | hasJsonContentType hs -> do
+            Endpoint cName cArgs varBindings hs Mutable ty | hasJsonContentType hs -> do
                 let nrArgs :: Int
                     nrArgs = length $ cArgs ^. typed @[(String, Type)]
                 varNames <- liftQ $ replicateM nrArgs (newName "arg")
@@ -834,7 +855,7 @@ mkApiPieceHandler gadt apiPiece =
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
-            Endpoint _cName cArgs _hs Mutable ty -> do
+            Endpoint _cName cArgs varBindings _hs Mutable ty -> do
                 -- FIXME: For non-JSON request bodies we support only one argument.
                 -- Combining JSON with other content types do not work properly at this point.
                 -- It could probably be fixed by adding MimeRender instances to NamedField1
