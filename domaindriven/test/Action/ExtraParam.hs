@@ -3,12 +3,18 @@
 module Action.ExtraParam where
 
 import Control.Monad.Catch
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import Data.Text qualified as T
 import DomainDriven
+import GHC.Generics (Generic)
 import Prelude
 
 data ExtraP = This | That
+
+newtype MyInt (ep :: ExtraP) = MyInt Int
+    deriving (Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
 
 data ExtraParamAction (bool :: Bool) (ep :: ExtraP) :: Action where
     ReverseText
@@ -21,7 +27,7 @@ data ExtraParamAction (bool :: Bool) (ep :: ExtraP) :: Action where
 
 data Sub1Action (ep :: ExtraP) :: Action where
     TalkToMe :: Sub1Action ep x Query Text
-    TellMe :: Sub1Action ep x Cmd Text
+    SayMyNumber :: P x "int" (MyInt ep) -> Sub1Action ep x Cmd String
     deriving (HasApiOptions)
 
 data Sub2Action :: Action where
@@ -44,7 +50,7 @@ handleExtraParamAction = \case
 handleSub1Action :: MonadThrow m => ActionHandler () () m (Sub1Action ep)
 handleSub1Action = \case
     TalkToMe -> Query $ \_ -> pure "Hello!"
-    TellMe -> Cmd $ \_ -> pure (const "hey", [])
+    SayMyNumber (MyInt i) -> Cmd $ \_ -> pure (const $ show i, [])
 
 handleSub2Action :: MonadThrow m => ActionHandler () () m Sub2Action
 handleSub2Action = \case

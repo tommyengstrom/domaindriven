@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module DomainDriven.Server.TH where
 
@@ -19,13 +20,13 @@ import DomainDriven.Server.Class
 import DomainDriven.Server.Config
 import DomainDriven.Server.Helpers
 import DomainDriven.Server.Types
-import GHC.Generics (Generic)
 import Language.Haskell.TH
 import Lens.Micro
 import Servant
 import UnliftIO (MonadUnliftIO (..))
 import Prelude
 
+-- import GHC.Generics (Generic)
 -- import Data.Bifunctor
 
 -- | Generate a server with granular configuration
@@ -74,7 +75,7 @@ getActionDec (GadtName n) = do
     let errMsg = fail $ "Expected " <> show n <> "to be a GADT"
     case cmdType of
         TyConI dec@(DataD _ctx _name params _ _ _) ->
-            case getVarBindings params of
+            case mkVarBindings params of
                 Right b -> pure (dec, b)
                 Left err -> fail $ "getActionDec: " <> err
         TyConI{} -> errMsg
@@ -87,6 +88,82 @@ getActionDec (GadtName n) = do
         VarI{} -> errMsg
         TyVarI{} -> errMsg
 
+getSubActionDec :: VarBindings -> SubActionMatch -> Q (Dec, VarBindings)
+getSubActionDec tyVars subAction = do
+    -- We have to do a `reify` on the subaction to get the constructors. When we do this
+    -- we get new [TyVarBndr ()]. These needs to be unified with what we have from the
+    -- parent.
+
+    cmdType <- reify $ subAction ^. field @"subActionName"
+    -- traceM $ "========================================================================"
+    -- traceM $ "=========== " <> show (subAction ^. field @"subActionName") <> " ==========="
+    -- traceM $ "========================================================================"
+    -- traceM $ "--------------------------------- cmdType ------------------------------"
+    -- traceShowM cmdType
+    -- traceM $ "--------------------------------- subAction ----------------------------"
+    -- traceShowM subAction
+    -- traceM $ "========================================================================"
+    case cmdType of
+        TyConI (DataD ctx name params mKind constructors deriv) -> do
+            let parentParams :: [TyVarBndr ()]
+                parentParams =
+                    getUsedTyVars
+                        (toTyVarBndr tyVars)
+                        (subAction ^. field @"subActionType")
+
+            unless
+                (on (==) length parentParams params)
+                ( fail $
+                    "getSubActionDec: Different number of parameters. Parent: "
+                        <> show parentParams
+                        <> ", child: "
+                        <> show params
+                )
+            let tyVarMap :: M.Map Name Name
+                tyVarMap =
+                    M.fromList $
+                        on zip (^.. folded . typed @Name) params parentParams
+
+            case mkVarBindings parentParams of
+                Right b -> do
+                    let rename :: Type -> Type
+                        rename ty = either (const ty) id $ replaceVarT tyVarMap ty
+
+                        constructorDec :: Dec
+                        constructorDec =
+                            DataD
+                                (fmap rename ctx)
+                                name
+                                parentParams
+                                mKind
+                                (fmap (updateConstructorTypes rename) constructors)
+                                deriv
+                    pure (constructorDec, b)
+                Left err -> fail $ "getSubActionDec: " <> err <> " --------- " <> show parentParams
+        TyConI{} -> errorOut
+        ClassI{} -> errorOut
+        ClassOpI{} -> errorOut
+        FamilyI{} -> errorOut
+        PrimTyConI{} -> errorOut
+        DataConI{} -> errorOut
+        PatSynI{} -> errorOut
+        VarI{} -> errorOut
+        TyVarI{} -> errorOut
+  where
+    errorOut =
+        fail $
+            "Expected "
+                <> show (subAction ^. field @"subActionName")
+                <> "to be a GADT"
+
+replaceVarT :: M.Map Name Name -> Type -> Either String Type
+replaceVarT m = \case
+    AppT ty1 ty2 -> AppT <$> replaceVarT m ty1 <*> replaceVarT m ty2
+    VarT oldName -> case M.lookup oldName m of
+        Just n -> Right (VarT n)
+        Nothing -> Left $ "replaceVarT: No match for variable \"" <> show oldName <> "\""
+    ty -> Right ty -- Don't think I need to match on other constructors. *lazy*
+
 guardMethodVar :: TyVarBndr flag -> Q ()
 guardMethodVar = \case
     KindedTV _ _ k -> check k
@@ -95,8 +172,8 @@ guardMethodVar = \case
     check :: Type -> Q ()
     check _ = pure ()
 
-getActionType :: Type -> Q ActionType
-getActionType = \case
+getMutabilityOf :: Type -> Q Mutability
+getMutabilityOf = \case
     AppT (AppT (AppT _ (PromotedT verbName)) _) _ -> checkVerb verbName
     ConT n ->
         reify n >>= \case
@@ -108,7 +185,7 @@ getActionType = \case
                         <> show info
     ty -> fail $ "Expected a Verb without return type applied, got: " <> show ty
   where
-    checkVerb :: Name -> Q ActionType
+    checkVerb :: Name -> Q Mutability
     checkVerb n = case show n of
         "Network.HTTP.Types.Method.GET" -> pure Immutable
         _ -> pure Mutable
@@ -116,6 +193,7 @@ getActionType = \case
 guardReturnVar :: Show flag => TyVarBndr flag -> Q ()
 guardReturnVar = \case
     KindedTV _ _ StarT -> pure ()
+    PlainTV _ _ -> pure ()
     ty -> fail $ "Return type must be a concrete type. Got: " <> show ty
 
 getConstructors :: Dec -> Q [Con]
@@ -127,6 +205,10 @@ getConstructors = \case
     d@DataD{} -> fail $ "Unexpected Action data type: " <> show d
     d -> fail $ "Expected a GADT with two parameters but got: " <> show d
 
+toTyVarBndr :: VarBindings -> [TyVarBndr ()]
+toTyVarBndr VarBindings{paramPart, method, return, extra} =
+    extra <> [KindedTV paramPart () (ConT ''ParamPart), PlainTV method (), PlainTV return ()]
+
 last3 :: [a] -> Maybe (a, a, a)
 last3 = \case
     [a, b, c] -> Just (a, b, c)
@@ -135,25 +217,25 @@ last3 = \case
     [] -> Nothing
     l -> last3 $ tail l
 
-getVarBindings :: Show flag => [TyVarBndr flag] -> Either String VarBindings
-getVarBindings varBinds = case varBinds of
-    [KindedTV x _ kind, KindedTV method _ StarT, KindedTV ret _ StarT]
+mkVarBindings :: Show flag => [TyVarBndr flag] -> Either String VarBindings
+mkVarBindings varBinds = case varBinds of
+    [KindedTV x _ kind, method, ret]
         | kind == ConT ''ParamPart ->
             Right
                 VarBindings
                     { paramPart = x
-                    , method = method
-                    , return = ret
+                    , method = method ^. to noFlag . typed @Name
+                    , return = ret ^. to noFlag . typed @Name
                     , extra = []
                     }
         | otherwise ->
             Left $
-                "getVarBindings: Expected parameter of kind ParamPart, got: "
+                "mkVarBindings: Expected parameter of kind ParamPart, got: "
                     <> show varBinds
     [_, _] -> Left errMsg
     [_] -> Left errMsg
     [] -> Left errMsg
-    p : l -> over (field @"extra") (noFlag p :) <$> getVarBindings l
+    p : l -> over (field @"extra") (noFlag p :) <$> mkVarBindings l
   where
     noFlag :: TyVarBndr flag -> TyVarBndr ()
     noFlag = \case
@@ -161,48 +243,8 @@ getVarBindings varBinds = case varBinds of
         PlainTV x _ -> PlainTV x ()
 
     errMsg =
-        "getVarBindings: Expected parameters `(x :: ParamPart) method return`, got: "
+        "mkVarBindings: Expected parameters `(x :: ParamPart) method return`, got: "
             <> show varBinds
-
-data Pmatch = Pmatch
-    { paramPart :: Name
-    , paramName :: String
-    , paramType :: Type
-    }
-    deriving (Show, Generic)
-
-data ConstructorMatch = ConstructorMatch
-    { xParam :: Name
-    -- ^ Of kind ParamPart
-    , constructorName :: Name
-    , parameters :: [Pmatch]
-    , finalType :: FinalConstructorTypeMatch
-    }
-    deriving (Show, Generic)
-
-data SubActionMatch = SubActionMatch
-    { constructorName :: Name
-    , parameters :: [Pmatch]
-    , subActionName :: Name
-    , subActionType :: Type
-    }
-    deriving (Show, Generic)
-
-data SubActionTypeMatch = SubActionTypeMatch
-    deriving (Show, Generic)
-
-data FinalConstructorTypeMatch = FinalConstructorTypeMatch
-    { requestType :: RequestTypeMatch
-    , returnType :: Type
-    }
-    deriving (Show, Generic)
-
-data RequestTypeMatch = RequestTypeMatch
-    { accessType :: Type
-    , contentTypes :: Type
-    , verb :: Type
-    }
-    deriving (Show, Generic)
 
 matchNormalConstructor :: Con -> Either String ConstructorMatch
 matchNormalConstructor con = do
@@ -248,7 +290,6 @@ matchSubActionConstructor con = do
     -- Left $ show gadtCon
     (conName, normalParams, (subActionName, subActionType), _constructorType) <-
         unconsGadt gadtCon
-    -- finalType <- matchSubActionConstructorType constructorType
     pure
         SubActionMatch
             { constructorName = conName
@@ -260,9 +301,6 @@ matchSubActionConstructor con = do
     unconsForall :: Con -> Either String Con
     unconsForall = \case
         ForallC _params _ctx con' -> pure con'
-        --  first (("unconsForall: " <> show params) <>) $
-        --      (,con')
-        --          <$> getVarBindings params
         con' ->
             Left $
                 "Expected a higher order constrctor parameterized by `(x :: ParamPart)`, got: "
@@ -291,12 +329,6 @@ matchSubActionConstructor con = do
             subActionName <- getActionName subActionType
             pure (actionName, normalParams, (subActionName, subActionType), ty)
         con' -> Left $ "Expected Gadt constrctor, got: " <> show con'
-
-matchSubActionConstructorType :: Type -> Either String SubActionTypeMatch
-matchSubActionConstructorType = \case
-    (AppT (AppT (AppT (ConT _typeName) (VarT _x)) (VarT _method)) (VarT _a)) ->
-        Right SubActionTypeMatch
-    ty -> Left $ "Expected a sub subaction with polymorphic argumnets, got: " <> show ty
 
 matchFinalConstructorType :: Type -> Either String FinalConstructorTypeMatch
 matchFinalConstructorType = \case
@@ -327,7 +359,7 @@ mkApiPiece cfg varBindings con = do
     case (matchNormalConstructor con, matchSubActionConstructor con) of
         (Right c, _) -> do
             actionType <-
-                getActionType $
+                getMutabilityOf $
                     c
                         ^. field @"finalType"
                             . field @"requestType"
@@ -406,12 +438,6 @@ mkServerSpec cfg n = do
             , options = opts
             }
 
--- I cannot do reify more than once!
--- But I need to in order to get the types of the subactions....
--- So what I need to do is to keep the top level VarBindings around and then, when I reify
--- the child type I need to rename type variables in accordance to the top level bindings
--- and what variables are applied to this child type.
-
 -- FIXME: This needs to be cleaned up
 gadtToAction :: GadtType -> Either String Type
 gadtToAction (GadtType ty) = case ty of
@@ -420,7 +446,7 @@ gadtToAction (GadtType ty) = case ty of
 
 mkSubServerSpec :: ServerConfig -> VarBindings -> SubActionMatch -> Q ApiSpec
 mkSubServerSpec cfg varBindings subAction = do
-    (dec, bindings) <- getActionDec name -- We must not use the bindings or we'd end up with different names
+    (dec, bindings) <- getSubActionDec varBindings subAction -- We must not use the bindings or we'd end up with different names
     traceM $ "mkSubServerSpec-varBindings: " <> show varBindings
     traceM $ "mkSubServerSpec-bindings: " <> show bindings
     traceM $ "mkSubServerSpec-subaction: " <> show subAction
@@ -432,17 +458,7 @@ mkSubServerSpec cfg varBindings subAction = do
         ApiSpec
             { gadtName = name
             , gadtType = GadtType actionTy
-            , -- GadtType $
-              --     L.foldl'
-              --         AppT
-              --         (ConT $ name ^. typed @Name)
-              --         ( fuckitUnifyVarBindings bindings varBindings
-              --             ^.. field @"extra"
-              --                 . folded
-              --                 . typed @Name
-              --                 . to VarT
-              --         )
-              allVarBindings = varBindings
+            , allVarBindings = varBindings
             , endpoints = eps
             , options = opts
             }
@@ -582,6 +598,15 @@ mkQueryParams (ConstructorArgs args) = do
 
 type QueryParamType = Type
 
+updateConstructorTypes :: (Type -> Type) -> Con -> Con
+updateConstructorTypes f = \case
+    NormalC n bts -> NormalC n (fmap (fmap f) bts)
+    RecC n vbt -> RecC n (fmap (fmap f) vbt)
+    InfixC bt1 n bt2 -> InfixC bt1 n bt2
+    ForallC b cxt' c -> ForallC b cxt' (updateConstructorTypes f c)
+    GadtC n bts ty -> GadtC n (fmap (fmap f) bts) (f ty)
+    RecGadtC n vbt ty -> RecGadtC n (fmap (fmap f) vbt) (f ty)
+
 mkVerb :: HandlerSettings -> Type -> Type
 mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
 
@@ -652,7 +677,7 @@ getUsedTyVars bindings = \case
 withForall :: [TyVarBndr ()] -> Type -> Type
 withForall extra ty =
     ForallT
-        bindings
+        (L.nub bindings) -- FIXME: Why are we getting duplicates here?
         varConstraints
         ty
   where
@@ -715,7 +740,7 @@ mkCmdHandlerSignature gadt cName cArgs (EpReturnType retType) = do
     pure $
         withForall (either (const []) id $ gadtTypeParams gadt) $
             mkFunction $
-                [actionRunner (gadt ^. field @"getGadtType")]
+                [actionRunner (gadt ^. typed)]
                     <> maybe [] pure nfArgs
                     <> [ret]
   where
@@ -743,7 +768,7 @@ varNameOrder = \case
     crap -> Left $ "sortAndExcludeBindings: " <> show crap
 
 gadtTypeParams :: GadtType -> Either String [TyVarBndr ()]
-gadtTypeParams = fmap (fmap (`PlainTV` ())) . varNameOrder . getGadtType
+gadtTypeParams = fmap (fmap (`PlainTV` ())) . varNameOrder . (^. typed)
 
 -- | Define the servant handler for an enpoint or referens the subapi with path
 -- parameters applied
@@ -805,7 +830,7 @@ mkApiPieceHandler gadt apiPiece =
                 funClause <-
                     liftQ $
                         clause
-                            (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                            (pure (VarP runnerName) : [pure varPat | nrArgs > 0])
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
@@ -839,7 +864,7 @@ mkApiPieceHandler gadt apiPiece =
                 funClause <-
                     liftQ $
                         clause
-                            (pure (VarP runnerName) : (if nrArgs > 0 then [pure $ varPat] else []))
+                            (pure (VarP runnerName) : [pure varPat | nrArgs > 0])
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
@@ -855,18 +880,18 @@ mkApiPieceHandler gadt apiPiece =
                     let params =
                             withForall (spec ^. field @"allVarBindings" . field @"extra") $
                                 mkFunction $
-                                    [actionRunner (gadt ^. field @"getGadtType")]
+                                    [actionRunner (gadt ^. typed)]
                                         <> cArgs ^.. typed @[(String, Type)] . folded . _2
                                         <> [ ConT ''ServerT
-                                                `AppT` (ConT targetApiTypeName)
-                                                `AppT` (VarT runnerMonadName)
+                                                `AppT` ConT targetApiTypeName
+                                                `AppT` VarT runnerMonadName
                                            ]
-                    SigD handlerName <$> pure params
+                    pure (SigD handlerName params)
 
                 funClause <- liftQ $ do
                     let cmd =
                             foldl
-                                (\b a -> AppE b a)
+                                AppE
                                 (ConE $ cName ^. typed)
                                 (fmap VarE varNames)
                      in clause

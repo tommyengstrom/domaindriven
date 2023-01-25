@@ -56,13 +56,13 @@ instance Show ApiOptions where
                 ^. field @"typenameSeparator"
             <> "\"}"
 
-data ActionType
+data Mutability
     = Mutable
     | Immutable
     deriving (Show, Eq)
 
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType EpReturnType
+    = Endpoint ConstructorName ConstructorArgs HandlerSettings Mutability EpReturnType
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
@@ -75,12 +75,7 @@ data HandlerSettings = HandlerSettings
 newtype ConstructorName = ConstructorName Name deriving (Show, Generic, Eq)
 newtype EpReturnType = EpReturnType Type deriving (Show, Generic, Eq)
 newtype GadtName = GadtName Name deriving (Show, Generic, Eq)
-
-data GadtType = GadtType
-    { getGadtType :: Type
-    -- , extraParams :: [TyVarBndr ()]
-    }
-    deriving (Show, Generic, Eq)
+newtype GadtType = GadtType Type deriving (Show, Generic, Eq)
 
 newtype UrlSegment = UrlSegment String deriving (Show, Generic, Eq)
 newtype ConstructorArgs = ConstructorArgs [(String, Type)] deriving (Show, Generic, Eq)
@@ -108,3 +103,43 @@ data ServerGenState = ServerGenState
 
 newtype ServerGenM a = ServerGenM {unServerGenM :: StateT ServerGenState Q a}
     deriving newtype (Functor, Applicative, Monad, MonadState ServerGenState, MonadFail)
+
+data Pmatch = Pmatch
+    { paramPart :: Name
+    , paramName :: String
+    , paramType :: Type
+    }
+    deriving (Show, Generic)
+
+data ConstructorMatch = ConstructorMatch
+    { xParam :: Name
+    -- ^ Of kind ParamPart
+    , constructorName :: Name
+    , parameters :: [Pmatch]
+    , finalType :: FinalConstructorTypeMatch
+    }
+    deriving (Show, Generic)
+
+data SubActionMatch = SubActionMatch
+    { constructorName :: Name
+    , parameters :: [Pmatch]
+    , subActionName :: Name
+    , subActionType :: Type
+    }
+    deriving (Show, Generic)
+
+data SubActionTypeMatch = SubActionTypeMatch
+    deriving (Show, Generic)
+
+data FinalConstructorTypeMatch = FinalConstructorTypeMatch
+    { requestType :: RequestTypeMatch
+    , returnType :: Type
+    }
+    deriving (Show, Generic)
+
+data RequestTypeMatch = RequestTypeMatch
+    { accessType :: Type
+    , contentTypes :: Type
+    , verb :: Type
+    }
+    deriving (Show, Generic)

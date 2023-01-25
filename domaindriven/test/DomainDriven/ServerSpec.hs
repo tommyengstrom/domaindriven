@@ -25,7 +25,181 @@ import Servant.Client
 import Test.Hspec
 import Prelude
 
+import Data.Kind (Type)
+import UnliftIO (MonadUnliftIO)
+
 $(mkServer extraParamConfig ''ExtraParamAction)
+
+-----------------------------------------------------------------------------------------
+-- type ExtraParamActionApi ep =
+--    ExtraParamAction_ReverseTextEndpoint
+--        :<|> "Sub1" :> ExtraParamAction_Sub1Api ep
+--        :<|> "Sub2" :> ExtraParamAction_Sub2Api
+--        :<|> "Sub3" :> ExtraParamAction_Sub3Api
+--
+-- type ExtraParamAction_ReverseTextEndpoint =
+--    (:>) "ReverseText" ((:>) (ReqBody '[JSON] (NF1 "ExtraParamAction_ReverseText" "text" Text)) (Verb 'POST 200 ( '(:) JSON ('[] :: [Type])) Text))
+-- type ExtraParamAction_Sub1Api ep =
+--    (:<|>) ExtraParamAction_Sub1_TalkToMeEndpoint (ExtraParamAction_Sub1_SayMyNumberEndpoint ep)
+-- type ExtraParamAction_Sub1_TalkToMeEndpoint =
+--    (:>) "TalkToMe" (Verb 'GET 200 ( '(:) JSON ('[] :: [Type])) Text)
+-- type ExtraParamAction_Sub1_SayMyNumberEndpoint ep =
+--    "SayMyNumber"
+--        :> ReqBody '[JSON] (NF1 "Sub1Action_SayMyNumber" "int" (MyInt ep))
+--        :> Verb 'POST 200 ( '(:) JSON ('[] :: [Type])) [Char]
+-- extraParamAction_Sub1Server
+--    :: forall
+--        (m :: Type -> Type)
+--        (ep :: ExtraP)
+--     . MonadUnliftIO m
+--    => ActionRunner m (Sub1Action ep)
+--    -> ServerT (ExtraParamAction_Sub1Api ep) m
+-- extraParamAction_Sub1Server runner =
+--    ( extraParamAction_Sub1_TalkToMeHandler runner
+--        :<|> extraParamAction_Sub1_SayMyNumberHandler runner
+--    )
+-- extraParamAction_Sub1_TalkToMeHandler
+--    :: forall
+--        (m :: Type -> Type)
+--        ep
+--     . MonadUnliftIO m
+--    => ActionRunner m (Sub1Action ep)
+--    -> m Text
+-- extraParamAction_Sub1_TalkToMeHandler runner_a2zOx =
+--    runner_a2zOx TalkToMe
+-- extraParamAction_Sub1_SayMyNumberHandler
+--    :: forall
+--        (m :: Type -> Type)
+--        ep
+--     . MonadUnliftIO m
+--    => ActionRunner m (Sub1Action ep)
+--    -> NF1 "Sub1Action_SayMyNumber" "int" (MyInt ep)
+--    -> m [Char]
+-- extraParamAction_Sub1_SayMyNumberHandler
+--    runner_a2zOz
+--    (NF1 arg_a2zOy) =
+--        runner_a2zOz (SayMyNumber arg_a2zOy)
+-- type ExtraParamAction_Sub2Api =
+--    ExtraParamAction_Sub2_SaySomethingEndpoint
+-- type ExtraParamAction_Sub2_SaySomethingEndpoint =
+--    (:>)
+--        "SaySomething"
+--        ( (:>)
+--            ( QueryParam'
+--                '[ Required
+--                 , Strict
+--                 ]
+--                "number"
+--                Int
+--            )
+--            (Verb 'GET 200 ( '(:) JSON ('[] :: [Type])) [Char])
+--        )
+-- extraParamAction_Sub2Server
+--    :: forall
+--        ( m
+--          :: Type
+--            -> Type
+--        )
+--     . MonadUnliftIO m
+--    => ActionRunner m Sub2Action
+--    -> ServerT ExtraParamAction_Sub2Api m
+-- extraParamAction_Sub2Server runner =
+--    extraParamAction_Sub2_SaySomethingHandler runner
+-- extraParamAction_Sub2_SaySomethingHandler
+--    :: forall
+--        ( m
+--          :: Type
+--            -> Type
+--        )
+--     . MonadUnliftIO m
+--    => ActionRunner m Sub2Action
+--    -> Int
+--    -> m [Char]
+-- extraParamAction_Sub2_SaySomethingHandler runner_a2zOB arg_a2zOA =
+--    runner_a2zOB (SaySomething arg_a2zOA)
+-- type ExtraParamAction_Sub3Api =
+--    ExtraParamAction_Sub3_SayHelloEndpoint
+-- type ExtraParamAction_Sub3_SayHelloEndpoint =
+--    (:>) "SayHello" (Verb 'GET 200 ( '(:) JSON ('[] :: [Type])) Text)
+-- extraParamAction_Sub3Server
+--    :: forall
+--        (m :: Type -> Type)
+--        (ep :: ExtraP)
+--        (bool_i2zMO :: Bool)
+--     . MonadUnliftIO m
+--    => ActionRunner m (Sub3Action ep bool_i2zMO)
+--    -> ServerT ExtraParamAction_Sub3Api m
+-- extraParamAction_Sub3Server runner =
+--    extraParamAction_Sub3_SayHelloHandler runner
+-- extraParamAction_Sub3_SayHelloHandler
+--    :: forall
+--        (m :: Type -> Type)
+--        ep
+--        bool_i2zMO
+--     . MonadUnliftIO m
+--    => ActionRunner m (Sub3Action ep bool_i2zMO)
+--    -> m Text
+-- extraParamAction_Sub3_SayHelloHandler runner_a2zOC =
+--    runner_a2zOC SayHello
+-- extraParamActionServer
+--    :: forall
+--        (m :: Type -> Type)
+--        (bool_i2zMO :: Bool)
+--        (ep :: ExtraP)
+--     . MonadUnliftIO m
+--    => ActionRunner m (ExtraParamAction bool_i2zMO ep)
+--    -> ServerT (ExtraParamActionApi ep) m
+-- extraParamActionServer runner =
+--    ( extraParamAction_ReverseTextHandler runner
+--        :<|> ( extraParamAction_Sub1Handler runner
+--                :<|> ( extraParamAction_Sub2Handler runner
+--                        :<|> extraParamAction_Sub3Handler runner
+--                     )
+--             )
+--    )
+-- extraParamAction_ReverseTextHandler
+--    :: forall
+--        (m :: Type -> Type)
+--        bool_i2zMO
+--        ep
+--     . MonadUnliftIO m
+--    => ActionRunner m (ExtraParamAction bool_i2zMO ep)
+--    -> NF1 "ExtraParamAction_ReverseText" "text" Text
+--    -> m Text
+-- extraParamAction_ReverseTextHandler runner_a2zOE (NF1 arg_a2zOD) =
+--    runner_a2zOE (Action.ExtraParam.ReverseText arg_a2zOD)
+-- extraParamAction_Sub1Handler
+--    :: forall
+--        (m :: Type -> Type)
+--        (bool_i2zMO :: Bool)
+--        (ep :: ExtraP)
+--     . MonadUnliftIO m
+--    => ActionRunner m (ExtraParamAction bool_i2zMO ep)
+--    -> ServerT (ExtraParamAction_Sub1Api ep) m
+-- extraParamAction_Sub1Handler runner_a2zOF =
+--    extraParamAction_Sub1Server (runner_a2zOF . Sub1)
+-- extraParamAction_Sub2Handler
+--    :: forall
+--        (m :: Type -> Type)
+--        (bool_i2zMO :: Bool)
+--        (ep :: ExtraP)
+--     . MonadUnliftIO m
+--    => ActionRunner m (ExtraParamAction bool_i2zMO ep)
+--    -> ServerT ExtraParamAction_Sub2Api m
+-- extraParamAction_Sub2Handler runner_a2zOG =
+--    extraParamAction_Sub2Server (runner_a2zOG . Sub2)
+-- extraParamAction_Sub3Handler
+--    :: forall
+--        (m :: Type -> Type)
+--        (bool_i2zMO :: Bool)
+--        (ep :: ExtraP)
+--     . MonadUnliftIO m
+--    => ActionRunner m (ExtraParamAction bool_i2zMO ep)
+--    -> ServerT ExtraParamAction_Sub3Api m
+-- extraParamAction_Sub3Handler runner_a2zOH =
+--    extraParamAction_Sub3Server (runner_a2zOH . Sub3)
+--
+-----------------------------------------------------------------------------------------
 $(mkServer storeActionConfig ''StoreAction)
 
 --
