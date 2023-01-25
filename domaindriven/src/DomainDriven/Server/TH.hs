@@ -7,6 +7,7 @@ module DomainDriven.Server.TH where
 import Control.Monad
 
 import Control.Monad.State
+import Data.Function (on)
 import Data.Generics.Product
 import Data.List qualified as L
 import Data.Map qualified as M
@@ -404,11 +405,29 @@ mkServerSpec cfg n = do
             , options = opts
             }
 
+fuckitUnifyVarBindings :: VarBindings -> VarBindings -> VarBindings
+fuckitUnifyVarBindings sub sup = sup{extra = extraSubset (sub ^. field @"extra") (sup ^. field @"extra")}
+  where
+    extraSubset :: [TyVarBndr ()] -> [TyVarBndr ()] -> [TyVarBndr ()]
+    extraSubset [] _ = []
+    extraSubset (PlainTV n _ : subs) (PlainTV n' _ : sups)
+        | on (==) (L.takeWhile (/= '_') . show) n n' = PlainTV n' () : extraSubset subs sups
+        | otherwise = extraSubset subs sups
+    extraSubset (KindedTV n _ k : subs) (KindedTV n' _ k' : sups)
+        | on (==) (L.takeWhile (/= '_') . show) n n' && k == k' = KindedTV n' () k' : extraSubset subs sups
+        | otherwise = extraSubset subs sups
+    extraSubset subs@(PlainTV{} : _) (KindedTV{} : sups) = extraSubset subs sups
+    extraSubset subs@(KindedTV{} : _) (PlainTV{} : sups) = extraSubset subs sups
+    extraSubset (_ : _) [] = [] -- This is a failure
+
 mkSubServerSpec :: ServerConfig -> VarBindings -> SubActionMatch -> Q ApiSpec
 mkSubServerSpec cfg varBindings subAction = do
-    (dec, _) <- getActionDec name -- We must not use the bindings or we'd end up with different names
+    (dec, bindings) <- getActionDec name -- We must not use the bindings or we'd end up with different names
+    traceM $ "mkSubServerSpec-varBindings: " <> show varBindings
+    traceM $ "mkSubServerSpec-bindings: " <> show bindings
     eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg name
+
     pure
         ApiSpec
             { gadtName = name
@@ -417,7 +436,7 @@ mkSubServerSpec cfg varBindings subAction = do
                     L.foldl'
                         AppT
                         (ConT $ name ^. typed @Name)
-                        ( varBindings
+                        ( fuckitUnifyVarBindings bindings varBindings
                             ^.. field @"extra"
                                 . folded
                                 . typed @Name
@@ -604,7 +623,6 @@ mkServerDec spec = do
         mkHandlerExp p = enterApiPiece p $ do
             n <- askHandlerName
             pure $ VarE n `AppE` VarE runnerName
-
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
     body <- case reverse handlers of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
@@ -758,12 +776,6 @@ mkApiPieceHandler gadt apiPiece =
                     nfName = mkName $ "NF" <> show nrArgs
 
                 funSig <- SigD handlerName <$> mkCmdHandlerSignature gadt cName cArgs ty
-                traceM $ "----------------------------------------------------------"
-                traceShowM gadt
-                traceShowM cArgs
-                traceShowM ty
-                traceShowM funSig
-                traceM $ "==========================================================="
 
                 let funBodyBase =
                         AppE (VarE runnerName) $
