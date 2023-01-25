@@ -384,6 +384,7 @@ mkApiPiece cfg varBindings con = do
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     (dec, varBindings) <- getActionDec n --- AHA, THis is the fucker fucking with me!
+    traceM $ "mkServerSpec: " <> show dec
     eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
@@ -405,44 +406,54 @@ mkServerSpec cfg n = do
             , options = opts
             }
 
-fuckitUnifyVarBindings :: VarBindings -> VarBindings -> VarBindings
-fuckitUnifyVarBindings sub sup = sup{extra = extraSubset (sub ^. field @"extra") (sup ^. field @"extra")}
+-- I cannot do reify more than once!
+-- But I need to in order to get the types of the subactions....
+-- So what I need to do is to keep the top level VarBindings around and then, when I reify
+-- the child type I need to rename type variables in accordance to the top level bindings
+-- and what variables are applied to this child type.
+
+getUsedTyVars :: forall flag. [TyVarBndr flag] -> Type -> [TyVarBndr flag]
+getUsedTyVars bindings = \case
+    (AppT a b) -> on (<>) (getUsedTyVars bindings) a b
+    (ConT _) -> []
+    (VarT n) -> bindings ^.. folded . filtered ((== n) . getName)
+    _ -> []
   where
-    extraSubset :: [TyVarBndr ()] -> [TyVarBndr ()] -> [TyVarBndr ()]
-    extraSubset [] _ = []
-    extraSubset (PlainTV n _ : subs) (PlainTV n' _ : sups)
-        | on (==) (L.takeWhile (/= '_') . show) n n' = PlainTV n' () : extraSubset subs sups
-        | otherwise = extraSubset subs sups
-    extraSubset (KindedTV n _ k : subs) (KindedTV n' _ k' : sups)
-        | on (==) (L.takeWhile (/= '_') . show) n n' && k == k' = KindedTV n' () k' : extraSubset subs sups
-        | otherwise = extraSubset subs sups
-    extraSubset subs@(PlainTV{} : _) (KindedTV{} : sups) = extraSubset subs sups
-    extraSubset subs@(KindedTV{} : _) (PlainTV{} : sups) = extraSubset subs sups
-    extraSubset (_ : _) [] = [] -- This is a failure
+    getName :: TyVarBndr flag -> Name
+    getName = \case
+        PlainTV n _ -> n
+        KindedTV n _ _ -> n
+
+gadtToAction :: GadtType -> Either String Type
+gadtToAction (GadtType ty) = case ty of
+    AppT (AppT (AppT ty' (VarT _x)) (VarT _method)) (VarT _return) -> Right ty'
+    _ -> Left $ "Expected `GADT` with final kind `Action`, got: " <> show ty
 
 mkSubServerSpec :: ServerConfig -> VarBindings -> SubActionMatch -> Q ApiSpec
 mkSubServerSpec cfg varBindings subAction = do
     (dec, bindings) <- getActionDec name -- We must not use the bindings or we'd end up with different names
     traceM $ "mkSubServerSpec-varBindings: " <> show varBindings
     traceM $ "mkSubServerSpec-bindings: " <> show bindings
+    traceM $ "mkSubServerSpec-subaction: " <> show subAction
     eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg name
 
+    actionTy <- either fail pure $ gadtToAction $ subAction ^. field @"subActionType" . to GadtType
     pure
         ApiSpec
             { gadtName = name
-            , gadtType =
-                GadtType $
-                    L.foldl'
-                        AppT
-                        (ConT $ name ^. typed @Name)
-                        ( fuckitUnifyVarBindings bindings varBindings
-                            ^.. field @"extra"
-                                . folded
-                                . typed @Name
-                                . to VarT
-                        )
-            , allVarBindings = varBindings
+            , gadtType = GadtType actionTy
+            , -- GadtType $
+              --     L.foldl'
+              --         AppT
+              --         (ConT $ name ^. typed @Name)
+              --         ( fuckitUnifyVarBindings bindings varBindings
+              --             ^.. field @"extra"
+              --                 . folded
+              --                 . typed @Name
+              --                 . to VarT
+              --         )
+              allVarBindings = varBindings
             , endpoints = eps
             , options = opts
             }
@@ -612,7 +623,13 @@ mkServerDec spec = do
         serverType :: Type
         serverType =
             withForall
-                (spec ^. field' @"allVarBindings" . field @"extra")
+                ( getUsedTyVars
+                    (spec ^. field' @"allVarBindings" . field @"extra")
+                    ( spec
+                        ^. field @"gadtType"
+                            . typed
+                    )
+                )
                 (ArrowT `AppT` actionRunner' `AppT` server)
 
     -- ret <- liftQ [t| Server $(pure $ ConT apiTypeName) |]
