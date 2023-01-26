@@ -515,23 +515,25 @@ mkApiTypeDecs spec = do
     epTypes <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
-        (tyName, tyVars) : ts -> do
+        (ty, tyVars) : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
-            ty <- liftQ (foldM fish tyName (fmap fst ts))
+            apiType <- liftQ (foldM fish (applyTyVars ty tyVars) (fmap (uncurry applyTyVars) ts))
             let tyVars :: [TyVarBndr ()]
                 tyVars =
                     getUsedTyVars
                         (spec ^. field @"allVarBindings" . to toTyVarBndr)
-                        ty
+                        apiType
             traceM $ "*************************mkApiTypeDecs**************************"
-            traverse_ traceShowM (tyName : fmap fst ts)
             traceM $ "------------------------- TySyndD -------------------------"
-            traceShowM $ (TySynD apiTypeName tyVars ty)
+            traceShowM $ (TySynD apiTypeName tyVars apiType)
             traceM $ "==============================================================="
-            pure $ TySynD apiTypeName tyVars ty
+            pure $ TySynD apiTypeName tyVars apiType
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
+  where
+    applyTyVars :: Type -> [TyVarBndr ()] -> Type
+    applyTyVars ty tyVars = foldl AppT ty (tyVars ^.. folded . typed @Name . to VarT)
 
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
@@ -749,7 +751,7 @@ getUsedTyVars bindings ty = getUsedTyVarNames ty ^.. folded . to (`M.lookup` m) 
         KindedTV n _ _ -> n
 
 getUsedTyVarNames :: Type -> [Name]
-getUsedTyVarNames = \case
+getUsedTyVarNames ty = L.nub $ case ty of
     (AppT a b) -> on (<>) getUsedTyVarNames a b
     (ConT _) -> []
     (VarT n) -> [n]
