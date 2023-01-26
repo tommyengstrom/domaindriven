@@ -418,7 +418,7 @@ mkApiPiece cfg varBindings con = do
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     (dec, varBindings) <- getActionDec n --- AHA, THis is the fucker fucking with me!
-    traceM $ "mkServerSpec: " <> show dec
+    -- traceM $ "mkServerSpec: " <> show dec
     eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
@@ -470,47 +470,20 @@ mkSubServerSpec cfg varBindings subAction = do
     name :: GadtName
     name = subAction ^. field @"subActionName" . to GadtName
 
-------------------------------------------------------------------------------------------
+-- | Name and type variables used by API
+askApiNameAndParams :: ApiSpec -> ServerGenM (Name, [TyVarBndr ()])
+askApiNameAndParams spec = do
+    apiTypeName <- askApiTypeName
+    pure
+        ( apiTypeName
+        , getUsedTyVars
+            (spec ^. field @"allVarBindings" . field @"extra")
+            (spec ^. field @"gadtType" . typed)
+        )
 
--- | Create the API definition for the top level API
--- * For Endpoint this simply means referencing that API type
--- * For SubApi we add the path parameters before referencing the sub API.
---
--- Result will be something like
--- ```
--- type SomeApi = Endpoint1
---           :<|> Endpoint2
---           :<|> "CustomerKey" :> CustomerKey :> CustomerApi
---mkApiTypeDecs' :: ApiSpec -> ServerGenM [Dec]
---mkApiTypeDecs' spec = do
---    apiTypeName <- askApiTypeName
---    -- FIXME: Refactor this to traverse name and content at the same time!
---    (epTypes, topShit) <- fmap unzip . for (spec ^. typed @[ApiPiece]) $ \apiPiece -> do
---       epType <- mkEndpointApiType apiPiece
---       case epType of
---           []
---    topLevelDec <- case reverse epTypes of -- :<|> is right associative
---        [] -> fail "Server contains no endpoints"
---        t : ts -> do
---            let fish :: Type -> Type -> Q Type
---                fish b a = [t|$(pure a) :<|> $(pure b)|]
---            ty <- liftQ (foldM fish t ts)
---            let tyVars :: [TyVarBndr ()]
---                tyVars =
---                    getUsedTyVars
---                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
---                        ty
---            traceM $ "-------------------------mkApiTypeDecs'-------------------------"
---            traceM $ "mkApiTypeDecs': " <> show t
---            traceM $ "mkApiTypeDecs': " <> show ts
---            traceM $ "mkApiTypeDecs': " <> show (TySynD apiTypeName tyVars ty)
---            traceM $ "==============================================================="
---            pure $ TySynD apiTypeName tyVars ty
---    handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
---    pure $ topLevelDec : handlerDecs
 mkApiTypeDecs :: ApiSpec -> ServerGenM [Dec]
 mkApiTypeDecs spec = do
-    apiTypeName <- askApiTypeName
+    (apiTypeName, tyVars) <- askApiNameAndParams spec
     -- FIXME: Refactor this to traverse name and content at the same time!
     epTypes <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
@@ -518,22 +491,22 @@ mkApiTypeDecs spec = do
         (ty, tyVars) : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
-            apiType <- liftQ (foldM fish (applyTyVars ty tyVars) (fmap (uncurry applyTyVars) ts))
-            let tyVars :: [TyVarBndr ()]
-                tyVars =
-                    getUsedTyVars
-                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
-                        apiType
-            traceM $ "*************************mkApiTypeDecs**************************"
-            traceM $ "------------------------- TySyndD -------------------------"
-            traceShowM $ (TySynD apiTypeName tyVars apiType)
-            traceM $ "==============================================================="
+            apiType <- liftQ (foldM fish ty (fmap fst ts))
+            -- let tyVars :: [TyVarBndr ()]
+            --     tyVars =
+            --         getUsedTyVars
+            --             (spec ^. field @"allVarBindings" . to toTyVarBndr)
+            --             apiType
+            -- traceM $ "*************************mkApiTypeDecs**************************"
+            -- traceM $ "------------------------- TySyndD -------------------------"
+            -- traceShowM $ (TySynD apiTypeName tyVars apiType)
+            -- traceM $ "==============================================================="
             pure $ TySynD apiTypeName tyVars apiType
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
-  where
-    applyTyVars :: Type -> [TyVarBndr ()] -> Type
-    applyTyVars ty tyVars = foldl AppT ty (tyVars ^.. folded . typed @Name . to VarT)
+
+applyTyVars :: Type -> [TyVarBndr ()] -> Type
+applyTyVars ty tyVars = foldl AppT ty (tyVars ^.. folded . typed @Name . to VarT)
 
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
@@ -548,7 +521,6 @@ mkEndpointApiType p = enterApiPiece p $ case p of
                     foldMap
                         (getUsedTyVars $ bindings ^. field @"extra")
                         (ret ^. typed @Type : args ^.. typed @[(String, Type)] . folded . typed @Type)
-        -- FIXME: Grab the type variables that are used!
         traceM $ "-------------mkEndpointApiType - Endpoint--------------------"
         traceM $ "epName: " <> show epName
         traceM $ "args: " <> show args
@@ -556,30 +528,27 @@ mkEndpointApiType p = enterApiPiece p $ case p of
         traceM $ "bindings: " <> show bindings
         traceM $ "usedTyVars: " <> show usedTyVars
         pure
-            ( ConT epName
+            ( applyTyVars (ConT epName) usedTyVars
             , filter (`elem` usedTyVars) (bindings ^. field @"extra") -- Make sure we get type vars in the right order
             )
     SubApi cName cArgs spec -> do
         urlSegment <- mkUrlSegment cName
-        n <- askApiTypeName
-        finalType <- liftQ $ prependServerEndpointName urlSegment (ConT n)
+        (n, tyVars) <- askApiNameAndParams spec
+        finalType <- liftQ $ prependServerEndpointName urlSegment (applyTyVars (ConT n) tyVars)
 
         params <- mkQueryParams cArgs
         bird <- liftQ [t|(:>)|]
         let ep = foldr (\a b -> bird `AppT` a `AppT` b) finalType params
-        let usedTyVars :: [TyVarBndr ()]
-            usedTyVars =
-                getUsedTyVars
-                    (spec ^. field @"allVarBindings" . field @"extra")
-                    (spec ^. field @"gadtType" . typed)
 
         traceM $ "-------------mkEndpointApiType - SubApi --------------------"
         traceM $ "cName: " <> show cName
+        traceM $ "finalType: " <> show finalType
         traceM $ "cArgs: " <> show cArgs
+        traceM $ "params: " <> show params
         traceM $ "spec: " <> show spec
-        traceM $ "usedTyVars: " <> show usedTyVars
+        traceM $ "tyVars: " <> show tyVars
         traceM $ "============================================================"
-        pure (ep, usedTyVars)
+        pure (ep, tyVars)
 
 -- | Defines the servant types for the endpoints
 -- For SubApi it will trigger the full creating of the sub server with types and all
@@ -690,7 +659,7 @@ mkVerb (HandlerSettings _ verb) ret = verb `AppT` ret
 -- | Declare then handlers for the API
 mkServerDec :: ApiSpec -> ServerGenM [Dec]
 mkServerDec spec = do
-    apiTypeName <- askApiTypeName
+    (apiTypeName, apiParams) <- askApiNameAndParams spec
     serverName <- askServerName
 
     let runnerName :: Name
@@ -708,7 +677,7 @@ mkServerDec spec = do
         server :: Type
         server =
             ConT ''ServerT
-                `AppT` ConT apiTypeName
+                `AppT` applyTyVars (ConT apiTypeName) apiParams
                 `AppT` VarT runnerMonadName
 
         serverType :: Type
@@ -750,6 +719,8 @@ getUsedTyVars bindings ty = getUsedTyVarNames ty ^.. folded . to (`M.lookup` m) 
         PlainTV n _ -> n
         KindedTV n _ _ -> n
 
+-- | Get the type variables (VarT) used in a type, returned in the order they're
+-- referenced
 getUsedTyVarNames :: Type -> [Name]
 getUsedTyVarNames ty = L.nub $ case ty of
     (AppT a b) -> on (<>) getUsedTyVarNames a b
@@ -833,7 +804,7 @@ mkCmdHandlerSignature gadt cName cArgs (EpReturnType retType) = do
         ty -> ty
 
 mkFunction :: [Type] -> Type
-mkFunction = foldr1 (\a b -> AppT (AppT ArrowT a) b)
+mkFunction = foldr1 (\a b -> ArrowT `AppT` a `AppT` b)
 
 sortAndExcludeBindings :: [TyVarBndr Specificity] -> Type -> Either String [TyVarBndr Specificity]
 sortAndExcludeBindings bindings ty = do
@@ -955,7 +926,7 @@ mkApiPieceHandler gadt apiPiece =
                 -- Apply the arguments to the constructor before referencing the subserver
                 varNames <- liftQ $ replicateM (length (cArgs ^. typed @[(String, Type)])) (newName "arg")
                 handlerName <- askHandlerName
-                targetApiTypeName <- enterApi spec askApiTypeName
+                (targetApiTypeName, targetApiParams) <- enterApi spec (askApiNameAndParams spec)
                 targetServer <- enterApi spec askServerName
                 runnerName <- liftQ $ newName "runner"
 
@@ -966,7 +937,7 @@ mkApiPieceHandler gadt apiPiece =
                                     [actionRunner (gadt ^. typed)]
                                         <> cArgs ^.. typed @[(String, Type)] . folded . _2
                                         <> [ ConT ''ServerT
-                                                `AppT` ConT targetApiTypeName
+                                                `AppT` applyTyVars (ConT targetApiTypeName) targetApiParams
                                                 `AppT` VarT runnerMonadName
                                            ]
                     pure (SigD handlerName params)
