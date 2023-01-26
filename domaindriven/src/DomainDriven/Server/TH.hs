@@ -8,13 +8,14 @@ module DomainDriven.Server.TH where
 import Control.Monad
 
 import Control.Monad.State
+import Data.Foldable
 import Data.Function (on)
 import Data.Generics.Product
 import Data.List qualified as L
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
-import Data.Traversable (for)
+import Data.Traversable
 import Debug.Trace
 import DomainDriven.Server.Class
 import DomainDriven.Server.Config
@@ -480,25 +481,53 @@ mkSubServerSpec cfg varBindings subAction = do
 -- type SomeApi = Endpoint1
 --           :<|> Endpoint2
 --           :<|> "CustomerKey" :> CustomerKey :> CustomerApi
+--mkApiTypeDecs' :: ApiSpec -> ServerGenM [Dec]
+--mkApiTypeDecs' spec = do
+--    apiTypeName <- askApiTypeName
+--    -- FIXME: Refactor this to traverse name and content at the same time!
+--    (epTypes, topShit) <- fmap unzip . for (spec ^. typed @[ApiPiece]) $ \apiPiece -> do
+--       epType <- mkEndpointApiType apiPiece
+--       case epType of
+--           []
+--    topLevelDec <- case reverse epTypes of -- :<|> is right associative
+--        [] -> fail "Server contains no endpoints"
+--        t : ts -> do
+--            let fish :: Type -> Type -> Q Type
+--                fish b a = [t|$(pure a) :<|> $(pure b)|]
+--            ty <- liftQ (foldM fish t ts)
+--            let tyVars :: [TyVarBndr ()]
+--                tyVars =
+--                    getUsedTyVars
+--                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
+--                        ty
+--            traceM $ "-------------------------mkApiTypeDecs'-------------------------"
+--            traceM $ "mkApiTypeDecs': " <> show t
+--            traceM $ "mkApiTypeDecs': " <> show ts
+--            traceM $ "mkApiTypeDecs': " <> show (TySynD apiTypeName tyVars ty)
+--            traceM $ "==============================================================="
+--            pure $ TySynD apiTypeName tyVars ty
+--    handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
+--    pure $ topLevelDec : handlerDecs
 mkApiTypeDecs :: ApiSpec -> ServerGenM [Dec]
 mkApiTypeDecs spec = do
     apiTypeName <- askApiTypeName
+    -- FIXME: Refactor this to traverse name and content at the same time!
     epTypes <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
-        t : ts -> do
+        (tyName, tyVars) : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
-            ty <- liftQ (foldM fish t ts)
+            ty <- liftQ (foldM fish tyName (fmap fst ts))
             let tyVars :: [TyVarBndr ()]
                 tyVars =
                     getUsedTyVars
                         (spec ^. field @"allVarBindings" . to toTyVarBndr)
                         ty
-            traceM $ "-------------------------mkApiTypeDecs-------------------------"
-            traceM $ "mkApiTypeDecs: " <> show t
-            traceM $ "mkApiTypeDecs: " <> show ts
-            traceM $ "mkApiTypeDecs: " <> show (TySynD apiTypeName tyVars ty)
+            traceM $ "*************************mkApiTypeDecs**************************"
+            traverse_ traceShowM (tyName : fmap fst ts)
+            traceM $ "------------------------- TySyndD -------------------------"
+            traceShowM $ (TySynD apiTypeName tyVars ty)
             traceM $ "==============================================================="
             pure $ TySynD apiTypeName tyVars ty
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
@@ -507,17 +536,48 @@ mkApiTypeDecs spec = do
 -- | Create endpoint types to be referenced in the API
 -- * For Endpoint this is just a reference to the handler type
 -- * For SubApi we apply the path parameters before referencing the SubApi
-mkEndpointApiType :: ApiPiece -> ServerGenM Type
+mkEndpointApiType :: ApiPiece -> ServerGenM (Type, [TyVarBndr ()])
 mkEndpointApiType p = enterApiPiece p $ case p of
-    Endpoint{} -> ConT <$> askEndpointTypeName
-    SubApi cName cArgs _ -> do
+    Endpoint _n args bindings _ _ ret -> do
+        epName <- askEndpointTypeName
+        let usedTyVars :: [TyVarBndr ()]
+            usedTyVars =
+                L.nub $
+                    foldMap
+                        (getUsedTyVars $ bindings ^. field @"extra")
+                        (ret ^. typed @Type : args ^.. typed @[(String, Type)] . folded . typed @Type)
+        -- FIXME: Grab the type variables that are used!
+        traceM $ "-------------mkEndpointApiType - Endpoint--------------------"
+        traceM $ "epName: " <> show epName
+        traceM $ "args: " <> show args
+        traceM $ "ret: " <> show ret
+        traceM $ "bindings: " <> show bindings
+        traceM $ "usedTyVars: " <> show usedTyVars
+        pure
+            ( ConT epName
+            , filter (`elem` usedTyVars) (bindings ^. field @"extra") -- Make sure we get type vars in the right order
+            )
+    SubApi cName cArgs spec -> do
         urlSegment <- mkUrlSegment cName
         n <- askApiTypeName
         finalType <- liftQ $ prependServerEndpointName urlSegment (ConT n)
 
         params <- mkQueryParams cArgs
         bird <- liftQ [t|(:>)|]
-        pure $ foldr (\a b -> bird `AppT` a `AppT` b) finalType params
+        let ep = foldr (\a b -> bird `AppT` a `AppT` b) finalType params
+        let usedTyVars :: [TyVarBndr ()]
+            usedTyVars =
+                getUsedTyVars
+                    (spec ^. field @"allVarBindings" . field @"extra")
+                    (spec ^. field @"gadtType" . typed)
+
+        traceM $ "-------------mkEndpointApiType - SubApi --------------------"
+        traceM $ "cName: " <> show cName
+        traceM $ "cArgs: " <> show cArgs
+        traceM $ "spec: " <> show spec
+        traceM $ "usedTyVars: " <> show usedTyVars
+        traceM $ "============================================================"
+        pure (ep, usedTyVars)
 
 -- | Defines the servant types for the endpoints
 -- For SubApi it will trigger the full creating of the sub server with types and all
