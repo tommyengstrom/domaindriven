@@ -25,8 +25,8 @@ import Servant.Client
 import Test.Hspec
 import Prelude
 
-import Data.Kind (Type)
-import UnliftIO (MonadUnliftIO)
+-- import Data.Kind (Type)
+-- import UnliftIO (MonadUnliftIO)
 
 $(mkServer extraParamConfig ''ExtraParamAction)
 

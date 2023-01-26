@@ -474,12 +474,24 @@ mkSubServerSpec cfg varBindings subAction = do
 askApiNameAndParams :: ApiSpec -> ServerGenM (Name, [TyVarBndr ()])
 askApiNameAndParams spec = do
     apiTypeName <- askApiTypeName
-    pure
-        ( apiTypeName
-        , getUsedTyVars
-            (spec ^. field @"allVarBindings" . field @"extra")
-            (spec ^. field @"gadtType" . typed)
-        )
+    pure (apiTypeName, apiSpecTyVars spec)
+
+apiPieceTyVars :: ApiPiece -> [TyVarBndr ()]
+apiPieceTyVars = \case
+    Endpoint _ args bindings _ _ ret ->
+        L.nub $
+            foldMap
+                (getUsedTyVars $ bindings ^. field @"extra")
+                (ret ^. typed @Type : args ^.. typed @[(String, Type)] . folded . typed @Type)
+    SubApi _ _ spec -> apiSpecTyVars spec
+
+apiSpecTyVars :: ApiSpec -> [TyVarBndr ()]
+apiSpecTyVars spec =
+    filter
+        (`elem` usedTyVars)
+        (spec ^. field @"allVarBindings" . field @"extra")
+  where
+    usedTyVars = L.nub $ foldMap apiPieceTyVars $ spec ^. field @"endpoints"
 
 mkApiTypeDecs :: ApiSpec -> ServerGenM [Dec]
 mkApiTypeDecs spec = do
@@ -488,19 +500,19 @@ mkApiTypeDecs spec = do
     epTypes <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
-        (ty, tyVars) : ts -> do
+        (ty, _tyVars) : ts -> do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
             apiType <- liftQ (foldM fish ty (fmap fst ts))
-            -- let tyVars :: [TyVarBndr ()]
-            --     tyVars =
-            --         getUsedTyVars
-            --             (spec ^. field @"allVarBindings" . to toTyVarBndr)
-            --             apiType
-            -- traceM $ "*************************mkApiTypeDecs**************************"
-            -- traceM $ "------------------------- TySyndD -------------------------"
-            -- traceShowM $ (TySynD apiTypeName tyVars apiType)
-            -- traceM $ "==============================================================="
+            let tyVars :: [TyVarBndr ()]
+                tyVars =
+                    getUsedTyVars
+                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
+                        apiType
+            traceM $ "*************************mkApiTypeDecs**************************"
+            traceM $ "------------------------- TySyndD -------------------------"
+            traceShowM $ (TySynD apiTypeName tyVars apiType)
+            traceM $ "==============================================================="
             pure $ TySynD apiTypeName tyVars apiType
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
@@ -686,7 +698,6 @@ mkServerDec spec = do
                 (spec ^. field' @"allVarBindings" . field @"extra")
                 (ArrowT `AppT` actionRunner' `AppT` server)
 
-    -- ret <- liftQ [t| Server $(pure $ ConT apiTypeName) |]
     let serverSigDec :: Dec
         serverSigDec = SigD serverName serverType
 
@@ -694,6 +705,14 @@ mkServerDec spec = do
         mkHandlerExp p = enterApiPiece p $ do
             n <- askHandlerName
             pure $ VarE n `AppE` VarE runnerName
+    traceM $ "------------------------------- mkServerDec -------------------------------"
+    traceShowM apiTypeName
+    traceM $ "-- apiParams --"
+    traverse_ traceShowM apiParams
+    traceM $ "-- serverSigDec --"
+    traceShowM serverSigDec
+    traceShowM serverName
+    traceM $ "---------------------------------------------------------------------------"
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
     body <- case reverse handlers of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
@@ -722,11 +741,33 @@ getUsedTyVars bindings ty = getUsedTyVarNames ty ^.. folded . to (`M.lookup` m) 
 -- | Get the type variables (VarT) used in a type, returned in the order they're
 -- referenced
 getUsedTyVarNames :: Type -> [Name]
-getUsedTyVarNames ty = L.nub $ case ty of
+getUsedTyVarNames ty' = L.nub $ case ty' of
     (AppT a b) -> on (<>) getUsedTyVarNames a b
     (ConT _) -> []
     (VarT n) -> [n]
-    _ -> []
+    ForallT _ _ ty -> getUsedTyVarNames ty
+    ForallVisT _ ty -> getUsedTyVarNames ty
+    AppKindT ty _ -> getUsedTyVarNames ty
+    SigT ty _ -> getUsedTyVarNames ty
+    PromotedT _ -> []
+    InfixT ty1 _ ty2 -> getUsedTyVarNames ty1 <> getUsedTyVarNames ty2
+    UInfixT ty1 _ ty2 -> getUsedTyVarNames ty1 <> getUsedTyVarNames ty2
+    ParensT ty -> getUsedTyVarNames ty
+    TupleT _ -> []
+    UnboxedTupleT _ -> []
+    UnboxedSumT _ -> []
+    ArrowT -> []
+    MulArrowT -> []
+    EqualityT -> []
+    ListT -> []
+    PromotedTupleT _ -> []
+    PromotedNilT -> []
+    PromotedConsT -> []
+    StarT -> []
+    ConstraintT -> []
+    LitT _ -> []
+    WildCardT -> []
+    ImplicitParamT _ ty -> getUsedTyVarNames ty
 
 withForall :: [TyVarBndr ()] -> Type -> Type
 withForall extra ty =
