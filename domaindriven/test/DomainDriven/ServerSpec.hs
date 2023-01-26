@@ -12,7 +12,6 @@ import Control.Monad.Except
 import Data.Map qualified as M
 import Data.Text (Text)
 import DomainDriven
-import DomainDriven.Internal.NamedFields
 import DomainDriven.Persistance.ForgetfulInMemory
 import DomainDriven.Server.Config (ServerConfig (..))
 import Network.HTTP.Client

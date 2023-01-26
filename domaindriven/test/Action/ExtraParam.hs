@@ -28,6 +28,7 @@ data ExtraParamAction (bool :: Bool) (ep :: ExtraP) :: Action where
 data Sub1Action (ep :: ExtraP) :: Action where
     TalkToMe :: Sub1Action ep x Query Text
     SayMyNumber :: P x "int" (MyInt ep) -> Sub1Action ep x Cmd String
+    SayMyMaybeNumber :: P x "int" (Maybe (MyInt ep)) -> Sub1Action ep x Query String
     deriving (HasApiOptions)
 
 data Sub2Action :: Action where
@@ -52,6 +53,7 @@ handleSub1Action :: MonadThrow m => ActionHandler () () m (Sub1Action ep)
 handleSub1Action = \case
     TalkToMe -> Query $ \_ -> pure "Hello!"
     SayMyNumber (MyInt i) -> Cmd $ \_ -> pure (const $ show i, [])
+    SayMyMaybeNumber i -> Query $ \_ -> pure (show i)
 
 handleSub2Action :: MonadThrow m => ActionHandler () () m Sub2Action
 handleSub2Action = \case

@@ -16,7 +16,6 @@ import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Traversable
-import Debug.Trace
 import DomainDriven.Server.Class
 import DomainDriven.Server.Config
 import DomainDriven.Server.Helpers
@@ -27,6 +26,7 @@ import Servant
 import UnliftIO (MonadUnliftIO (..))
 import Prelude
 
+-- import Debug.Trace
 -- import GHC.Generics (Generic)
 -- import Data.Bifunctor
 
@@ -504,15 +504,15 @@ mkApiTypeDecs spec = do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
             apiType <- liftQ (foldM fish ty (fmap fst ts))
-            let tyVars :: [TyVarBndr ()]
-                tyVars =
-                    getUsedTyVars
-                        (spec ^. field @"allVarBindings" . to toTyVarBndr)
-                        apiType
-            traceM $ "*************************mkApiTypeDecs**************************"
-            traceM $ "------------------------- TySyndD -------------------------"
-            traceShowM $ (TySynD apiTypeName tyVars apiType)
-            traceM $ "==============================================================="
+            -- let tyVars :: [TyVarBndr ()]
+            --    tyVars =
+            --        getUsedTyVars
+            --            (spec ^. field @"allVarBindings" . to toTyVarBndr)
+            --            apiType
+            -- traceM $ "*************************mkApiTypeDecs**************************"
+            -- traceM $ "------------------------- TySyndD -------------------------"
+            -- traceShowM $ (TySynD apiTypeName tyVars apiType)
+            -- traceM $ "==============================================================="
             pure $ TySynD apiTypeName tyVars apiType
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
@@ -533,12 +533,12 @@ mkEndpointApiType p = enterApiPiece p $ case p of
                     foldMap
                         (getUsedTyVars $ bindings ^. field @"extra")
                         (ret ^. typed @Type : args ^.. typed @[(String, Type)] . folded . typed @Type)
-        traceM $ "-------------mkEndpointApiType - Endpoint--------------------"
-        traceM $ "epName: " <> show epName
-        traceM $ "args: " <> show args
-        traceM $ "ret: " <> show ret
-        traceM $ "bindings: " <> show bindings
-        traceM $ "usedTyVars: " <> show usedTyVars
+        -- traceM $ "-------------mkEndpointApiType - Endpoint--------------------"
+        -- traceM $ "epName: " <> show epName
+        -- traceM $ "args: " <> show args
+        -- traceM $ "ret: " <> show ret
+        -- traceM $ "bindings: " <> show bindings
+        -- traceM $ "usedTyVars: " <> show usedTyVars
         pure
             ( applyTyVars (ConT epName) usedTyVars
             , filter (`elem` usedTyVars) (bindings ^. field @"extra") -- Make sure we get type vars in the right order
@@ -552,14 +552,14 @@ mkEndpointApiType p = enterApiPiece p $ case p of
         bird <- liftQ [t|(:>)|]
         let ep = foldr (\a b -> bird `AppT` a `AppT` b) finalType params
 
-        traceM $ "-------------mkEndpointApiType - SubApi --------------------"
-        traceM $ "cName: " <> show cName
-        traceM $ "finalType: " <> show finalType
-        traceM $ "cArgs: " <> show cArgs
-        traceM $ "params: " <> show params
-        traceM $ "spec: " <> show spec
-        traceM $ "tyVars: " <> show tyVars
-        traceM $ "============================================================"
+        -- traceM $ "-------------mkEndpointApiType - SubApi --------------------"
+        -- traceM $ "cName: " <> show cName
+        -- traceM $ "finalType: " <> show finalType
+        -- traceM $ "cArgs: " <> show cArgs
+        -- traceM $ "params: " <> show params
+        -- traceM $ "spec: " <> show spec
+        -- traceM $ "tyVars: " <> show tyVars
+        -- traceM $ "============================================================"
         pure (ep, tyVars)
 
 -- | Defines the servant types for the endpoints
@@ -634,7 +634,7 @@ mkQueryParams :: ConstructorArgs -> ServerGenM [QueryParamType]
 mkQueryParams (ConstructorArgs args) = do
     may <- liftQ [t|Maybe|] -- Maybe parameters are optional, others required
     for args $ \case
-        (name, (AppT may' ty@(ConT _)))
+        (name, AppT may' ty)
             | may' == may -> do
                 guardUniqueParamName name
                 liftQ
@@ -705,14 +705,14 @@ mkServerDec spec = do
         mkHandlerExp p = enterApiPiece p $ do
             n <- askHandlerName
             pure $ VarE n `AppE` VarE runnerName
-    traceM $ "------------------------------- mkServerDec -------------------------------"
-    traceShowM apiTypeName
-    traceM $ "-- apiParams --"
-    traverse_ traceShowM apiParams
-    traceM $ "-- serverSigDec --"
-    traceShowM serverSigDec
-    traceShowM serverName
-    traceM $ "---------------------------------------------------------------------------"
+    -- traceM $ "------------------------------- mkServerDec -------------------------------"
+    -- traceShowM apiTypeName
+    -- traceM $ "-- apiParams --"
+    -- traverse_ traceShowM apiParams
+    -- traceM $ "-- serverSigDec --"
+    -- traceShowM serverSigDec
+    -- traceShowM serverName
+    -- traceM $ "---------------------------------------------------------------------------"
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
     body <- case reverse handlers of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
@@ -871,7 +871,7 @@ mkApiPieceHandler :: GadtType -> ApiPiece -> ServerGenM [Dec]
 mkApiPieceHandler gadt apiPiece =
     enterApiPiece apiPiece $ do
         case apiPiece of
-            Endpoint _cName cArgs varBindings _hs Immutable ty -> do
+            Endpoint _cName cArgs _ _hs Immutable ty -> do
                 let nrArgs :: Int
                     nrArgs = length $ cArgs ^. typed @[(String, Type)]
                 varNames <- liftQ $ replicateM nrArgs (newName "arg")
@@ -898,7 +898,7 @@ mkApiPieceHandler gadt apiPiece =
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
-            Endpoint cName cArgs varBindings hs Mutable ty | hasJsonContentType hs -> do
+            Endpoint cName cArgs _ hs Mutable ty | hasJsonContentType hs -> do
                 let nrArgs :: Int
                     nrArgs = length $ cArgs ^. typed @[(String, Type)]
                 varNames <- liftQ $ replicateM nrArgs (newName "arg")
@@ -929,7 +929,7 @@ mkApiPieceHandler gadt apiPiece =
                             (normalB [|$(funBody)|])
                             []
                 pure [funSig, FunD handlerName [funClause]]
-            Endpoint _cName cArgs varBindings _hs Mutable ty -> do
+            Endpoint _cName cArgs _ _hs Mutable ty -> do
                 -- FIXME: For non-JSON request bodies we support only one argument.
                 -- Combining JSON with other content types do not work properly at this point.
                 -- It could probably be fixed by adding MimeRender instances to NamedField1
