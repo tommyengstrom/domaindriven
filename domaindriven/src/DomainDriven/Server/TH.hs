@@ -96,14 +96,6 @@ getSubActionDec tyVars subAction = do
     -- parent.
 
     cmdType <- reify $ subAction ^. field @"subActionName"
-    -- traceM $ "========================================================================"
-    -- traceM $ "=========== " <> show (subAction ^. field @"subActionName") <> " ==========="
-    -- traceM $ "========================================================================"
-    -- traceM $ "--------------------------------- cmdType ------------------------------"
-    -- traceShowM cmdType
-    -- traceM $ "--------------------------------- subAction ----------------------------"
-    -- traceShowM subAction
-    -- traceM $ "========================================================================"
     case cmdType of
         TyConI (DataD ctx name params mKind constructors deriv) -> do
             let parentParams :: [TyVarBndr ()]
@@ -205,18 +197,18 @@ getConstructors = \case
         pure cs
     d@DataD{} -> fail $ "Unexpected Action data type: " <> show d
     d -> fail $ "Expected a GADT with two parameters but got: " <> show d
+  where
+    last3 :: [a] -> Maybe (a, a, a)
+    last3 = \case
+        [a, b, c] -> Just (a, b, c)
+        [_, _] -> Nothing
+        [_] -> Nothing
+        [] -> Nothing
+        l -> last3 $ tail l
 
 toTyVarBndr :: VarBindings -> [TyVarBndr ()]
 toTyVarBndr VarBindings{paramPart, method, return, extra} =
     extra <> [KindedTV paramPart () (ConT ''ParamPart), PlainTV method (), PlainTV return ()]
-
-last3 :: [a] -> Maybe (a, a, a)
-last3 = \case
-    [a, b, c] -> Just (a, b, c)
-    [_, _] -> Nothing
-    [_] -> Nothing
-    [] -> Nothing
-    l -> last3 $ tail l
 
 mkVarBindings :: Show flag => [TyVarBndr flag] -> Either String VarBindings
 mkVarBindings varBinds = case varBinds of
@@ -350,7 +342,7 @@ matchP :: Type -> Either String Pmatch
 matchP = \case
     AppT (AppT (AppT (ConT p) (VarT x)) (LitT (StrTyLit pName))) ty -> do
         unless
-            (show p == show ''P) -- FIXME: Comparing them directly will not match? or is it just my test case with mkName?
+            (on (==) show p ''P)
             (Left $ "Expected " <> show ''P <> ", got: " <> show p)
         Right Pmatch{paramPart = x, paramName = pName, paramType = ty}
     ty -> Left $ "Expected type family `P`, got: " <> show ty
@@ -418,7 +410,6 @@ mkApiPiece cfg varBindings con = do
 mkServerSpec :: ServerConfig -> GadtName -> Q ApiSpec
 mkServerSpec cfg n = do
     (dec, varBindings) <- getActionDec n --- AHA, THis is the fucker fucking with me!
-    -- traceM $ "mkServerSpec: " <> show dec
     eps <- traverse (mkApiPiece cfg varBindings) =<< getConstructors dec
     opts <- getApiOptions cfg n
     pure
@@ -440,7 +431,6 @@ mkServerSpec cfg n = do
             , options = opts
             }
 
--- FIXME: This needs to be cleaned up
 gadtToAction :: GadtType -> Either String Type
 gadtToAction (GadtType ty) = case ty of
     AppT (AppT (AppT ty' (VarT _x)) (VarT _method)) (VarT _return) -> Right ty'
@@ -496,7 +486,6 @@ apiSpecTyVars spec =
 mkApiTypeDecs :: ApiSpec -> ServerGenM [Dec]
 mkApiTypeDecs spec = do
     (apiTypeName, tyVars) <- askApiNameAndParams spec
-    -- FIXME: Refactor this to traverse name and content at the same time!
     epTypes <- traverse mkEndpointApiType (spec ^. typed @[ApiPiece])
     topLevelDec <- case reverse epTypes of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
@@ -504,15 +493,6 @@ mkApiTypeDecs spec = do
             let fish :: Type -> Type -> Q Type
                 fish b a = [t|$(pure a) :<|> $(pure b)|]
             apiType <- liftQ (foldM fish ty (fmap fst ts))
-            -- let tyVars :: [TyVarBndr ()]
-            --    tyVars =
-            --        getUsedTyVars
-            --            (spec ^. field @"allVarBindings" . to toTyVarBndr)
-            --            apiType
-            -- traceM $ "*************************mkApiTypeDecs**************************"
-            -- traceM $ "------------------------- TySyndD -------------------------"
-            -- traceShowM $ (TySynD apiTypeName tyVars apiType)
-            -- traceM $ "==============================================================="
             pure $ TySynD apiTypeName tyVars apiType
     handlerDecs <- mconcat <$> traverse mkHandlerTypeDec (spec ^. typed @[ApiPiece])
     pure $ topLevelDec : handlerDecs
@@ -533,12 +513,6 @@ mkEndpointApiType p = enterApiPiece p $ case p of
                     foldMap
                         (getUsedTyVars $ bindings ^. field @"extra")
                         (ret ^. typed @Type : args ^.. typed @[(String, Type)] . folded . typed @Type)
-        -- traceM $ "-------------mkEndpointApiType - Endpoint--------------------"
-        -- traceM $ "epName: " <> show epName
-        -- traceM $ "args: " <> show args
-        -- traceM $ "ret: " <> show ret
-        -- traceM $ "bindings: " <> show bindings
-        -- traceM $ "usedTyVars: " <> show usedTyVars
         pure
             ( applyTyVars (ConT epName) usedTyVars
             , filter (`elem` usedTyVars) (bindings ^. field @"extra") -- Make sure we get type vars in the right order
@@ -551,15 +525,6 @@ mkEndpointApiType p = enterApiPiece p $ case p of
         params <- mkQueryParams cArgs
         bird <- liftQ [t|(:>)|]
         let ep = foldr (\a b -> bird `AppT` a `AppT` b) finalType params
-
-        -- traceM $ "-------------mkEndpointApiType - SubApi --------------------"
-        -- traceM $ "cName: " <> show cName
-        -- traceM $ "finalType: " <> show finalType
-        -- traceM $ "cArgs: " <> show cArgs
-        -- traceM $ "params: " <> show params
-        -- traceM $ "spec: " <> show spec
-        -- traceM $ "tyVars: " <> show tyVars
-        -- traceM $ "============================================================"
         pure (ep, tyVars)
 
 -- | Defines the servant types for the endpoints
@@ -586,7 +551,6 @@ mkHandlerTypeDec p = enterApiPiece p $ do
                 urlSegment <- mkUrlSegment name
                 liftQ $ prependServerEndpointName urlSegment stuff
             epTypeName <- askEndpointTypeName
-            --- FIXME Pick out the type variables!!!! FIXME
             pure [TySynD epTypeName (getUsedTyVars (toTyVarBndr varBindings) ty) ty]
         Endpoint name args varBindings hs Mutable retType -> do
             -- Non-get endpoints use a request body
@@ -705,14 +669,6 @@ mkServerDec spec = do
         mkHandlerExp p = enterApiPiece p $ do
             n <- askHandlerName
             pure $ VarE n `AppE` VarE runnerName
-    -- traceM $ "------------------------------- mkServerDec -------------------------------"
-    -- traceShowM apiTypeName
-    -- traceM $ "-- apiParams --"
-    -- traverse_ traceShowM apiParams
-    -- traceM $ "-- serverSigDec --"
-    -- traceShowM serverSigDec
-    -- traceShowM serverName
-    -- traceM $ "---------------------------------------------------------------------------"
     handlers <- traverse mkHandlerExp (spec ^. typed @[ApiPiece])
     body <- case reverse handlers of -- :<|> is right associative
         [] -> fail "Server contains no endpoints"
@@ -772,7 +728,7 @@ getUsedTyVarNames ty' = L.nub $ case ty' of
 withForall :: [TyVarBndr ()] -> Type -> Type
 withForall extra ty =
     ForallT
-        (L.nub bindings) -- FIXME: Why are we getting duplicates here?
+        bindings
         varConstraints
         ty
   where
@@ -930,10 +886,6 @@ mkApiPieceHandler gadt apiPiece =
                             []
                 pure [funSig, FunD handlerName [funClause]]
             Endpoint _cName cArgs _ _hs Mutable ty -> do
-                -- FIXME: For non-JSON request bodies we support only one argument.
-                -- Combining JSON with other content types do not work properly at this point.
-                -- It could probably be fixed by adding MimeRender instances to NamedField1
-                -- that just uses the underlying MimeRender.
                 let nrArgs :: Int
                     nrArgs = length $ cArgs ^. typed @[(String, Type)]
                 unless (nrArgs < 2) $
