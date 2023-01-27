@@ -22,7 +22,7 @@ data ExtraParamAction (bool :: Bool) (ep :: ExtraP) :: Action where
         -> ExtraParamAction bool ep x CbCmd Text
     Sub1 :: Sub1Action ep x a r -> ExtraParamAction bool ep x a r
     Sub2 :: Sub2Action x a r -> ExtraParamAction bool ep x a r
-    -- Sub3 :: Sub3Action ep bool x a r -> ExtraParamAction bool ep x a r
+    Sub3 :: Sub3Action ep bool x a r -> ExtraParamAction bool ep x a r
     deriving (HasApiOptions)
 
 data Sub1Action (ep :: ExtraP) :: Action where
@@ -46,8 +46,7 @@ handleExtraParamAction = \case
     ReverseText t -> CbCmd $ \_runTransaction -> pure (T.reverse t)
     Sub1 a -> handleSub1Action a
     Sub2 a -> handleSub2Action a
-
--- Sub3 a -> handleSub3Action a
+    Sub3 a -> handleSub3Action a
 
 handleSub1Action :: MonadThrow m => ActionHandler () () m (Sub1Action ep)
 handleSub1Action = \case
