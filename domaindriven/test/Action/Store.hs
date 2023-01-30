@@ -1,7 +1,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Models.Store where
+module Action.Store where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)

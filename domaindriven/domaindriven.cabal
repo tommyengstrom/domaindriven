@@ -51,18 +51,19 @@ library
       DerivingStrategies
       DuplicateRecordFields
       FlexibleContexts
-      FunctionalDependencies
       FlexibleInstances
+      FunctionalDependencies
       GADTs
       GeneralizedNewtypeDeriving
+      ImportQualifiedPost
       LambdaCase
       MultiParamTypeClasses
-      PolyKinds
       MultiWayIf
       NamedFieldPuns
       NoImplicitPrelude
       OverloadedLabels
       OverloadedStrings
+      PolyKinds
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving
@@ -106,11 +107,12 @@ test-suite domaindriven-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Action.Counter
+      Action.ExtraParam
+      Action.ServerTest
+      Action.Store
       DomainDriven.Internal.NamedJsonFieldsSpec
       DomainDriven.ServerSpec
-      DomainDriven.ServerSpecModel
-      Models.Counter
-      Models.Store
       Paths_domaindriven
   hs-source-dirs:
       test
@@ -125,18 +127,19 @@ test-suite domaindriven-test
       DerivingStrategies
       DuplicateRecordFields
       FlexibleContexts
-      FunctionalDependencies
       FlexibleInstances
+      FunctionalDependencies
       GADTs
       GeneralizedNewtypeDeriving
+      ImportQualifiedPost
       LambdaCase
       MultiParamTypeClasses
-      PolyKinds
       MultiWayIf
       NamedFieldPuns
       NoImplicitPrelude
       OverloadedLabels
       OverloadedStrings
+      PolyKinds
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving

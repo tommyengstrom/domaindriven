@@ -3,7 +3,7 @@ module DomainDriven.Server.Types where
 import Control.Monad.State
 import Data.Function (on)
 import Data.Generics.Product
-import qualified Data.List as L
+import Data.List qualified as L
 import Data.Set (Set)
 import GHC.Generics (Generic)
 import Language.Haskell.TH
@@ -13,13 +13,23 @@ import Prelude
 -- Contains infromatiotion of how the API should look, gathered from the Action GADT.
 data ApiSpec = ApiSpec
     { gadtName :: GadtName
+    , gadtType :: GadtType
     -- ^ Name of the GADT representing the command
+    , allVarBindings :: VarBindings
     , endpoints :: [ApiPiece]
     -- ^ Endpoints created from the constructors of the GADT
     , options :: ApiOptions
     -- ^ The setting to use when generating part of the API
     }
     deriving (Show, Generic)
+
+data VarBindings = VarBindings
+    { paramPart :: Name
+    , method :: Name
+    , return :: Name
+    , extra :: [TyVarBndr ()]
+    }
+    deriving (Show, Generic, Eq)
 
 data ApiOptions = ApiOptions
     { renameConstructor :: String -> String
@@ -46,13 +56,19 @@ instance Show ApiOptions where
                 ^. field @"typenameSeparator"
             <> "\"}"
 
-data ActionType
+data Mutability
     = Mutable
     | Immutable
     deriving (Show, Eq)
 
 data ApiPiece
-    = Endpoint ConstructorName ConstructorArgs HandlerSettings ActionType EpReturnType
+    = Endpoint
+        ConstructorName
+        ConstructorArgs
+        VarBindings
+        HandlerSettings
+        Mutability
+        EpReturnType
     | SubApi ConstructorName ConstructorArgs ApiSpec
     deriving (Show, Generic)
 
@@ -65,7 +81,8 @@ data HandlerSettings = HandlerSettings
 newtype ConstructorName = ConstructorName Name deriving (Show, Generic, Eq)
 newtype EpReturnType = EpReturnType Type deriving (Show, Generic, Eq)
 newtype GadtName = GadtName Name deriving (Show, Generic, Eq)
-newtype GadtType = GadtType {unGadtType :: Type} deriving (Show, Generic, Eq)
+newtype GadtType = GadtType Type deriving (Show, Generic, Eq)
+
 newtype UrlSegment = UrlSegment String deriving (Show, Generic, Eq)
 newtype ConstructorArgs = ConstructorArgs [(String, Type)] deriving (Show, Generic, Eq)
 newtype Runner = Runner Type deriving (Show, Generic, Eq)
@@ -92,3 +109,43 @@ data ServerGenState = ServerGenState
 
 newtype ServerGenM a = ServerGenM {unServerGenM :: StateT ServerGenState Q a}
     deriving newtype (Functor, Applicative, Monad, MonadState ServerGenState, MonadFail)
+
+data Pmatch = Pmatch
+    { paramPart :: Name
+    , paramName :: String
+    , paramType :: Type
+    }
+    deriving (Show, Generic)
+
+data ConstructorMatch = ConstructorMatch
+    { xParam :: Name
+    -- ^ Of kind ParamPart
+    , constructorName :: Name
+    , parameters :: [Pmatch]
+    , finalType :: FinalConstructorTypeMatch
+    }
+    deriving (Show, Generic)
+
+data SubActionMatch = SubActionMatch
+    { constructorName :: Name
+    , parameters :: [Pmatch]
+    , subActionName :: Name
+    , subActionType :: Type
+    }
+    deriving (Show, Generic)
+
+data SubActionTypeMatch = SubActionTypeMatch
+    deriving (Show, Generic)
+
+data FinalConstructorTypeMatch = FinalConstructorTypeMatch
+    { requestType :: RequestTypeMatch
+    , returnType :: Type
+    }
+    deriving (Show, Generic)
+
+data RequestTypeMatch = RequestTypeMatch
+    { accessType :: Type
+    , contentTypes :: Type
+    , verb :: Type
+    }
+    deriving (Show, Generic)

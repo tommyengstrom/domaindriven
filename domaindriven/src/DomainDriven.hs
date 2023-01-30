@@ -2,6 +2,7 @@ module DomainDriven (module X) where
 
 import Data.UUID as X (UUID)
 
+import DomainDriven.Internal.NamedFields as X
 import DomainDriven.Persistance.Class as X
     ( ReadModel (..)
     , Stored (..)

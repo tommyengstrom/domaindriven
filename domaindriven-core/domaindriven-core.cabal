@@ -48,18 +48,19 @@ library
       DerivingStrategies
       DuplicateRecordFields
       FlexibleContexts
-      FunctionalDependencies
       FlexibleInstances
+      FunctionalDependencies
       GADTs
       GeneralizedNewtypeDeriving
+      ImportQualifiedPost
       LambdaCase
       MultiParamTypeClasses
-      PolyKinds
       MultiWayIf
       NamedFieldPuns
       NoImplicitPrelude
       OverloadedLabels
       OverloadedStrings
+      PolyKinds
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving
@@ -114,18 +115,19 @@ test-suite domaindriven-core-test
       DerivingStrategies
       DuplicateRecordFields
       FlexibleContexts
-      FunctionalDependencies
       FlexibleInstances
+      FunctionalDependencies
       GADTs
       GeneralizedNewtypeDeriving
+      ImportQualifiedPost
       LambdaCase
       MultiParamTypeClasses
-      PolyKinds
       MultiWayIf
       NamedFieldPuns
       NoImplicitPrelude
       OverloadedLabels
       OverloadedStrings
+      PolyKinds
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving

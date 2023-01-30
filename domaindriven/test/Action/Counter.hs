@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Models.Counter where
+module Action.Counter where
 
 import Control.DeepSeq
 import Control.Monad (when)
