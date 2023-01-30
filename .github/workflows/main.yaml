@@ -33,9 +33,9 @@ jobs:
       - name: ACTIONS_ALLOW_UNSECURE_COMMANDS
         id: ACTIONS_ALLOW_UNSECURE_COMMANDS
         run: echo 'ACTIONS_ALLOW_UNSECURE_COMMANDS=true' >> $GITHUB_ENV
+
       - name: Update stack
         run: stack update
-
       - uses: actions/cache@v2
         name: Cache ~/.stack
         with:
@@ -43,17 +43,17 @@ jobs:
           key: ${{ runner.os }}-stack-${{ hashFiles('stack.yaml') }}
       - name: Build dependencies
         run: |
-            stack build domain-driven --only-dependencies --fast
+            stack build domaindriven --only-dependencies --fast
 
       - uses: actions/cache@v2
         name: Cache .stack-work
         with:
           path: .stack-work
           key: ${{ runner.os }}-stack-${{ hashFiles('services/claims/package.yaml') }}
-      - name: Build domain-driven
+      - name: Build domaindriven
         run: |
-            stack build domain-driven --fast
+            stack build domaindriven --fast
       - name: Run tests
         run: |
-            stack test domain-driven --fast
+            stack test domaindriven --fast
 

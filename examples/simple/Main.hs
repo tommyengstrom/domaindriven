@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 
--- | This module contains simple example of how to setup a counter using domain-driven.
+-- | This module contains simple example of how to setup a counter using domaindriven.
 module Main where
 
 import Control.Monad.Catch hiding (Handler)
