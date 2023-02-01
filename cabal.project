@@ -1,0 +1,6 @@
+packages:
+  domaindriven/
+  domaindriven-core/
+
+tests: True
+optimization: False
