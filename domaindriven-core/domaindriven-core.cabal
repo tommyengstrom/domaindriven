@@ -9,7 +9,7 @@ version:        0.5.0
 synopsis:       Batteries included event sourcing and CQRS
 description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 category:       Web
-homepage:       https://github.com/tommyengstrom/domaindriven#readme
+homepage:       https://github.com/tommyengstrom/domaindriven/tree/master/domaindriven-core#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
