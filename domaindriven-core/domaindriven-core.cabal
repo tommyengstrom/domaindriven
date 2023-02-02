@@ -13,7 +13,7 @@ homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
-copyright:      2022 Tommy Engström
+copyright:      2023 Tommy Engström
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
