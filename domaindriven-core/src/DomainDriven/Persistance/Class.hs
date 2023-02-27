@@ -17,19 +17,46 @@ import System.Random
 import UnliftIO
 import Prelude
 
+-- class ReadModel p where
+--     type Model p :: Type
+--     type Event p :: Type
+--     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
+--     getModel :: p -> IO (Model p)
+--     getEventList :: p -> IO [Stored (Event p)]
+--     getEventStream :: p -> SerialT IO (Stored (Event p))
+
+data AllIndices = AllIndices
+    deriving (Show, Eq)
+
 class ReadModel p where
     type Model p :: Type
     type Event p :: Type
-    applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: p -> IO (Model p)
-    getEventList :: p -> IO [Stored (Event p)]
-    getEventStream :: p -> SerialT IO (Stored (Event p))
+    type Index p :: Type
+    applyEvent
+        :: Index p
+        -> p
+        -> Model p
+        -> Stored (Event p)
+        -> Model p
+    getModel
+        :: Index p
+        -> p
+        -> IO (Model p)
+    getEventList
+        :: Index p
+        -> p
+        -> IO [Stored (Event p)]
+    getEventStream
+        :: Index p
+        -> p
+        -> SerialT IO (Stored (Event p))
 
 class ReadModel p => WriteModel p where
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
-        => p
+        => Index p
+        -> p
         -> (Model p -> m (Model p -> a, [Event p]))
         -> m a
 
