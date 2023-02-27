@@ -6,13 +6,12 @@ module Main where
 
 import Control.Monad.Catch hiding (Handler)
 import Control.Monad.Except
+import Counter
 import Data.Aeson
 import Data.Bifunctor (first)
-import qualified Data.ByteString.Lazy.Char8 as BL
+import Data.ByteString.Lazy.Char8 qualified as BL
 import DomainDriven
 import DomainDriven.Persistance.ForgetfulInMemory
-import DomainDriven.Server
-import Models.Counter
 import Network.Wai.Handler.Warp (run)
 import Servant
 import Servant.OpenApi
