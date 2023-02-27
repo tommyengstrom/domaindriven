@@ -21,6 +21,66 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
+executable generic
+  main-is: Main.hs
+  other-modules:
+      Counter
+      ServantPatch
+      Paths_domaindriven_examples
+  hs-source-dirs:
+      generic
+  default-extensions:
+      Arrows
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , deepseq
+    , domaindriven
+    , domaindriven-core
+    , exceptions
+    , mtl
+    , openapi3
+    , servant-openapi3
+    , servant-server
+    , text
+    , wai
+    , warp
+  default-language: Haskell2010
+
 executable simple
   main-is: Main.hs
   other-modules:
@@ -61,29 +121,23 @@ executable simple
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
-      QuickCheck >=2.14.2 && <2.15
-    , aeson >=2.0.3 && <2.2
-    , async >=2.2.4 && <2.3
+      aeson
     , base >=4.7 && <5
     , bytestring
-    , containers >=0.6.5.1 && <0.7
-    , deepseq >=1.4.6.1 && <1.5
-    , domaindriven >=0.5.0 && <0.6
-    , domaindriven-core >=0.5.0 && <0.6
-    , exceptions >=0.10.4 && <0.11
-    , hspec >=2.9.7 && <2.10
-    , http-client >=0.7.13.1 && <0.8
-    , mtl >=2.2.2 && <2.3
-    , openapi3 >=3.2.2 && <3.3
-    , quickcheck-arbitrary-adt >=0.3.1.0 && <0.4
-    , quickcheck-classes >=0.6.5.0 && <0.7
-    , servant-client ==0.19.*
+    , containers
+    , deepseq
+    , domaindriven
+    , domaindriven-core
+    , exceptions
+    , mtl
+    , openapi3
     , servant-openapi3
-    , servant-server >=0.19.2 && <0.20
-    , text >=1.2.5.0 && <1.3
-    , warp >=3.3.23 && <3.4
+    , servant-server
+    , text
+    , wai
+    , warp
   default-language: Haskell2010
 
 executable store
@@ -126,27 +180,21 @@ executable store
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
-      QuickCheck >=2.14.2 && <2.15
-    , aeson >=2.0.3 && <2.2
-    , async >=2.2.4 && <2.3
+      aeson
     , base >=4.7 && <5
     , bytestring
-    , containers >=0.6.5.1 && <0.7
-    , deepseq >=1.4.6.1 && <1.5
-    , domaindriven >=0.5.0 && <0.6
-    , domaindriven-core >=0.5.0 && <0.6
-    , exceptions >=0.10.4 && <0.11
-    , hspec >=2.9.7 && <2.10
-    , http-client >=0.7.13.1 && <0.8
-    , mtl >=2.2.2 && <2.3
-    , openapi3 >=3.2.2 && <3.3
-    , quickcheck-arbitrary-adt >=0.3.1.0 && <0.4
-    , quickcheck-classes >=0.6.5.0 && <0.7
-    , servant-client ==0.19.*
+    , containers
+    , deepseq
+    , domaindriven
+    , domaindriven-core
+    , exceptions
+    , mtl
+    , openapi3
     , servant-openapi3
-    , servant-server >=0.19.2 && <0.20
-    , text >=1.2.5.0 && <1.3
-    , warp >=3.3.23 && <3.4
+    , servant-server
+    , text
+    , wai
+    , warp
   default-language: Haskell2010
