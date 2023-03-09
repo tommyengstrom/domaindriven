@@ -34,6 +34,8 @@ library
       DomainDriven.Server.Class
       DomainDriven.Server.Config
       DomainDriven.Server.Helpers
+      DomainDriven.Server.Servant
+      DomainDriven.Server.Servant.TaggedSumOfApis
       DomainDriven.Server.TH
       DomainDriven.Server.Types
   other-modules:
@@ -79,11 +81,13 @@ library
     , async >=2.2.4 && <2.3
     , base >=4.7 && <5
     , bytestring >=0.11.3 && <0.12
+    , constraints
     , containers >=0.6.5.1 && <0.7
     , deepseq >=1.4.6.1 && <1.5
     , domaindriven-core >=0.5.0 && <0.6
     , exceptions >=0.10.4 && <0.11
     , generic-lens >=2.2.1.0 && <2.3
+    , generics-sop
     , http-types >=0.12.3 && <0.13
     , microlens >=0.4.12.0 && <0.5
     , mtl >=2.2.2 && <2.3
@@ -155,11 +159,13 @@ test-suite domaindriven-test
     , aeson >=2.0.3 && <2.2
     , async >=2.2.4 && <2.3
     , base >=4.7 && <5
+    , constraints
     , containers >=0.6.5.1 && <0.7
     , deepseq >=1.4.6.1 && <1.5
     , domaindriven >=0.5.0 && <0.6
     , domaindriven-core >=0.5.0 && <0.6
     , exceptions >=0.10.4 && <0.11
+    , generics-sop
     , hspec >=2.9.7 && <2.10
     , http-client >=0.7.13.1 && <0.8
     , mtl >=2.2.2 && <2.3

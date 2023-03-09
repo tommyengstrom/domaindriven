@@ -64,7 +64,7 @@ data HandlerType method model event m a where
         -> HandlerType method model event m a
     CbQuery
         :: (CanMutate method ~ 'False, GetModelAccess method ~ 'Callback)
-        => ((m model) -> m a)
+        => (m model -> m a)
         -> HandlerType method model event m a
     Cmd
         :: (CanMutate method ~ 'True, GetModelAccess method ~ 'Direct)

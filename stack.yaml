@@ -2,8 +2,8 @@ resolver: lts-20.7
 packages:
 - domaindriven-core
 - domaindriven
-extra-deps:
+
 ghc-options:
-  "$locals": -fwrite-ide-info
+  "$locals": -O0 -fwrite-ide-info
   '$everything': -haddock
     -hiedir=.hie
