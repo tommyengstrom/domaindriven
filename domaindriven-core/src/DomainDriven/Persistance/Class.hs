@@ -25,13 +25,15 @@ class ReadModel p where
     getEventList :: p -> IO [Stored (Event p)]
     getEventStream :: p -> SerialT IO (Stored (Event p))
 
+type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
+
 class ReadModel p => WriteModel p where
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
         => p
-        -> (Model p -> m (Model p -> a, [Event p]))
-        -> m a
+        -> TransactionalUpdate (Model p) (Event p) m a
+
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with

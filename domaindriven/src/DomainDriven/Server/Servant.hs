@@ -27,11 +27,20 @@ import Prelude
 
 data Cmd (model :: Type) (event :: Type) (verb :: Type)
 
+newtype CmdImpl (model :: Type) (event :: Type) m a = Cmd (model -> m (model -> a, [event]))
+
 data Query (model :: Type) (verb :: Type)
+
+newtype QueryImpl (model :: Type) m a = Query (model -> m a)
 
 data CbQuery (model :: Type) (verb :: Type)
 
+newtype CbQueryImpl (model :: Type) m a = CbQuery ((forall n. MonadIO n => n model) -> m a)
+
 data CbCmd (model :: Type) (event :: Type) (verb :: Type)
+
+newtype CbCmdImpl (model :: Type) (event :: Type) m a =
+    CbCmd ((forall n b. MonadUnliftIO n => TransactionalUpdate model event n b) -> m a)
 
 type family CanMutate (method :: StdMethod) :: Bool where
   CanMutate 'GET = 'False
@@ -47,7 +56,7 @@ mapServer f Delayed {..} =
     { serverD = \c p h a b req -> fmap f (serverD c p h a b req),
       ..
     }
-
+{-
 -- should use proxies?
 -- no! wrap types instead. less magic and avoids type annotations
 -- type ClaimTypeApi lc model events = TaggedSumOfApis (MkClaimTypeApi lc model events)
@@ -157,7 +166,7 @@ instance MapModel m model model' event event' api' api => MapModel m model model
 
 instance MapModel m model model' event event' api' api => MapModel m model model' event event' (Capture' mods capture a :> api') (Capture' mods capture a :> api) where
   mapModel proj inj server c = mapModel @m @model @model' @event @event' @api' @api proj inj (server c)
-
+-}
 -- I won't bother with read-only models in the server context...
 data WriteModel' model events where
   WriteModel' :: WriteModel p => p -> WriteModel' (Model p) (Event p)
@@ -169,14 +178,14 @@ instance
   ) =>
   HasServer (Cmd model event (Verb method status ctypes a)) context
   where
-  type ServerT (Cmd model event (Verb method status ctypes a)) m = model -> m (model -> a, [event])
-  hoistServerWithContext _ _ f action model = f (action model)
+  type ServerT (Cmd model event (Verb method status ctypes a)) m = CmdImpl model event m a
+  hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
 
   route _ context delayedServer = case getContextEntry context :: WriteModel' model event of
     WriteModel' p ->
       route (Proxy @(Verb method status ctypes a)) context $
         mapServer
-          ( \server -> do
+          ( \(Cmd server) -> do
               handlerRes <-
                 liftIO . Control.Monad.Catch.try . transactionalUpdate p $
                   either throwIO pure <=< runHandler . server
@@ -190,14 +199,14 @@ instance
   ) =>
   HasServer (Query model (Verb method status ctypes a)) context
   where
-  type ServerT (Query model (Verb method status ctypes a)) m = model -> m a
+  type ServerT (Query model (Verb method status ctypes a)) m = QueryImpl model m a
 
-  hoistServerWithContext _ _ f action model = f (action model)
+  hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
 
   route _ context delayedServer = case getContextEntry context :: WriteModel' model event of
     WriteModel' p ->
       route (Proxy @(Verb method status ctypes a)) context $
-        mapServer (=<< liftIO (getModel p)) delayedServer
+        mapServer (\(Query server) -> server =<< liftIO (getModel p)) delayedServer
 
 instance
   ( HasContextEntry context (WriteModel' model event),
@@ -205,18 +214,14 @@ instance
   ) =>
   HasServer (CbQuery model (Verb method status ctypes a)) context
   where
-  type ServerT (CbQuery model (Verb method status ctypes a)) m = IO model -> m a
+  type ServerT (CbQuery model (Verb method status ctypes a)) m = CbQueryImpl model m a
 
-  hoistServerWithContext _ _ f action model = f (action model)
+  hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \ model -> f (action model)
 
   route _ context delayedServer = case getContextEntry context :: WriteModel' model event of
     WriteModel' p ->
       route (Proxy @(Verb method status ctypes a)) context $
-        mapServer ($ getModel p) delayedServer
-
--- We have to wrap the transact function to avoid  'Illegal polymorphic or qualified type in typeclass'
-newtype TransactionalUpdate model event
-  = TransactionalUpdate (forall m x. MonadUnliftIO m => (model -> m (model -> x, [event])) -> m x)
+        mapServer (\(CbQuery server) -> server $ liftIO $ getModel p ) delayedServer
 
 instance
   ( HasContextEntry context (WriteModel' model event),
@@ -225,14 +230,14 @@ instance
   ) =>
   HasServer (CbCmd model event (Verb method status ctypes a)) context
   where
-  type ServerT (CbCmd model event (Verb method status ctypes a)) m = TransactionalUpdate model event -> m a
+  type ServerT (CbCmd model event (Verb method status ctypes a)) m = CbCmdImpl model event m a
 
-  hoistServerWithContext _ _ f action model = f (action model)
+  hoistServerWithContext _ _ f (CbCmd action) = CbCmd $ \ transact -> f (action transact)
 
   route _ context delayedServer = case getContextEntry context :: WriteModel' model event of
     WriteModel' p ->
       route (Proxy @(Verb method status ctypes a)) context $
-        mapServer ($ TransactionalUpdate (transactionalUpdate p)) delayedServer
+        mapServer (\(CbCmd server) ->  server $ transactionalUpdate p) delayedServer
 
 data NamedField = NamedField Symbol Type
 
