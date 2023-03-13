@@ -1,7 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
@@ -48,9 +48,33 @@ mapServer f Delayed {..} =
       ..
     }
 
--- TODO: fix this nonsense
+-- should use proxies?
+-- no! wrap types instead. less magic and avoids type annotations
+-- type ClaimTypeApi lc model events = TaggedSumOfApis (MkClaimTypeApi lc model events)
+-- need to transform through TaggedSumOfApis...
 gmapModel ::
-  forall m model model' event event' mkApiFrom mkApiTo.
+  forall m mkModelApi model model' event event'.
+  ( SOP.Generic (mkModelApi model' event' (AsServerT m)),
+    SOP.Generic (mkModelApi model event (AsServerT m)),
+    GMapModel
+      m
+      model
+      model'
+      event
+      event'
+      (SOP.Code (mkModelApi model' event' AsApi))
+      (SOP.Code (mkModelApi model event AsApi))
+      (SOP.Code (mkModelApi model' event' (AsServerT m)))
+      (SOP.Code (mkModelApi model event (AsServerT m)))
+  ) =>
+  (model -> model') ->
+  (event' -> event) ->
+  mkModelApi model' event' (AsServerT m) ->
+  mkModelApi model event (AsServerT m)
+gmapModel proj inj = SOP.to . SOP . gmapModel'' @m @model @model' @event @event' @(SOP.Code (mkModelApi model' event' AsApi)) @(SOP.Code (mkModelApi model event AsApi)) @_ @_ proj inj . unSOP . SOP.from
+
+{- gmapModel ::
+  forall mkApiFrom mkApiTo m model model' event event' .
   (SOP.Generic (mkApiFrom (AsServerT m)), SOP.Generic (mkApiTo (AsServerT m))
   , GMapModel m model model' event event' (SOP.Code (mkApiFrom AsApi)) (SOP.Code (mkApiTo AsApi)) (SOP.Code (mkApiFrom (AsServerT m))) (SOP.Code (mkApiTo (AsServerT m)))
   ) =>
@@ -59,7 +83,7 @@ gmapModel ::
   mkApiFrom (AsServerT m) ->
   mkApiTo (AsServerT m)
 gmapModel proj inj = SOP.to . SOP . gmapModel'' @m @model @model' @event @event' @(SOP.Code (mkApiFrom AsApi)) @(SOP.Code (mkApiTo AsApi)) @_ @_ proj inj . unSOP . SOP.from
-
+ -}
 class GMapModel m model model' event event' (apisFrom :: [[Type]]) (apisTo :: [[Type]]) (serversFrom :: [[Type]]) (serversTo :: [[Type]]) where
   gmapModel'' :: (model -> model') -> (event' -> event) -> NS (NP I) serversFrom -> NS (NP I) serversTo
 
@@ -132,8 +156,7 @@ instance MapModel m model model' event event' api' api => MapModel m model model
   mapModel = mapModel @m @model @model' @event @event' @api' @api
 
 instance MapModel m model model' event event' api' api => MapModel m model model' event event' (Capture' mods capture a :> api') (Capture' mods capture a :> api) where
-  mapModel proj inj server c = mapModel @m @model @model' @event @event' @api' @api proj inj  (server c)
-
+  mapModel proj inj server c = mapModel @m @model @model' @event @event' @api' @api proj inj (server c)
 
 -- I won't bother with read-only models in the server context...
 data WriteModel' model events where
