@@ -15,6 +15,8 @@ import Servant hiding (inject)
 import Servant.Server.Internal.Delayed
 import UnliftIO hiding (Handler)
 import Prelude
+import Servant.Auth.Server
+import Control.Monad.Except
 
 newtype CmdServer (model :: Type) (event :: Type) m a = Cmd (model -> m (model -> a, [event]))
 
@@ -24,6 +26,18 @@ newtype CbQueryServer (model :: Type) m a = CbQuery ((forall n. MonadIO n => n m
 
 newtype CbCmdServer (model :: Type) (event :: Type) m a
   = CbCmd ((forall n b. MonadUnliftIO n => TransactionalUpdate model event n b) -> m a)
+
+instance (MonadError ServerError m) => ThrowAll (CmdServer model event m a) where
+    throwAll = Cmd . throwAll
+
+instance (MonadError ServerError m) => ThrowAll (CbCmdServer model event m a) where
+    throwAll err = CbCmd $ \_ -> throwAll err
+
+instance (MonadError ServerError m) => ThrowAll (QueryServer model m a) where
+    throwAll  = Query . throwAll
+
+instance (MonadError ServerError m) => ThrowAll (CbQueryServer model m a) where
+    throwAll err = CbQuery $ \_ -> throwAll err
 
 type family CanMutate (method :: StdMethod) :: Bool where
   CanMutate 'GET = 'False

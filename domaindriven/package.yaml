@@ -32,6 +32,8 @@ dependencies:
 - generics-sop
 - constraints
 - servant-openapi3
+- optics
+- servant-auth-server
 
 
 default-extensions:

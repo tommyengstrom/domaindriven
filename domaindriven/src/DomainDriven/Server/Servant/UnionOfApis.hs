@@ -6,7 +6,7 @@
 module DomainDriven.Server.Servant.UnionOfApis where
 
 import Data.Kind
-import Generics.SOP (NP (Nil, (:*)))
+import Generics.SOP (I (..), NP (Nil, (:*)))
 import Servant
 import Servant.OpenApi
 import Servant.Server.Internal.Delayed
@@ -15,12 +15,14 @@ import Prelude
 
 type Api = Type
 
-data UnionOfApis (apis :: [Api]) -- union...
+-- also with record? todo: naming? Or Generic.UnionOfApis and plain NP.UnionOfApis?
+data UnionOfApis (apis :: [Api])
 
-data FlipServerT (m :: Type -> Type) (api :: Api) where
-  FlipServerT :: ServerT api m -> FlipServerT m api
+type family MapServerT (apis :: [Api]) (m :: Type -> Type) :: [Type] where
+  MapServerT '[] _ = '[]
+  MapServerT (api ': apis) m = ServerT api m ': MapServerT apis m
 
-type ServerTs' (apis :: [Api]) m = NP (FlipServerT m) apis
+type ServerTs' (apis :: [Api]) m = NP I (MapServerT apis m)
 
 class HaveServers (apis :: [Api]) (context :: [Type]) where
   routes :: Context context -> Delayed env (ServerTs' apis Handler) -> Router env
@@ -33,17 +35,17 @@ instance HaveServers '[] context where
 instance (HasServer api context, HaveServers apis context) => HaveServers (api ': apis) context where
   routes context delayedServers =
     choice
-      (route (Proxy @api) context $ (\(FlipServerT server :* _) -> server) <$> delayedServers)
+      (route (Proxy @api) context $ (\(I server :* _) -> server) <$> delayedServers)
       (routes @apis @context context $ (\(_ :* servers) -> servers) <$> delayedServers)
-  hoistServersWithContext nt (FlipServerT server :* servers) =
-    FlipServerT (hoistServerWithContext (Proxy @api) (Proxy @context) nt server)
+  hoistServersWithContext nt (I server :* servers) =
+    I (hoistServerWithContext (Proxy @api) (Proxy @context) nt server)
       :* hoistServersWithContext @apis @context nt servers
 
-newtype ServerTs (apis :: [Api]) m = ServerTs (NP (FlipServerT m) apis)
+newtype ServerTs (apis :: [Api]) m = ServerTs (NP I (MapServerT apis m))
 
 instance HaveServers apis context => HasServer (UnionOfApis apis) context where
   type ServerT (UnionOfApis apis) m = ServerTs apis m
-  route _ context delayedServers = routes context $ (\(ServerTs servers) -> servers) <$> delayedServers
+  route _ context delayedServers = routes @apis context $ (\(ServerTs servers) -> servers) <$> delayedServers
   hoistServerWithContext _ _ nt (ServerTs servers) = ServerTs $ hoistServersWithContext @apis @context nt servers
 
 instance HasOpenApi (UnionOfApis '[]) where
