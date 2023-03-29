@@ -36,13 +36,13 @@ library
       DomainDriven.Server.Helpers
       DomainDriven.Server.Servant
       DomainDriven.Server.Servant.Api
-      DomainDriven.Server.Servant.MangledPathSegment
+      DomainDriven.Server.Servant.Helper.GenericRecord
       DomainDriven.Server.Servant.MapModel
       DomainDriven.Server.Servant.Server
       DomainDriven.Server.Servant.TaggedSumOfApis
-      DomainDriven.Server.Servant.UnionOfApis
       DomainDriven.Server.TH
       DomainDriven.Server.Types
+      Servant.Auth.Internal.ThrowAll.SOP
   other-modules:
       Paths_domaindriven
   hs-source-dirs:

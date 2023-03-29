@@ -53,11 +53,11 @@ instance MapModelAndEvent (NP I fields) (NP I fields') model model' event event'
     S xs -> case xs of {}
 
 instance
-  ( SOP.Generic (TaggedSumOfServers a),
-    SOP.Generic (TaggedSumOfServers b),
-    MapModelAndEvent (SOP I (SOP.Code (TaggedSumOfServers a))) (SOP I (SOP.Code (TaggedSumOfServers b))) model model' event event'
+  ( SOP.Generic (RecordOfServers a),
+    SOP.Generic (RecordOfServers b),
+    MapModelAndEvent (SOP I (SOP.Code (RecordOfServers a))) (SOP I (SOP.Code (RecordOfServers b))) model model' event event'
   ) =>
-  MapModelAndEvent (TaggedSumOfServers a) (TaggedSumOfServers b) model model' event event'
+  MapModelAndEvent (RecordOfServers a) (RecordOfServers b) model model' event event'
   where
   mapModelAndEvent proj inj = SOP.to . mapModelAndEvent proj inj . SOP.from
 
@@ -99,11 +99,11 @@ instance MapModel (NP I fields) (NP I fields') model model' => MapModel (SOP I '
     S xs -> case xs of {}
 
 instance
-  ( SOP.Generic (TaggedSumOfServers a),
-    SOP.Generic (TaggedSumOfServers b),
-    MapModel (SOP I (SOP.Code (TaggedSumOfServers a))) (SOP I (SOP.Code (TaggedSumOfServers b))) model model'
+  ( SOP.Generic (RecordOfServers a),
+    SOP.Generic (RecordOfServers b),
+    MapModel (SOP I (SOP.Code (RecordOfServers a))) (SOP I (SOP.Code (RecordOfServers b))) model model'
   ) =>
-  MapModel (TaggedSumOfServers a) (TaggedSumOfServers b) model model'
+  MapModel (RecordOfServers a) (RecordOfServers b) model model'
   where
   mapModel proj = SOP.to . mapModel proj . SOP.from
 
@@ -145,11 +145,11 @@ instance MapEvent (NP I fields) (NP I fields') event event' => MapEvent (SOP I '
     S xs -> case xs of {}
 
 instance
-  ( SOP.Generic (TaggedSumOfServers a),
-    SOP.Generic (TaggedSumOfServers b),
-    MapEvent (SOP I (SOP.Code (TaggedSumOfServers a))) (SOP I (SOP.Code (TaggedSumOfServers b))) event event'
+  ( SOP.Generic (RecordOfServers a),
+    SOP.Generic (RecordOfServers b),
+    MapEvent (SOP I (SOP.Code (RecordOfServers a))) (SOP I (SOP.Code (RecordOfServers b))) event event'
   ) =>
-  MapEvent (TaggedSumOfServers a) (TaggedSumOfServers b) event event'
+  MapEvent (RecordOfServers a) (RecordOfServers b) event event'
   where
   mapEvent inj = SOP.to . mapEvent inj . SOP.from
 
