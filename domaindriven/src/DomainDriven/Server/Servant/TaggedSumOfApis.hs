@@ -1,16 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE EmptyCase #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module DomainDriven.Server.Servant.TaggedSumOfApis where
 
-import Data.Constraint
 import Data.Kind
-import DomainDriven.Server.Servant.MangledPathSegment
-import DomainDriven.Server.Servant.UnionOfApis (UnionOfApis)
+import Data.OpenApi (OpenApi, prependPath)
+import Data.Text qualified as Text
 import GHC.Generics qualified as GHC
 import GHC.TypeLits
 import Generics.SOP (All, Generic (..), HasDatatypeInfo (..), I (..), NP (Nil, (:*)), NS (..), Rep, SListI, SOP (..), unSOP)
@@ -50,7 +48,10 @@ Todo: derive SOP.Generic and SOP.HasDatatypeInfo behind the scenes
 -}
 
 -- attach 'tagfromconstructorlabel' to mkApiRecord?
-data TaggedSumOfApis (tagFromConstructorLabel :: Type) (mkApiRecord :: Type -> Type)
+data TaggedSumOfApis (mkApiRecord :: Type -> Type)
+
+class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
+  apiTagFromLabel :: String -> String
 
 -- recordOfServers?
 newtype TaggedSumOfServers a = TaggedSumOfServers {unTaggedSumOfServers :: a}
@@ -92,48 +93,53 @@ instance
     Z servers -> servers
     S y -> case y of {}
 
-class TaggedSumOfApisHasServers t (apis :: [Api]) (infos :: [FieldInfo]) (context :: [Type]) where
+class TaggedSumOfApisHasServers (mkApiRecord :: Type -> Type) (apis :: [Api]) (infos :: [FieldInfo]) (context :: [Type]) where
   type ServerTs apis (m :: Type -> Type) :: [Type]
-  type TaggedApis t apis infos :: [Api]
   taggedSumOfRoutes :: Context context -> Delayed env (NP I (ServerTs apis Handler)) -> Router env
   hoistTaggedServersWithContext :: (forall x. m x -> n x) -> NP I (ServerTs apis m) -> NP I (ServerTs apis n)
 
-instance TaggedSumOfApisHasServers t '[] '[] context where
+instance TaggedSumOfApisHasServers mkApiRecord '[] '[] context where
   type ServerTs '[] m = '[]
-  type TaggedApis t '[] '[] = '[]
   taggedSumOfRoutes _ _ = StaticRouter mempty mempty
   hoistTaggedServersWithContext _ Nil = Nil
 
 instance
-  (HasServer (PathSegment label t :> api) context, TaggedSumOfApisHasServers t apis infos context) =>
-  TaggedSumOfApisHasServers t (api ': apis) ('FieldInfo label ': infos) context
+  ( HasServer api context,
+    TaggedSumOfApisHasServers mkApiRecord apis infos context,
+    KnownSymbol label,
+    ApiTagFromLabel mkApiRecord
+  ) =>
+  TaggedSumOfApisHasServers mkApiRecord (api ': apis) ('FieldInfo label ': infos) context
   where
   type ServerTs (api ': apis) m = ServerT api m ': ServerTs apis m
-  type TaggedApis t (api ': apis) ('FieldInfo label ': infos) = (PathSegment label t :> api) ': TaggedApis t apis infos
 
   taggedSumOfRoutes context delayedServers =
     choice
-      (route (Proxy @(PathSegment label t :> api)) context $ (\(I server :* _) -> server) <$> delayedServers)
-      (taggedSumOfRoutes @t @apis @infos context $ (\(_ :* servers) -> servers) <$> delayedServers)
+      ( pathRouter
+          (Text.pack $ apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label))
+          $ route (Proxy @api) context
+          $ (\(I server :* _) -> server) <$> delayedServers
+      )
+      (taggedSumOfRoutes @mkApiRecord @apis @infos context $ (\(_ :* servers) -> servers) <$> delayedServers)
 
   hoistTaggedServersWithContext nt (I server :* servers) =
-    I (hoistServerWithContext (Proxy @(PathSegment label t :> api)) (Proxy @context) nt server)
-      :* hoistTaggedServersWithContext @t @apis @infos @context nt servers
+    I (hoistServerWithContext (Proxy @api) (Proxy @context) nt server)
+      :* hoistTaggedServersWithContext @mkApiRecord @apis @infos @context nt servers
 
 instance
   ( TaggedSumOfApisHasServers
-      t
+      mkApiRecord
       (GenericRecordFields (mkApiRecord AsApi))
       (GenericRecordFieldInfos (mkApiRecord AsApi))
       context,
     forall m. TaggedSumOfServersFields mkApiRecord m
   ) =>
-  HasServer (TaggedSumOfApis t mkApiRecord) context
+  HasServer (TaggedSumOfApis mkApiRecord) context
   where
-  type ServerT (TaggedSumOfApis t mkApiRecord) m = TaggedSumOfServers (mkApiRecord (AsServerT m))
+  type ServerT (TaggedSumOfApis mkApiRecord) m = TaggedSumOfServers (mkApiRecord (AsServerT m))
 
   route _ context delayedServer =
-    taggedSumOfRoutes @t
+    taggedSumOfRoutes @mkApiRecord
       @(GenericRecordFields (mkApiRecord AsApi))
       @(GenericRecordFieldInfos (mkApiRecord AsApi))
       context
@@ -142,7 +148,7 @@ instance
   hoistServerWithContext _ _ nt servers =
     TaggedSumOfServers
       . taggedSumOfServersFromFields
-      . hoistTaggedServersWithContext @t
+      . hoistTaggedServersWithContext @mkApiRecord
         @(GenericRecordFields (mkApiRecord AsApi))
         @(GenericRecordFieldInfos (mkApiRecord AsApi))
         @context
@@ -150,8 +156,32 @@ instance
       . taggedSumOfServersToFields
       $ unTaggedSumOfServers servers
 
+class TaggedSumOfApisHasOpenApi (mkApiRecord :: Type -> Type) (apis :: [Api]) (infos :: [FieldInfo]) where
+  taggedSumOfApisToOpenApi :: OpenApi
+
+instance TaggedSumOfApisHasOpenApi mkApiRecord '[] '[] where
+  taggedSumOfApisToOpenApi = mempty
+
 instance
-  HasOpenApi (UnionOfApis (TaggedApis t (GenericRecordFields (mkApiRecord AsApi)) (GenericRecordFieldInfos (mkApiRecord AsApi)))) =>
-  HasOpenApi (TaggedSumOfApis t mkApiRecord)
+  ( KnownSymbol label,
+    ApiTagFromLabel mkApiRecord,
+    HasOpenApi api,
+    TaggedSumOfApisHasOpenApi mkApiRecord apis infos
+  ) =>
+  TaggedSumOfApisHasOpenApi mkApiRecord (api ': apis) ('FieldInfo label ': infos)
   where
-  toOpenApi _ = toOpenApi $ Proxy @(UnionOfApis (TaggedApis t (GenericRecordFields (mkApiRecord AsApi)) (GenericRecordFieldInfos (mkApiRecord AsApi))))
+  taggedSumOfApisToOpenApi =
+    prependPath (apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label)) (toOpenApi (Proxy @api))
+      <> taggedSumOfApisToOpenApi @mkApiRecord @apis @infos
+
+instance
+  TaggedSumOfApisHasOpenApi
+    mkApiRecord
+    (GenericRecordFields (mkApiRecord AsApi))
+    (GenericRecordFieldInfos (mkApiRecord AsApi)) =>
+  HasOpenApi (TaggedSumOfApisHasOpenApi mkApiRecord)
+  where
+  toOpenApi _ =
+    taggedSumOfApisToOpenApi @mkApiRecord
+      @(GenericRecordFields (mkApiRecord AsApi))
+      @(GenericRecordFieldInfos (mkApiRecord AsApi))
