@@ -88,8 +88,6 @@ data FullApi model event mode = FullApi
     }
     deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
 
--- 3. Implement the endpoints
-
 numberServer :: forall m. Monad m => NumberApi NumberModel NumberEvent (AsServerT m)
 numberServer =
     NumberApi
