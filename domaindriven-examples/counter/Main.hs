@@ -33,20 +33,17 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
 --------------------------------------------------------------------------------
 -- 3. Define the API, i.e. the commands and queries
 --------------------------------------------------------------------------------
-data CounterApis model event mode = CounterApis
-    { current :: mode :- Query model (Get '[JSON] Int)
-    , increase :: mode :- Cmd model event (Post '[JSON] Int)
-    , decrease :: mode :- Cmd model event (Post '[JSON] Int)
+data CounterApis mode = CounterApis
+    { current :: mode :- Query CounterModel (Get '[JSON] Int)
+    , increase :: mode :- Cmd CounterModel CounterEvent (Post '[JSON] Int)
+    , decrease :: mode :- Cmd CounterModel CounterEvent (Post '[JSON] Int)
     }
     deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo)
 
 -- FIXME: Make sure it's good enough to only derive GHC generics!
 
 -- 3. Implement the endpoints
-counterServers
-    :: forall m
-     . Monad m
-    => CounterApis CounterModel CounterEvent (AsServerT m)
+counterServers :: forall m. Monad m => CounterApis (AsServerT m)
 counterServers =
     CounterApis
         { current = Query (pure . getCounter)
@@ -57,7 +54,7 @@ counterServers =
 -- 4. Define the final API type using `TaggedSumOfApis`, which uses the labels of the
 -- record to add a path piece to the final endpoints.
 
-type CounterApi = TaggedSumOfApis (CounterApis CounterModel CounterEvent)
+type CounterApi = TaggedSumOfApis CounterApis
 
 -- 5. Define the server.
 -- The `HasServer` instance for `TaggedSumOfApis` with covert it into a `RecordOfServers`
@@ -65,7 +62,7 @@ counterServer :: forall m. Monad m => ServerT CounterApi m
 counterServer = RecordOfServers counterServers
 
 -- FIXME: This should be the default implementation imo
-instance ApiTagFromLabel (CounterApis model event) where
+instance ApiTagFromLabel CounterApis where
     apiTagFromLabel = id
 
 app

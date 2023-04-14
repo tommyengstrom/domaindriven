@@ -2,6 +2,7 @@ resolver: lts-20.7
 packages:
 - domaindriven-core
 - domaindriven
+- domaindriven-examples
 
 ghc-options:
   "$locals": -O0 -fwrite-ide-info
