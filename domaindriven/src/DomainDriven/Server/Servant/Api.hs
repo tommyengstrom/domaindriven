@@ -15,27 +15,33 @@ import Data.Typeable
 import GHC.TypeLits
 import Generics.SOP hiding (fieldName)
 import Optics
+import Servant.API (JSON, StdMethod (GET, POST), Verb)
 import Servant.OpenApi
 import Prelude
 
-data Cmd (model :: Type) (event :: Type) (verb :: Type)
+type Cmd model event a = Cmd' model event (Verb 'POST 200 '[JSON] a)
+type CbCmd model event a = CbCmd' model event (Verb 'POST 200 '[JSON] a)
+type CbQuery model a = CbQuery' model (Verb 'GET 200 '[JSON] a)
+type Query model a = Query' model (Verb 'GET 200 '[JSON] a)
 
-data Query (model :: Type) (verb :: Type)
+data Cmd' (model :: Type) (event :: Type) (verb :: Type)
 
-data CbQuery (model :: Type) (verb :: Type)
+data Query' (model :: Type) (verb :: Type)
 
-data CbCmd (model :: Type) (event :: Type) (verb :: Type)
+data CbQuery' (model :: Type) (verb :: Type)
 
-instance HasOpenApi verb => HasOpenApi (Cmd model event verb) where
+data CbCmd' (model :: Type) (event :: Type) (verb :: Type)
+
+instance HasOpenApi verb => HasOpenApi (Cmd' model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (CbCmd model event verb) where
+instance HasOpenApi verb => HasOpenApi (CbCmd' model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (Query model verb) where
+instance HasOpenApi verb => HasOpenApi (Query' model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (CbQuery model verb) where
+instance HasOpenApi verb => HasOpenApi (CbQuery' model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
 data NamedField = NamedField Symbol Type

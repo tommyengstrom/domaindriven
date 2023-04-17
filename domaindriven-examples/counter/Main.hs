@@ -34,9 +34,9 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
 -- 3. Define the API, i.e. the commands and queries
 --------------------------------------------------------------------------------
 data CounterApis mode = CounterApis
-    { current :: mode :- Query CounterModel (Get '[JSON] Int)
-    , increase :: mode :- Cmd CounterModel CounterEvent (Post '[JSON] Int)
-    , decrease :: mode :- Cmd CounterModel CounterEvent (Post '[JSON] Int)
+    { current :: mode :- Query CounterModel Int
+    , increase :: mode :- Cmd CounterModel CounterEvent Int
+    , decrease :: mode :- Cmd CounterModel CounterEvent Int
     }
     deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo)
 

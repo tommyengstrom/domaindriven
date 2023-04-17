@@ -75,10 +75,10 @@ instance
     , model ~ Model (LookupPersistance context)
     , event ~ Event (LookupPersistance context)
     )
-    => HasServer (Cmd model event (Verb method status ctypes a)) context
+    => HasServer (Cmd' model event (Verb method status ctypes a)) context
     where
     type
-        ServerT (Cmd model event (Verb method status ctypes a)) m =
+        ServerT (Cmd' model event (Verb method status ctypes a)) m =
             CmdServer model event m a
     hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
 
@@ -101,9 +101,9 @@ instance
     , ReadModel (LookupPersistance context)
     , model ~ Model (LookupPersistance context)
     )
-    => HasServer (Query model (Verb method status ctypes a)) context
+    => HasServer (Query' model (Verb method status ctypes a)) context
     where
-    type ServerT (Query model (Verb method status ctypes a)) m = QueryServer model m a
+    type ServerT (Query' model (Verb method status ctypes a)) m = QueryServer model m a
 
     hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
 
@@ -121,10 +121,10 @@ instance
     , ReadModel (LookupPersistance context)
     , model ~ Model (LookupPersistance context)
     )
-    => HasServer (CbQuery model (Verb method status ctypes a)) context
+    => HasServer (CbQuery' model (Verb method status ctypes a)) context
     where
     type
-        ServerT (CbQuery model (Verb method status ctypes a)) m =
+        ServerT (CbQuery' model (Verb method status ctypes a)) m =
             CbQueryServer model m a
 
     hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \model -> f (action model)
@@ -145,10 +145,10 @@ instance
     , model ~ Model (LookupPersistance context)
     , event ~ Event (LookupPersistance context)
     )
-    => HasServer (CbCmd model event (Verb method status ctypes a)) context
+    => HasServer (CbCmd' model event (Verb method status ctypes a)) context
     where
     type
-        ServerT (CbCmd model event (Verb method status ctypes a)) m =
+        ServerT (CbCmd' model event (Verb method status ctypes a)) m =
             CbCmdServer
                 model
                 event

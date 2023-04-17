@@ -65,20 +65,14 @@ applyTextEvent _ ev = case ev of
 -- parameters of all the APIs.
 --------------------------------------------------------------------------------
 data NumberApi model event mode = NumberApi
-    { set
-        :: mode
-            :- ReqBody '[JSON] Int
-            :> Cmd model event (Post '[JSON] Int)
-    , get :: mode :- Query model (Get '[JSON] Int)
+    { set :: mode :- ReqBody '[JSON] Int :> Cmd model event Int
+    , get :: mode :- Query model Int
     }
     deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
 
 data TextApi model event mode = TextApi
-    { set
-        :: mode
-            :- ReqBody '[JSON] String
-            :> Cmd model event (Post '[JSON] String)
-    , get :: mode :- Query model (Get '[JSON] String)
+    { set :: mode :- ReqBody '[JSON] String :> Cmd model event String
+    , get :: mode :- Query model String
     }
     deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
 
