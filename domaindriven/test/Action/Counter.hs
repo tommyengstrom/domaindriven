@@ -4,10 +4,7 @@
 module Action.Counter where
 
 import Control.DeepSeq
-import Control.Monad (when)
-import Control.Monad.Catch
 import Data.Aeson
-import Data.Typeable (Typeable)
 import DomainDriven
 import GHC.Generics (Generic)
 import Prelude
@@ -24,10 +21,6 @@ data CounterAction :: Action where
     GetCounter :: CounterAction x Query Int
     IncreaseCounter :: CounterAction x Cmd Int
     DecreaseCounter :: CounterAction x Cmd Int
-    AddToCounter
-        :: P x "numberToAdd" Int
-        -> CounterAction x Cmd Int
-        -- ^ Add a positive number to the counter
     deriving (HasApiOptions)
 
 handleAction
@@ -36,15 +29,8 @@ handleAction
 handleAction = \case
     GetCounter -> Query $ pure
     IncreaseCounter -> Cmd $ \_ -> pure (id, [CounterIncreased])
-    DecreaseCounter -> Cmd $ \counter -> do
-        when (counter < 1) (throwM NegativeNotSupported)
+    DecreaseCounter -> Cmd $ \_ -> do
         pure (id, [CounterDecreased])
-    AddToCounter a -> Cmd $ \_ -> do
-        when (a < 0) (throwM NegativeNotSupported)
-        pure (id, replicate a CounterIncreased)
-
-data CounterError = NegativeNotSupported
-    deriving (Show, Eq, Typeable, Exception)
 
 applyCounterEvent :: CounterModel -> Stored CounterEvent -> CounterModel
 applyCounterEvent m (Stored event _timestamp _uuid) = case event of

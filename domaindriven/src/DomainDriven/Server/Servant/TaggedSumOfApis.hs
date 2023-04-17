@@ -46,7 +46,12 @@ newtype RecordOfServers a = RecordOfServers {unRecordOfServers :: a}
     deriving newtype (GHC.Generic)
 
 instance
-    (GHC.Generic a, All SListI (Code a), GTo a, GFrom a, Rep a ~ SOP I (GCode a))
+    ( GHC.Generic a
+    , All SListI (Code a)
+    , GTo a
+    , GFrom a
+    , Rep a ~ SOP I (GCode a)
+    )
     => Generic (RecordOfServers a)
 
 class RecordOfServersFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
