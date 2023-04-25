@@ -4,18 +4,18 @@ module DomainDriven.Server.Servant.Helper.GenericRecord where
 
 import Data.Kind
 import GHC.TypeLits
-import Generics.SOP (Generic (..), HasDatatypeInfo (..))
 import Generics.SOP.Type.Metadata
+import Generics.SOP.GGP
 
 type family GenericRecordFields (record :: Type) :: [Type] where
-    GenericRecordFields record = GenericRecordFields' (Code record)
+    GenericRecordFields record = GenericRecordFields' (GCode record)
 
 type family GenericRecordFields' (code :: [[Type]]) :: [Type] where
     GenericRecordFields' '[fields] = fields
     GenericRecordFields' _ = TypeError ( 'Text "not a record!")
 
 type family GenericRecordFieldInfos (record :: Type) :: [FieldInfo] where
-    GenericRecordFieldInfos record = GenericRecordFieldInfos' (DatatypeInfoOf record)
+    GenericRecordFieldInfos record = GenericRecordFieldInfos' (GDatatypeInfoOf record)
 
 type family GenericRecordFieldInfos' (info :: DatatypeInfo) :: [FieldInfo] where
     GenericRecordFieldInfos' ( 'ADT _ _ '[ 'Record _ infos] _) = infos

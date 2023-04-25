@@ -13,14 +13,9 @@ import DomainDriven.Server.Servant.Helper.GenericRecord
 import GHC.Generics qualified as GHC
 import GHC.TypeLits
 import Generics.SOP
-    ( All
-    , Generic (..)
-    , HasDatatypeInfo (..)
-    , I (..)
+    ( I (..)
     , NP (..)
     , NS (..)
-    , Rep
-    , SListI
     , SOP (..)
     , unSOP
     )
@@ -46,32 +41,25 @@ class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
 newtype RecordOfServers a = RecordOfServers {unRecordOfServers :: a}
     deriving newtype (GHC.Generic)
 
-instance
-    ( GHC.Generic a
-    , All SListI (Code a)
-    , GTo a
-    , GFrom a
-    , Rep a ~ SOP I (GCode a)
-    )
-    => Generic (RecordOfServers a)
-
 class RecordOfServersFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
     recordOfServersFromFields
-        :: NP I (ServerTs (GenericRecordFields (Wrap (mkApiRecord AsApi))) m)
-        -> Wrap (mkApiRecord (AsServerT m))
+        :: NP I (ServerTs (GenericRecordFields (mkApiRecord AsApi)) m)
+        -> mkApiRecord (AsServerT m)
     recordOfServersToFields
-        :: Wrap (mkApiRecord (AsServerT m))
-        -> NP I (ServerTs (GenericRecordFields (Wrap (mkApiRecord AsApi))) m)
+        :: mkApiRecord (AsServerT m)
+        -> NP I (ServerTs (GenericRecordFields (mkApiRecord AsApi)) m)
 
 instance
-    ( Generic (Wrap (mkApiRecord (AsServerT m)))
-    , Code (Wrap (mkApiRecord (AsServerT m)))
-        ~ '[ServerTs (GenericRecordFields (Wrap (mkApiRecord AsApi))) m]
+    ( GHC.Generic (mkApiRecord (AsServerT m))
+    , GCode (mkApiRecord (AsServerT m))
+        ~ '[ServerTs (GenericRecordFields (mkApiRecord AsApi)) m]
+    , GFrom (mkApiRecord (AsServerT m))
+    , GTo (mkApiRecord (AsServerT m))
     )
     => RecordOfServersFields mkApiRecord m
     where
-    recordOfServersFromFields = to . SOP . Z
-    recordOfServersToFields x = case unSOP $ from x of
+    recordOfServersFromFields = gto . SOP . Z
+    recordOfServersToFields x = case unSOP $ gfrom x of
         Z servers -> servers
         S y -> case y of {}
 
@@ -129,8 +117,8 @@ instance
 instance
     ( TaggedSumOfApisHasServers
         mkApiRecord
-        (GenericRecordFields (Wrap (mkApiRecord AsApi)))
-        (GenericRecordFieldInfos (Wrap (mkApiRecord AsApi)))
+        (GenericRecordFields (mkApiRecord AsApi))
+        (GenericRecordFieldInfos (mkApiRecord AsApi))
         context
     , forall m. RecordOfServersFields mkApiRecord m
     )
@@ -142,22 +130,20 @@ instance
 
     route _ context delayedServer =
         taggedSumOfRoutes @mkApiRecord
-            @(GenericRecordFields (Wrap (mkApiRecord AsApi)))
-            @(GenericRecordFieldInfos (Wrap (mkApiRecord AsApi)))
+            @(GenericRecordFields (mkApiRecord AsApi))
+            @(GenericRecordFieldInfos (mkApiRecord AsApi))
             context
-            (recordOfServersToFields . Wrap . unRecordOfServers <$> delayedServer)
+            (recordOfServersToFields . unRecordOfServers <$> delayedServer)
 
     hoistServerWithContext _ _ nt servers =
         RecordOfServers
-            . unWrap
             . recordOfServersFromFields
             . hoistTaggedServersWithContext @mkApiRecord
-                @(GenericRecordFields (Wrap (mkApiRecord AsApi)))
-                @(GenericRecordFieldInfos (Wrap (mkApiRecord AsApi)))
+                @(GenericRecordFields (mkApiRecord AsApi))
+                @(GenericRecordFieldInfos (mkApiRecord AsApi))
                 @context
                 nt
             . recordOfServersToFields
-            . Wrap
             $ unRecordOfServers servers
 
 class
@@ -198,24 +184,10 @@ instance
             @(GenericRecordFieldInfos (mkApiRecord AsApi))
 
 instance
-    ( Generic (RecordOfServers a)
-    , ThrowAll (SOP I (Code (RecordOfServers a)))
+    ( GHC.Generic (RecordOfServers a)
+    , GTo a
+    , ThrowAll (SOP I (GCode (RecordOfServers a)))
     )
     => ThrowAll (RecordOfServers a)
     where
-    throwAll = to . throwAll @(SOP I (Code (RecordOfServers a)))
-
-newtype Wrap a = Wrap { unWrap :: a }
-    deriving newtype (GHC.Generic)
-
-instance (GFrom a, GHC.Generic a, GTo a, (All SListI (GCode a))) => Generic (Wrap a) where
-    type Code (Wrap a) = GCode a
-    from (Wrap a) = gfrom a
-    to = Wrap . gto
-
-instance
-    (Generic (Wrap a), GDatatypeInfo (Wrap a))
-    => HasDatatypeInfo (Wrap a)
-    where
-    type DatatypeInfoOf (Wrap a) = GDatatypeInfoOf a
-    datatypeInfo = gdatatypeInfo
+    throwAll = gto . throwAll @(SOP I (GCode (RecordOfServers a)))
