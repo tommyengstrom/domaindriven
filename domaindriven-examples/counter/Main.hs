@@ -5,7 +5,6 @@ import DomainDriven (Event, Model, Stored (..), WriteModel)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 import DomainDriven.Server.Servant
 import GHC.Generics (Generic)
-import Generics.SOP qualified as SOP
 import Network.Wai.Handler.Warp (run)
 import Servant
 import Servant.Server.Generic
@@ -38,7 +37,7 @@ data CounterApis mode = CounterApis
     , increase :: mode :- Cmd CounterModel CounterEvent Int
     , decrease :: mode :- Cmd CounterModel CounterEvent Int
     }
-    deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo)
+    deriving (Generic)
 
 -- FIXME: Make sure it's good enough to only derive GHC generics!
 

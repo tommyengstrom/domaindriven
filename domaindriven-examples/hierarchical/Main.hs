@@ -6,7 +6,6 @@ import DomainDriven (Event, Model, Stored (..), WriteModel)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 import DomainDriven.Server.Servant
 import GHC.Generics (Generic)
-import Generics.SOP qualified as SOP
 import Lens.Micro
 import Network.Wai.Handler.Warp (run)
 import Servant
@@ -68,19 +67,19 @@ data NumberApi model event mode = NumberApi
     { set :: mode :- ReqBody '[JSON] Int :> Cmd model event Int
     , get :: mode :- Query model Int
     }
-    deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
+    deriving (Generic, ApiTagFromLabel)
 
 data TextApi model event mode = TextApi
     { set :: mode :- ReqBody '[JSON] String :> Cmd model event String
     , get :: mode :- Query model String
     }
-    deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
+    deriving (Generic, ApiTagFromLabel)
 
 data FullApi model event mode = FullApi
     { number :: mode :- TaggedSumOfApis (NumberApi model event)
     , text :: mode :- TaggedSumOfApis (TextApi model event)
     }
-    deriving (Generic, SOP.Generic, SOP.HasDatatypeInfo, ApiTagFromLabel)
+    deriving (Generic, ApiTagFromLabel)
 
 -- 3. Implement the endpoints
 
