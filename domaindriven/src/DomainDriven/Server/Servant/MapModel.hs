@@ -14,6 +14,8 @@ import Servant hiding (inject)
 import Prelude
 
 import DomainDriven.Server.Servant.Server
+import GHC.Generics qualified as GHC
+import Generics.SOP.GGP
 
 class MapModelAndEvent serverFrom serverTo model model' event event' where
     mapModelAndEvent
@@ -107,11 +109,13 @@ instance
         S xs -> case xs of {}
 
 instance
-    ( SOP.Generic (RecordOfServers a)
-    , SOP.Generic (RecordOfServers b)
+    ( GHC.Generic (RecordOfServers a)
+    , GHC.Generic (RecordOfServers b)
+    , GFrom (RecordOfServers a)
+    , GTo (RecordOfServers b)
     , MapModelAndEvent
-        (SOP I (SOP.Code (RecordOfServers a)))
-        (SOP I (SOP.Code (RecordOfServers b)))
+        (SOP I (GCode (RecordOfServers a)))
+        (SOP I (GCode (RecordOfServers b)))
         model
         model'
         event
@@ -119,7 +123,7 @@ instance
     )
     => MapModelAndEvent (RecordOfServers a) (RecordOfServers b) model model' event event'
     where
-    mapModelAndEvent proj inj = SOP.to . mapModelAndEvent proj inj . SOP.from
+    mapModelAndEvent proj inj = gto . mapModelAndEvent proj inj . gfrom
 
 class MapModel serverFrom serverTo model model' where
     mapModel :: (model -> model') -> serverFrom -> serverTo
