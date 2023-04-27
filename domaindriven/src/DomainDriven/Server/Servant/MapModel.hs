@@ -27,7 +27,15 @@ class MapModelAndEvent serverFrom serverTo model model' event event' where
 instance {-# OVERLAPS #-} MapModelAndEvent server server model model' event event' where
     mapModelAndEvent _ _ = id
 
-instance MapModelAndEvent (CbCmdServer model' event' m a) (CbCmdServer model event m a) model model' event event' where
+instance
+    MapModelAndEvent
+        (CbCmdServer model' event' m a)
+        (CbCmdServer model event m a)
+        model
+        model'
+        event
+        event'
+    where
     mapModelAndEvent proj inj (CbCmd server) =
         CbCmd $ \transact ->
             server

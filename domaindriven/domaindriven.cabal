@@ -27,21 +27,13 @@ source-repository head
 library
   exposed-modules:
       DomainDriven
-      DomainDriven.Internal.HasFieldName
-      DomainDriven.Internal.NamedFields
-      DomainDriven.Internal.NamedJsonFields
-      DomainDriven.Internal.Text
       DomainDriven.Server.Class
-      DomainDriven.Server.Config
-      DomainDriven.Server.Helpers
       DomainDriven.Server.Servant
       DomainDriven.Server.Servant.Api
       DomainDriven.Server.Servant.Helper.GenericRecord
       DomainDriven.Server.Servant.MapModel
       DomainDriven.Server.Servant.Server
       DomainDriven.Server.Servant.TaggedSumOfApis
-      DomainDriven.Server.TH
-      DomainDriven.Server.Types
       Servant.Auth.Internal.ThrowAll.SOP
   other-modules:
       Paths_domaindriven
@@ -120,12 +112,6 @@ test-suite domaindriven-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Action.Counter
-      Action.ExtraParam
-      Action.ServerTest
-      Action.Store
-      DomainDriven.Internal.NamedJsonFieldsSpec
-      DomainDriven.ServerSpec
       Paths_domaindriven
   hs-source-dirs:
       test

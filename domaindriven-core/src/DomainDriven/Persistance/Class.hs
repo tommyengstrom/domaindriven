@@ -34,7 +34,6 @@ class ReadModel p => WriteModel p where
         => p
         -> TransactionalUpdate (Model p) (Event p) m a
 
-
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
 -- that when implementing the model.

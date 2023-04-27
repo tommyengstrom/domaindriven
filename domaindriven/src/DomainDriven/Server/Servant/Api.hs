@@ -48,7 +48,7 @@ data NamedField = NamedField Symbol Type
 
 type family FieldTypes (fields :: [NamedField]) :: [Type] where
     FieldTypes '[] = '[]
-    FieldTypes ( 'NamedField _ t ': fields) = t ': FieldTypes fields
+    FieldTypes ('NamedField _ t ': fields) = t ': FieldTypes fields
 
 newtype Field a = Field a
 
@@ -62,7 +62,7 @@ instance ParseFields '[] where
 
 instance
     (ParseFields fields, FromJSON t, KnownSymbol name)
-    => ParseFields ( 'NamedField name (Maybe t) ': fields)
+    => ParseFields ('NamedField name (Maybe t) ': fields)
     where
     parseFields o = do
         fields <- parseFields @fields o
@@ -72,7 +72,7 @@ instance
 instance
     {-# OVERLAPPABLE #-}
     (ParseFields fields, FromJSON t, KnownSymbol name)
-    => ParseFields ( 'NamedField name t ': fields)
+    => ParseFields ('NamedField name t ': fields)
     where
     parseFields o = do
         fields <- parseFields @fields o
@@ -86,12 +86,12 @@ instance ToSchema (JsonObject '[]) where
     declareNamedSchema _ = pure . unnamed $ mempty & #type ?~ OpenApiObject
 
 instance
-    ( Typeable (JsonObject ( 'NamedField name t ': fields))
+    ( Typeable (JsonObject ('NamedField name t ': fields))
     , ToSchema (JsonObject fields)
     , ToSchema t
     , KnownSymbol name
     )
-    => ToSchema (JsonObject ( 'NamedField name t ': fields))
+    => ToSchema (JsonObject ('NamedField name t ': fields))
     where
     declareNamedSchema _ = do
         NamedSchema _ subSchema <- declareNamedSchema (Proxy @(JsonObject fields))

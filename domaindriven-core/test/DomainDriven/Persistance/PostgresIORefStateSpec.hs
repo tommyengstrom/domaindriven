@@ -7,7 +7,7 @@ import Data.String (fromString)
 import Data.Time
 import Data.Traversable
 import Data.UUID (nil)
-import qualified Data.UUID.V4 as V4
+import Data.UUID.V4 qualified as V4
 import Database.PostgreSQL.Simple
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
@@ -18,7 +18,7 @@ import DomainDriven.Persistance.Postgres.Internal
     )
 import DomainDriven.Persistance.Postgres.Migration
 import GHC.Generics (Generic)
-import qualified Streamly.Prelude as S
+import Streamly.Prelude qualified as S
 import Test.Hspec
 import UnliftIO.Pool
 import Prelude

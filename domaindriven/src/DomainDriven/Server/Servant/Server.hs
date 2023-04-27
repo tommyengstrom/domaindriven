@@ -29,16 +29,16 @@ newtype CbQueryServer (model :: Type) m a
 newtype CbCmdServer (model :: Type) (event :: Type) m a
     = CbCmd ((forall n b. MonadUnliftIO n => TransactionalUpdate model event n b) -> m a)
 
-instance (MonadError ServerError m) => ThrowAll (CmdServer model event m a) where
+instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
     throwAll = Cmd . throwAll
 
-instance (MonadError ServerError m) => ThrowAll (CbCmdServer model event m a) where
+instance MonadError ServerError m => ThrowAll (CbCmdServer model event m a) where
     throwAll err = CbCmd $ \_ -> throwAll err
 
-instance (MonadError ServerError m) => ThrowAll (QueryServer model m a) where
+instance MonadError ServerError m => ThrowAll (QueryServer model m a) where
     throwAll = Query . throwAll
 
-instance (MonadError ServerError m) => ThrowAll (CbQueryServer model m a) where
+instance MonadError ServerError m => ThrowAll (CbQueryServer model m a) where
     throwAll err = CbQuery $ \_ -> throwAll err
 
 type family CanMutate (method :: StdMethod) :: Bool where
@@ -65,7 +65,7 @@ newtype Persistence p = Persistence p
 type family LookupPersistance (context :: [Type]) :: Type where
     LookupPersistance (Persistence p ': _) = p
     LookupPersistance (_ ': context) = LookupPersistance context
-    LookupPersistance '[] = TypeError ( 'Text "Context does not contain a Persistence!")
+    LookupPersistance '[] = TypeError ('Text "Context does not contain a Persistence!")
 
 instance
     ( HasServer (Verb method status ctypes a) context

@@ -16,6 +16,9 @@ maintainer:     tommy@tommyengstrom.com
 copyright:      2022 Tommy Engström
 license:        BSD3
 build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
 
 source-repository head
   type: git
