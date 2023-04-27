@@ -3,7 +3,7 @@ module Main where
 import Data.Aeson
 import DomainDriven (Event, Model, Stored (..), WriteModel)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
-import DomainDriven.Server.Servant
+import DomainDriven.Server
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (run)
 import Servant

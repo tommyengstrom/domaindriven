@@ -4,7 +4,7 @@ import Data.Aeson
 import Data.Generics.Labels ()
 import DomainDriven (Event, Model, Stored (..), WriteModel)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
-import DomainDriven.Server.Servant
+import DomainDriven.Server
 import GHC.Generics (Generic)
 import Lens.Micro
 import Network.Wai.Handler.Warp (run)

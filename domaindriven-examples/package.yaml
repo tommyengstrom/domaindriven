@@ -6,9 +6,7 @@ author:              "Tommy Engström"
 maintainer:          "tommy@tommyengstrom.com"
 copyright:           "2022 Tommy Engström"
 
-extra-source-files:
-- README.md
-- ChangeLog.md
+extra-source-files: []
 
 # Metadata used when publishing your package
 synopsis: Batteries included event sourcing and CQRS
@@ -96,9 +94,9 @@ ghc-options:
 - -Wincomplete-patterns
 
 executables:
-  counter-example:
+  simple-example:
     main:                Main.hs
-    source-dirs:         counter
+    source-dirs:         simple
     ghc-options:
     - -threaded
     - -rtsopts

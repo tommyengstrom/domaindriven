@@ -4,12 +4,12 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module DomainDriven.Server.Servant.TaggedSumOfApis where
+module DomainDriven.Server.TaggedSumOfApis where
 
 import Data.Kind
 import Data.OpenApi (OpenApi, prependPath)
 import Data.Text qualified as Text
-import DomainDriven.Server.Servant.Helper.GenericRecord
+import DomainDriven.Server.Helper.GenericRecord
 import GHC.Generics qualified as GHC
 import GHC.TypeLits
 import Generics.SOP

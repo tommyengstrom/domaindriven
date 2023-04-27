@@ -1,6 +1,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 
-module DomainDriven.Server.Servant.Helper.GenericRecord where
+module DomainDriven.Server.Helper.GenericRecord where
 
 import Data.Kind
 import GHC.TypeLits

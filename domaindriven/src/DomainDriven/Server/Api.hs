@@ -1,7 +1,7 @@
 -- got it the wrong way around. this should presumably be domaindriven.servant.api
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
-module DomainDriven.Server.Servant.Api where
+module DomainDriven.Server.Api where
 
 import Data.Aeson
 import Data.Aeson.Key

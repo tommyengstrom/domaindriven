@@ -16,20 +16,17 @@ maintainer:     tommy@tommyengstrom.com
 copyright:      2022 Tommy Engström
 license:        BSD3
 build-type:     Simple
-extra-source-files:
-    README.md
-    ChangeLog.md
 
 source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-executable counter-example
+executable hierarchical-example
   main-is: Main.hs
   other-modules:
       Paths_domaindriven_examples
   hs-source-dirs:
-      counter
+      hierarchical
   default-extensions:
       Arrows
       ConstraintKinds
@@ -95,12 +92,12 @@ executable counter-example
     , warp
   default-language: Haskell2010
 
-executable hierarchical-example
+executable simple-example
   main-is: Main.hs
   other-modules:
       Paths_domaindriven_examples
   hs-source-dirs:
-      hierarchical
+      simple
   default-extensions:
       Arrows
       ConstraintKinds

@@ -27,13 +27,13 @@ source-repository head
 library
   exposed-modules:
       DomainDriven
+      DomainDriven.Server
+      DomainDriven.Server.Api
       DomainDriven.Server.Class
-      DomainDriven.Server.Servant
-      DomainDriven.Server.Servant.Api
-      DomainDriven.Server.Servant.Helper.GenericRecord
-      DomainDriven.Server.Servant.MapModel
-      DomainDriven.Server.Servant.Server
-      DomainDriven.Server.Servant.TaggedSumOfApis
+      DomainDriven.Server.Helper.GenericRecord
+      DomainDriven.Server.MapModel
+      DomainDriven.Server.Server
+      DomainDriven.Server.TaggedSumOfApis
       Servant.Auth.Internal.ThrowAll.SOP
   other-modules:
       Paths_domaindriven

@@ -3,14 +3,14 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module DomainDriven.Server.Servant.Server where
+module DomainDriven.Server.Server where
 
 import Control.Monad
 import Control.Monad.Catch qualified
 import Control.Monad.Except
 import Data.Kind
 import DomainDriven.Persistance.Class
-import DomainDriven.Server.Servant.Api
+import DomainDriven.Server.Api
 import GHC.TypeLits
 import Servant hiding (inject)
 import Servant.Auth.Server

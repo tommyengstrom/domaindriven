@@ -1,11 +1,11 @@
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DomainDriven.Server.Servant.MapModel where
+module DomainDriven.Server.MapModel where
 
 import Control.Arrow
 import Control.Monad
-import DomainDriven.Server.Servant.TaggedSumOfApis
+import DomainDriven.Server.TaggedSumOfApis
 import Generics.SOP qualified as SOP
 import Generics.SOP.BasicFunctors
 import Generics.SOP.NP hiding (Projection)
@@ -13,7 +13,7 @@ import Generics.SOP.NS
 import Servant hiding (inject)
 import Prelude
 
-import DomainDriven.Server.Servant.Server
+import DomainDriven.Server.Server
 import GHC.Generics qualified as GHC
 import Generics.SOP.GGP
 
