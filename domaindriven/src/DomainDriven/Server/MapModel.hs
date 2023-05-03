@@ -27,6 +27,20 @@ class MapModelAndEvent serverFrom serverTo where
         -> serverFrom
         -> serverTo
 
+class MapEvent serverFrom serverTo where
+    mapEvent
+        :: (EventFrom serverFrom -> EventTo serverTo)
+        -> serverFrom
+        -> serverTo
+
+instance
+    ( MapModelAndEvent serverFrom serverTo
+    , ModelFrom serverFrom ~ ModelTo serverTo
+    )
+    => MapEvent serverFrom serverTo
+    where
+    mapEvent = mapModelAndEvent id
+
 class MapModel serverFrom serverTo where
     mapModel
         :: (ModelTo serverTo -> ModelFrom serverFrom)
