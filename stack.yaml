@@ -5,6 +5,6 @@ packages:
 - domaindriven-examples
 
 ghc-options:
-  "$locals": -O0 -fwrite-ide-info
+  "$locals": -fwrite-ide-info
   '$everything': -haddock
     -hiedir=.hie
