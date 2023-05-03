@@ -30,10 +30,10 @@ library
       DomainDriven.Server
       DomainDriven.Server.Api
       DomainDriven.Server.Class
+      DomainDriven.Server.DomainDrivenApi
       DomainDriven.Server.Helper.GenericRecord
       DomainDriven.Server.MapModel
       DomainDriven.Server.Server
-      DomainDriven.Server.TaggedSumOfApis
       Servant.Auth.Internal.ThrowAll.SOP
   other-modules:
       Paths_domaindriven

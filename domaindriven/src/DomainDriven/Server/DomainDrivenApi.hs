@@ -2,9 +2,8 @@
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 
-module DomainDriven.Server.TaggedSumOfApis where
+module DomainDriven.Server.DomainDrivenApi where
 
 import Data.Kind
 import Data.OpenApi (OpenApi, prependPath)
@@ -32,13 +31,13 @@ import Prelude
 
 type Api = Type
 
-data TaggedSumOfApis (mkApiRecord :: Type -> Type)
+data DomainDrivenApi (model :: Type) (event :: Type) (mkApiRecord :: Type -> Type)
 
 class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
     apiTagFromLabel :: String -> String
     apiTagFromLabel = id
 
-newtype RecordOfServers a = RecordOfServers {unRecordOfServers :: a}
+newtype RecordOfServers (model :: Type) (event :: Type) a = RecordOfServers {unRecordOfServers :: a}
     deriving newtype (GHC.Generic)
 
 class RecordOfServersFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
@@ -64,7 +63,7 @@ instance
         S y -> case y of {}
 
 class
-    TaggedSumOfApisHasServers
+    DomainDrivenApiHasServers
         (mkApiRecord :: Type -> Type)
         (apis :: [Api])
         (infos :: [FieldInfo])
@@ -80,18 +79,18 @@ class
         -> NP I (ServerTs apis m)
         -> NP I (ServerTs apis n)
 
-instance TaggedSumOfApisHasServers mkApiRecord '[] '[] context where
+instance DomainDrivenApiHasServers mkApiRecord '[] '[] context where
     type ServerTs '[] m = '[]
     taggedSumOfRoutes _ _ = StaticRouter mempty mempty
     hoistTaggedServersWithContext _ Nil = Nil
 
 instance
     ( HasServer api context
-    , TaggedSumOfApisHasServers mkApiRecord apis infos context
+    , DomainDrivenApiHasServers mkApiRecord apis infos context
     , KnownSymbol label
     , ApiTagFromLabel mkApiRecord
     )
-    => TaggedSumOfApisHasServers
+    => DomainDrivenApiHasServers
         mkApiRecord
         (api ': apis)
         ('FieldInfo label ': infos)
@@ -115,18 +114,18 @@ instance
             :* hoistTaggedServersWithContext @mkApiRecord @apis @infos @context nt servers
 
 instance
-    ( TaggedSumOfApisHasServers
+    ( DomainDrivenApiHasServers
         mkApiRecord
         (GenericRecordFields (mkApiRecord AsApi))
         (GenericRecordFieldInfos (mkApiRecord AsApi))
         context
     , forall m. RecordOfServersFields mkApiRecord m
     )
-    => HasServer (TaggedSumOfApis mkApiRecord) context
+    => HasServer (DomainDrivenApi model event mkApiRecord) context
     where
     type
-        ServerT (TaggedSumOfApis mkApiRecord) m =
-            RecordOfServers (mkApiRecord (AsServerT m))
+        ServerT (DomainDrivenApi model event mkApiRecord) m =
+            RecordOfServers model event (mkApiRecord (AsServerT m))
 
     route _ context delayedServer =
         taggedSumOfRoutes @mkApiRecord
@@ -147,47 +146,47 @@ instance
             $ unRecordOfServers servers
 
 class
-    TaggedSumOfApisHasOpenApi
+    DomainDrivenApiHasOpenApi
         (mkApiRecord :: Type -> Type)
         (apis :: [Api])
         (infos :: [FieldInfo])
     where
-    taggedSumOfApisToOpenApi :: OpenApi
+    domainDrivenApiToOpenApi :: OpenApi
 
-instance TaggedSumOfApisHasOpenApi mkApiRecord '[] '[] where
-    taggedSumOfApisToOpenApi = mempty
+instance DomainDrivenApiHasOpenApi mkApiRecord '[] '[] where
+    domainDrivenApiToOpenApi = mempty
 
 instance
     ( KnownSymbol label
     , ApiTagFromLabel mkApiRecord
     , HasOpenApi api
-    , TaggedSumOfApisHasOpenApi mkApiRecord apis infos
+    , DomainDrivenApiHasOpenApi mkApiRecord apis infos
     )
-    => TaggedSumOfApisHasOpenApi mkApiRecord (api ': apis) ('FieldInfo label ': infos)
+    => DomainDrivenApiHasOpenApi mkApiRecord (api ': apis) ('FieldInfo label ': infos)
     where
-    taggedSumOfApisToOpenApi =
+    domainDrivenApiToOpenApi =
         prependPath
             (apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label))
             (toOpenApi (Proxy @api))
-            <> taggedSumOfApisToOpenApi @mkApiRecord @apis @infos
+            <> domainDrivenApiToOpenApi @mkApiRecord @apis @infos
 
 instance
-    TaggedSumOfApisHasOpenApi
+    DomainDrivenApiHasOpenApi
         mkApiRecord
         (GenericRecordFields (mkApiRecord AsApi))
         (GenericRecordFieldInfos (mkApiRecord AsApi))
-    => HasOpenApi (TaggedSumOfApis mkApiRecord)
+    => HasOpenApi (DomainDrivenApi model event mkApiRecord)
     where
     toOpenApi _ =
-        taggedSumOfApisToOpenApi @mkApiRecord
+        domainDrivenApiToOpenApi @mkApiRecord
             @(GenericRecordFields (mkApiRecord AsApi))
             @(GenericRecordFieldInfos (mkApiRecord AsApi))
 
 instance
-    ( GHC.Generic (RecordOfServers a)
+    ( GHC.Generic (RecordOfServers model event a)
     , GTo a
-    , ThrowAll (SOP I (GCode (RecordOfServers a)))
+    , ThrowAll (SOP I (GCode (RecordOfServers model event a)))
     )
-    => ThrowAll (RecordOfServers a)
+    => ThrowAll (RecordOfServers model event a)
     where
-    throwAll = gto . throwAll @(SOP I (GCode (RecordOfServers a)))
+    throwAll = gto . throwAll @(SOP I (GCode (RecordOfServers model event a)))

@@ -50,13 +50,13 @@ counterServers =
         , decrease = Cmd $ \_ -> pure (getCounter, [Decrease])
         }
 
--- 4. Define the final API type using `TaggedSumOfApis`, which uses the labels of the
+-- 4. Define the final API type using `DomainDrivenApi`, which uses the labels of the
 -- record to add a path piece to the final endpoints.
 
-type CounterApi = TaggedSumOfApis CounterApis
+type CounterApi = DomainDrivenApi CounterModel CounterEvent CounterApis
 
 -- 5. Define the server.
--- The `HasServer` instance for `TaggedSumOfApis` with covert it into a `RecordOfServers`
+-- The `HasServer` instance for `DomainDrivenApi` with covert it into a `RecordOfServers`
 counterServer :: forall m. Monad m => ServerT CounterApi m
 counterServer = RecordOfServers counterServers
 

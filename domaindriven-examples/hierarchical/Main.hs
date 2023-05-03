@@ -76,46 +76,44 @@ data TextApi model event mode = TextApi
     deriving (Generic, ApiTagFromLabel)
 
 data FullApi model event mode = FullApi
-    { number :: mode :- TaggedSumOfApis (NumberApi model event)
-    , text :: mode :- TaggedSumOfApis (TextApi model event)
+    { number :: mode :- DomainDrivenApi model event (NumberApi model event)
+    , text :: mode :- DomainDrivenApi model event (TextApi model event)
     }
     deriving (Generic, ApiTagFromLabel)
 
 -- 3. Implement the endpoints
 
-numberServer :: forall m. Monad m => NumberApi NumberModel NumberEvent (AsServerT m)
+numberServer :: Monad m => NumberApi NumberModel NumberEvent (AsServerT m)
 numberServer =
     NumberApi
         { set = \i -> Cmd $ \_ -> pure (getNumber, [SetNumber i])
         , get = Query (pure . getNumber)
         }
 
-textServer :: forall m. Monad m => TextApi TextModel TextEvent (AsServerT m)
+textServer :: Monad m => TextApi TextModel TextEvent (AsServerT m)
 textServer =
     TextApi
         { set = \t -> Cmd $ \_ -> pure (getText, [SetText t])
         , get = Query (pure . getText)
         }
 
-fullServer :: forall m. Monad m => FullApi FullModel FullEvent (AsServerT m)
+fullServer :: Monad m => FullApi FullModel FullEvent (AsServerT m)
 fullServer =
     FullApi
         { number =
             mapModelAndEvent
-                ((^. #numberModel) :: FullModel -> NumberModel)
-                (NumberEvent :: NumberEvent -> FullEvent)
-                (RecordOfServers (numberServer @m))
+                (^. #numberModel)
+                NumberEvent
+                (RecordOfServers numberServer)
         , text =
             mapModelAndEvent
-                ((^. #textModel) :: FullModel -> TextModel)
-                (TextEvent :: TextEvent -> FullEvent)
-                (RecordOfServers (textServer @m))
+                (^. #textModel)
+                TextEvent
+                (RecordOfServers textServer)
         }
 
 fullServer'
-    :: forall m
-     . Monad m
-    => ServerT (TaggedSumOfApis (FullApi FullModel FullEvent)) m
+    :: Monad m => ServerT (DomainDrivenApi FullModel FullEvent (FullApi FullModel FullEvent)) m
 fullServer' = RecordOfServers fullServer
 
 app
@@ -127,7 +125,7 @@ app
     -> Application
 app p =
     serveWithContext
-        (Proxy @(TaggedSumOfApis (FullApi FullModel FullEvent)))
+        (Proxy @(DomainDrivenApi FullModel FullEvent (FullApi FullModel FullEvent)))
         (Persistence p :. EmptyContext)
         fullServer'
 
