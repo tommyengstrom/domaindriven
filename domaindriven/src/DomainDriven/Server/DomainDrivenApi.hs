@@ -31,12 +31,23 @@ import Prelude
 
 type Api = Type
 
+-- | Wrapper around the data structure containing the API and endpoint definitions.
+-- The endpoints name in the record will be added to the path. For example:
+-- ```
+-- data CounterAction model event mode = CounterAction
+--     { increaseWith :: mode :- "something" :> ReqBody '[JSON] Int :> Cmd model event Int
+--     }
+-- ```
+-- Will result in a Post endpoint with path "something/increaseWith".
 data DomainDrivenApi (model :: Type) (event :: Type) (mkApiRecord :: Type -> Type)
 
 class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
     apiTagFromLabel :: String -> String
     apiTagFromLabel = id
 
+-- | Wrapper around the data structure containing the API and endpoint definitions.
+-- This is used to carry the expectation of `HasServer` for `DomainDrivenApi`. i.e.
+-- this is what the `ServerT` type family will produce when given a `DomainDrivenApi`.
 newtype RecordOfServers (model :: Type) (event :: Type) a = RecordOfServers {unRecordOfServers :: a}
     deriving newtype (GHC.Generic)
 

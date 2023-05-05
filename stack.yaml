@@ -1,4 +1,4 @@
-resolver: lts-20.7
+resolver: lts-20.19
 packages:
 - domaindriven-core
 - domaindriven
