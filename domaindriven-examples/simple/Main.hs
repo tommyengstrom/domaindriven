@@ -56,9 +56,9 @@ counterServers =
 type CounterApi = DomainDrivenApi CounterModel CounterEvent CounterApis
 
 -- 5. Define the server.
--- The `HasServer` instance for `DomainDrivenApi` with covert it into a `RecordOfServers`
+-- The `HasServer` instance for `DomainDrivenApi` with covert it into a `DomainDrivenServer`
 counterServer :: forall m. Monad m => ServerT CounterApi m
-counterServer = RecordOfServers counterServers
+counterServer = DomainDrivenServer counterServers
 
 -- FIXME: This should be the default implementation imo
 instance ApiTagFromLabel CounterApis where

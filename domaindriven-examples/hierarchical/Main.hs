@@ -104,17 +104,17 @@ fullServer =
             mapModelAndEvent
                 (^. #numberModel)
                 NumberEvent
-                (RecordOfServers numberServer)
+                (DomainDrivenServer numberServer)
         , text =
             mapModelAndEvent
                 (^. #textModel)
                 TextEvent
-                (RecordOfServers textServer)
+                (DomainDrivenServer textServer)
         }
 
 fullServer'
     :: Monad m => ServerT (DomainDrivenApi FullModel FullEvent (FullApi FullModel FullEvent)) m
-fullServer' = RecordOfServers fullServer
+fullServer' = DomainDrivenServer fullServer
 
 app
     :: ( Model p ~ FullModel

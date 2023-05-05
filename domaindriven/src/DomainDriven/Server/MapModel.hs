@@ -57,20 +57,20 @@ instance
 
 instance
     MapModelAndEvent'
-        (ModelFrom (RecordOfServers modelFrom eventFrom recordFrom))
-        (ModelTo (RecordOfServers modelTo eventTo recordTo))
-        (EventFrom (RecordOfServers modelFrom eventFrom recordFrom))
-        (EventTo (RecordOfServers modelTo eventTo recordTo))
-        (RecordOfServers modelFrom eventFrom recordFrom)
-        (RecordOfServers modelTo eventTo recordTo)
+        (ModelFrom (DomainDrivenServer modelFrom eventFrom recordFrom))
+        (ModelTo (DomainDrivenServer modelTo eventTo recordTo))
+        (EventFrom (DomainDrivenServer modelFrom eventFrom recordFrom))
+        (EventTo (DomainDrivenServer modelTo eventTo recordTo))
+        (DomainDrivenServer modelFrom eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     => MapModelAndEvent
-        (RecordOfServers modelFrom eventFrom recordFrom)
-        (RecordOfServers modelTo eventTo recordTo)
+        (DomainDrivenServer modelFrom eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     where
-    type ModelFrom (RecordOfServers modelFrom eventFrom recordFrom) = modelFrom
-    type ModelTo (RecordOfServers modelTo eventTo recordTo) = modelTo
-    type EventFrom (RecordOfServers modelFrom eventFrom recordFrom) = eventFrom
-    type EventTo (RecordOfServers modelTo eventTo recordTo) = eventTo
+    type ModelFrom (DomainDrivenServer modelFrom eventFrom recordFrom) = modelFrom
+    type ModelTo (DomainDrivenServer modelTo eventTo recordTo) = modelTo
+    type EventFrom (DomainDrivenServer modelFrom eventFrom recordFrom) = eventFrom
+    type EventTo (DomainDrivenServer modelTo eventTo recordTo) = eventTo
     mapModelAndEvent = mapModelAndEvent'
 
 class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo where
@@ -197,24 +197,24 @@ instance
         S xs -> case xs of {}
 
 instance
-    ( GHC.Generic (RecordOfServers modelFrom eventFrom recordFrom)
-    , GHC.Generic (RecordOfServers modelTo eventTo recordTo)
-    , GFrom (RecordOfServers modelFrom eventFrom recordFrom)
-    , GTo (RecordOfServers modelTo eventTo recordTo)
+    ( GHC.Generic (DomainDrivenServer modelFrom eventFrom recordFrom)
+    , GHC.Generic (DomainDrivenServer modelTo eventTo recordTo)
+    , GFrom (DomainDrivenServer modelFrom eventFrom recordFrom)
+    , GTo (DomainDrivenServer modelTo eventTo recordTo)
     , MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (SOP I (GCode (RecordOfServers modelFrom eventFrom recordFrom)))
-        (SOP I (GCode (RecordOfServers modelTo eventTo recordTo)))
+        (SOP I (GCode (DomainDrivenServer modelFrom eventFrom recordFrom)))
+        (SOP I (GCode (DomainDrivenServer modelTo eventTo recordTo)))
     )
     => MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (RecordOfServers modelFrom eventFrom recordFrom)
-        (RecordOfServers modelTo eventTo recordTo)
+        (DomainDrivenServer modelFrom eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     where
     mapModelAndEvent' proj inj = gto . mapModelAndEvent' proj inj . gfrom

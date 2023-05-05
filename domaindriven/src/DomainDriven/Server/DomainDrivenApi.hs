@@ -48,10 +48,10 @@ class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
 -- | Wrapper around the data structure containing the API and endpoint definitions.
 -- This is used to carry the expectation of `HasServer` for `DomainDrivenApi`. i.e.
 -- this is what the `ServerT` type family will produce when given a `DomainDrivenApi`.
-newtype RecordOfServers (model :: Type) (event :: Type) a = RecordOfServers {unRecordOfServers :: a}
+newtype DomainDrivenServer (model :: Type) (event :: Type) a = DomainDrivenServer {unDomainDrivenServer :: a}
     deriving newtype (GHC.Generic)
 
-class RecordOfServersFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
+class DomainDrivenServerFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
     recordOfServersFromFields
         :: NP I (ServerTs (GenericRecordFields (mkApiRecord AsApi)) m)
         -> mkApiRecord (AsServerT m)
@@ -66,7 +66,7 @@ instance
     , GFrom (mkApiRecord (AsServerT m))
     , GTo (mkApiRecord (AsServerT m))
     )
-    => RecordOfServersFields mkApiRecord m
+    => DomainDrivenServerFields mkApiRecord m
     where
     recordOfServersFromFields = gto . SOP . Z
     recordOfServersToFields x = case unSOP $ gfrom x of
@@ -130,23 +130,23 @@ instance
         (GenericRecordFields (mkApiRecord AsApi))
         (GenericRecordFieldInfos (mkApiRecord AsApi))
         context
-    , forall m. RecordOfServersFields mkApiRecord m
+    , forall m. DomainDrivenServerFields mkApiRecord m
     )
     => HasServer (DomainDrivenApi model event mkApiRecord) context
     where
     type
         ServerT (DomainDrivenApi model event mkApiRecord) m =
-            RecordOfServers model event (mkApiRecord (AsServerT m))
+            DomainDrivenServer model event (mkApiRecord (AsServerT m))
 
     route _ context delayedServer =
         taggedSumOfRoutes @mkApiRecord
             @(GenericRecordFields (mkApiRecord AsApi))
             @(GenericRecordFieldInfos (mkApiRecord AsApi))
             context
-            (recordOfServersToFields . unRecordOfServers <$> delayedServer)
+            (recordOfServersToFields . unDomainDrivenServer <$> delayedServer)
 
     hoistServerWithContext _ _ nt servers =
-        RecordOfServers
+        DomainDrivenServer
             . recordOfServersFromFields
             . hoistTaggedServersWithContext @mkApiRecord
                 @(GenericRecordFields (mkApiRecord AsApi))
@@ -154,7 +154,7 @@ instance
                 @context
                 nt
             . recordOfServersToFields
-            $ unRecordOfServers servers
+            $ unDomainDrivenServer servers
 
 class
     DomainDrivenApiHasOpenApi
@@ -194,10 +194,10 @@ instance
             @(GenericRecordFieldInfos (mkApiRecord AsApi))
 
 instance
-    ( GHC.Generic (RecordOfServers model event a)
+    ( GHC.Generic (DomainDrivenServer model event a)
     , GTo a
-    , ThrowAll (SOP I (GCode (RecordOfServers model event a)))
+    , ThrowAll (SOP I (GCode (DomainDrivenServer model event a)))
     )
-    => ThrowAll (RecordOfServers model event a)
+    => ThrowAll (DomainDrivenServer model event a)
     where
-    throwAll = gto . throwAll @(SOP I (GCode (RecordOfServers model event a)))
+    throwAll = gto . throwAll @(SOP I (GCode (DomainDrivenServer model event a)))
