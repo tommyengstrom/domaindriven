@@ -27,9 +27,7 @@ source-repository head
 library
   exposed-modules:
       DomainDriven
-      DomainDriven.Server
       DomainDriven.Server.Api
-      DomainDriven.Server.Class
       DomainDriven.Server.DomainDrivenApi
       DomainDriven.Server.Helper.GenericRecord
       DomainDriven.Server.MapModel
