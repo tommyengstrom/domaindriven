@@ -1,9 +1,21 @@
 module Main where
 
 import Data.Aeson
-import DomainDriven (Event, Model, Stored (..), WriteModel)
+import DomainDriven
+    ( ApiTagFromLabel (..)
+    , Cmd
+    , CmdServer (..)
+    , DomainDrivenApi
+    , DomainDrivenServer (..)
+    , Event
+    , Model
+    , Persistence (..)
+    , Query
+    , QueryServer (..)
+    , Stored (..)
+    , WriteModel
+    )
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
-import DomainDriven.Server
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (run)
 import Servant
@@ -32,19 +44,17 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
 --------------------------------------------------------------------------------
 -- 3. Define the API, i.e. the commands and queries
 --------------------------------------------------------------------------------
-data CounterApis mode = CounterApis
-    { current :: mode :- Query CounterModel Int
-    , increase :: mode :- Cmd CounterModel CounterEvent Int
-    , decrease :: mode :- Cmd CounterModel CounterEvent Int
+data CounterApi model event mode = CounterApi
+    { current :: mode :- Query model Int
+    , increase :: mode :- Cmd model event Int
+    , decrease :: mode :- Cmd model event Int
     }
     deriving (Generic)
 
--- FIXME: Make sure it's good enough to only derive GHC generics!
-
 -- 3. Implement the endpoints
-counterServers :: forall m. Monad m => CounterApis (AsServerT m)
+counterServers :: forall m. Monad m => CounterApi CounterModel CounterEvent (AsServerT m)
 counterServers =
-    CounterApis
+    CounterApi
         { current = Query (pure . getCounter)
         , increase = Cmd $ \_ -> pure (getCounter, [Increase])
         , decrease = Cmd $ \_ -> pure (getCounter, [Decrease])
@@ -53,15 +63,15 @@ counterServers =
 -- 4. Define the final API type using `DomainDrivenApi`, which uses the labels of the
 -- record to add a path piece to the final endpoints.
 
-type CounterApi = DomainDrivenApi CounterModel CounterEvent CounterApis
+type ServantCounterApi = DomainDrivenApi CounterApi CounterModel CounterEvent
 
 -- 5. Define the server.
 -- The `HasServer` instance for `DomainDrivenApi` with covert it into a `DomainDrivenServer`
-counterServer :: forall m. Monad m => ServerT CounterApi m
+counterServer :: forall m. Monad m => ServerT ServantCounterApi m
 counterServer = DomainDrivenServer counterServers
 
 -- FIXME: This should be the default implementation imo
-instance ApiTagFromLabel CounterApis where
+instance ApiTagFromLabel CounterApi where
     apiTagFromLabel = id
 
 app
@@ -72,7 +82,7 @@ app
     -> Application
 app p =
     serveWithContext
-        (Proxy @CounterApi)
+        (Proxy @ServantCounterApi)
         (Persistence p :. EmptyContext)
         counterServer
 

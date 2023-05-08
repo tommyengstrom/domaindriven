@@ -2,9 +2,24 @@ module Main where
 
 import Data.Aeson
 import Data.Generics.Labels ()
-import DomainDriven (Event, Model, Stored (..), WriteModel)
+import DomainDriven
+    ( ApiTagFromLabel (..)
+    , Cmd
+    , CmdServer (..)
+    , DomainDrivenApi
+    , DomainDrivenServer (..)
+    , Event
+    , Model
+    , Persistence (..)
+    , Query
+    , QueryServer (..)
+    , Stored (..)
+    , WriteModel
+    , mapEvent
+    , mapModel
+    )
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
-import DomainDriven.Server
+
 import GHC.Generics (Generic)
 import Lens.Micro
 import Network.Wai.Handler.Warp (run)
@@ -76,8 +91,8 @@ data TextApi model event mode = TextApi
     deriving (Generic, ApiTagFromLabel)
 
 data FullApi model event mode = FullApi
-    { number :: mode :- DomainDrivenApi model event (NumberApi model event)
-    , text :: mode :- DomainDrivenApi model event (TextApi model event)
+    { number :: mode :- DomainDrivenApi NumberApi model event
+    , text :: mode :- DomainDrivenApi TextApi model event
     }
     deriving (Generic, ApiTagFromLabel)
 
@@ -101,19 +116,17 @@ fullServer :: Monad m => FullApi FullModel FullEvent (AsServerT m)
 fullServer =
     FullApi
         { number =
-            mapModelAndEvent
-                (^. #numberModel)
-                NumberEvent
-                (DomainDrivenServer numberServer)
+            mapModel (^. #numberModel)
+                . mapEvent NumberEvent
+                $ DomainDrivenServer numberServer
         , text =
-            mapModelAndEvent
-                (^. #textModel)
-                TextEvent
-                (DomainDrivenServer textServer)
+            mapModel (^. #textModel)
+                . mapEvent TextEvent
+                $ DomainDrivenServer textServer
         }
 
 fullServer'
-    :: Monad m => ServerT (DomainDrivenApi FullModel FullEvent (FullApi FullModel FullEvent)) m
+    :: Monad m => ServerT (DomainDrivenApi FullApi FullModel FullEvent) m
 fullServer' = DomainDrivenServer fullServer
 
 app
@@ -125,7 +138,7 @@ app
     -> Application
 app p =
     serveWithContext
-        (Proxy @(DomainDrivenApi FullModel FullEvent (FullApi FullModel FullEvent)))
+        (Proxy @(DomainDrivenApi FullApi FullModel FullEvent))
         (Persistence p :. EmptyContext)
         fullServer'
 

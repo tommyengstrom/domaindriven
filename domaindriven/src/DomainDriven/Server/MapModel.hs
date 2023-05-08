@@ -1,3 +1,4 @@
+-- These instances can no doubt be simplified a little bit...
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -34,15 +35,14 @@ class MapEvent serverFrom serverTo where
         -> serverTo
 
 instance
-    ( modelFrom ~ modelTo
-    , ModelFrom (DomainDrivenServer modelTo eventFrom recordFrom) ~ ModelTo (DomainDrivenServer modelTo eventTo recordTo)
+    ( serverFrom ~ DomainDrivenServer mkServer modelTo eventFrom m
     , MapModelAndEvent
-        (DomainDrivenServer modelTo eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        (DomainDrivenServer mkServer modelTo eventFrom m)
+        (DomainDrivenServer mkServer modelTo eventTo m)
     )
     => MapEvent
-        (DomainDrivenServer modelFrom eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        serverFrom
+        (DomainDrivenServer mkServer modelTo eventTo m)
     where
     mapEvent = mapModelAndEvent id
 
@@ -53,33 +53,36 @@ class MapModel serverFrom serverTo where
         -> serverTo
 
 instance
-    ( eventFrom ~ eventTo
+    ( serverFrom ~ DomainDrivenServer mkServer modelFrom eventTo m
     , MapModelAndEvent
-        (DomainDrivenServer modelFrom eventTo recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        (DomainDrivenServer mkServer modelFrom eventTo m)
+        (DomainDrivenServer mkServer modelTo eventTo m)
     )
     => MapModel
-        (DomainDrivenServer modelFrom eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        serverFrom
+        (DomainDrivenServer mkServer modelTo eventTo m)
     where
     mapModel f = mapModelAndEvent f id
 
 instance
-    MapModelAndEvent'
-        (ModelFrom (DomainDrivenServer modelFrom eventFrom recordFrom))
-        (ModelTo (DomainDrivenServer modelTo eventTo recordTo))
-        (EventFrom (DomainDrivenServer modelFrom eventFrom recordFrom))
-        (EventTo (DomainDrivenServer modelTo eventTo recordTo))
-        (DomainDrivenServer modelFrom eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+    ( mkServerFrom ~ mkServerTo
+    , mFrom ~ mTo
+    , MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (DomainDrivenServer mkServerTo modelFrom eventFrom mTo)
+        (DomainDrivenServer mkServerTo modelTo eventTo mTo)
+    )
     => MapModelAndEvent
-        (DomainDrivenServer modelFrom eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom)
+        (DomainDrivenServer mkServerTo modelTo eventTo mTo)
     where
-    type ModelFrom (DomainDrivenServer modelFrom eventFrom recordFrom) = modelFrom
-    type ModelTo (DomainDrivenServer modelTo eventTo recordTo) = modelTo
-    type EventFrom (DomainDrivenServer modelFrom eventFrom recordFrom) = eventFrom
-    type EventTo (DomainDrivenServer modelTo eventTo recordTo) = eventTo
+    type ModelFrom (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom) = modelFrom
+    type ModelTo (DomainDrivenServer mkServerTo modelTo eventTo mTo) = modelTo
+    type EventFrom (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom) = eventFrom
+    type EventTo (DomainDrivenServer mkServerTo modelTo eventTo mTo) = eventTo
     mapModelAndEvent = mapModelAndEvent'
 
 class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo where
@@ -210,24 +213,24 @@ instance
         S xs -> case xs of {}
 
 instance
-    ( GHC.Generic (DomainDrivenServer modelFrom eventFrom recordFrom)
-    , GHC.Generic (DomainDrivenServer modelTo eventTo recordTo)
-    , GFrom (DomainDrivenServer modelFrom eventFrom recordFrom)
-    , GTo (DomainDrivenServer modelTo eventTo recordTo)
+    ( GHC.Generic (DomainDrivenServer mkServer modelFrom eventFrom m)
+    , GHC.Generic (DomainDrivenServer mkServer modelTo eventTo m)
+    , GFrom (DomainDrivenServer mkServer modelFrom eventFrom m)
+    , GTo (DomainDrivenServer mkServer modelTo eventTo m)
     , MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (SOP I (GCode (DomainDrivenServer modelFrom eventFrom recordFrom)))
-        (SOP I (GCode (DomainDrivenServer modelTo eventTo recordTo)))
+        (SOP I (GCode (DomainDrivenServer mkServer modelFrom eventFrom m)))
+        (SOP I (GCode (DomainDrivenServer mkServer modelTo eventTo m)))
     )
     => MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (DomainDrivenServer modelFrom eventFrom recordFrom)
-        (DomainDrivenServer modelTo eventTo recordTo)
+        (DomainDrivenServer mkServer modelFrom eventFrom m)
+        (DomainDrivenServer mkServer modelTo eventTo m)
     where
     mapModelAndEvent' proj inj = gto . mapModelAndEvent' proj inj . gfrom
