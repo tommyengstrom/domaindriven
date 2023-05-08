@@ -35,6 +35,7 @@ class MapEvent serverFrom serverTo where
 
 instance
     ( modelFrom ~ modelTo
+    , ModelFrom (DomainDrivenServer modelTo eventFrom recordFrom) ~ ModelTo (DomainDrivenServer modelTo eventTo recordTo)
     , MapModelAndEvent
         (DomainDrivenServer modelTo eventFrom recordFrom)
         (DomainDrivenServer modelTo eventTo recordTo)
@@ -132,8 +133,8 @@ instance
         modelTo
         eventFrom
         eventTo
-        (CmdServer modelFrom eventFrom mFrom aFrom)
-        (CmdServer modelTo eventTo mTo aTo)
+        (CmdServer modelFrom' eventFrom' mFrom aFrom)
+        (CmdServer modelTo' eventTo' mTo aTo)
     where
     mapModelAndEvent' proj inj (Cmd server) =
         Cmd $ \model -> ((. proj) *** map inj) <$> server (proj model)
@@ -149,8 +150,8 @@ instance
         modelTo
         eventFrom
         eventTo
-        (QueryServer modelFrom mFrom aFrom)
-        (QueryServer modelTo mTo aTo)
+        (QueryServer modelFrom' mFrom aFrom)
+        (QueryServer modelTo' mTo aTo)
     where
     mapModelAndEvent' proj _ (Query server) = Query $ server . proj
 
@@ -165,8 +166,8 @@ instance
         modelTo
         eventFrom
         eventTo
-        (CbQueryServer modelFrom mFrom aFrom)
-        (CbQueryServer modelTo mTo aTo)
+        (CbQueryServer modelFrom' mFrom aFrom)
+        (CbQueryServer modelTo' mTo aTo)
     where
     mapModelAndEvent' proj _ (CbQuery server) = CbQuery $ \model -> server (proj <$> model)
 
