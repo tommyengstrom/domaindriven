@@ -80,7 +80,11 @@ class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo 
         -> serverFrom
         -> serverTo
 
-instance {-# OVERLAPPABLE #-} (serverFrom ~ serverTo) => MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo where
+instance
+    {-# OVERLAPPABLE #-}
+    (serverFrom ~ serverTo)
+    => MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo
+    where
     mapModelAndEvent' _ _ = id
 
 instance
@@ -159,8 +163,8 @@ instance
     mapModelAndEvent' proj _ (CbQuery server) = CbQuery $ \model -> server (proj <$> model)
 
 instance
-    MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo
-    => MapModelAndEvent' modelFrom modelTo eventFrom eventTo (a -> serverFrom) (a -> serverTo)
+    (aFrom ~ aTo, MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo)
+    => MapModelAndEvent' modelFrom modelTo eventFrom eventTo (aFrom -> serverFrom) (aTo -> serverTo)
     where
     mapModelAndEvent' proj inj server a = mapModelAndEvent' proj inj (server a)
 
