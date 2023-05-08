@@ -34,10 +34,14 @@ class MapEvent serverFrom serverTo where
         -> serverTo
 
 instance
-    ( MapModelAndEvent serverFrom serverTo
-    , ModelFrom serverFrom ~ ModelTo serverTo
+    ( modelFrom ~ modelTo
+    , MapModelAndEvent
+        (DomainDrivenServer modelTo eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     )
-    => MapEvent serverFrom serverTo
+    => MapEvent
+        (DomainDrivenServer modelFrom eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     where
     mapEvent = mapModelAndEvent id
 
@@ -48,10 +52,14 @@ class MapModel serverFrom serverTo where
         -> serverTo
 
 instance
-    ( MapModelAndEvent serverFrom serverTo
-    , EventFrom serverFrom ~ EventTo serverTo
+    ( eventFrom ~ eventTo
+    , MapModelAndEvent
+        (DomainDrivenServer modelFrom eventTo recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     )
-    => MapModel serverFrom serverTo
+    => MapModel
+        (DomainDrivenServer modelFrom eventFrom recordFrom)
+        (DomainDrivenServer modelTo eventTo recordTo)
     where
     mapModel f = mapModelAndEvent f id
 
