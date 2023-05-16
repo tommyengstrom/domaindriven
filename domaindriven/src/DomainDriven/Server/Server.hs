@@ -60,7 +60,8 @@ mapServer f Delayed{..} =
         , ..
         }
 
-data WritePersistence model event = forall p. (Model p ~ model, Event p ~ event, WriteModel p) => WritePersistence p
+data WritePersistence model event
+    = forall p. (Model p ~ model, Event p ~ event, WriteModel p) => WritePersistence p
 data ReadPersistence model = forall p. (Model p ~ model, ReadModel p) => ReadPersistence p
 
 instance

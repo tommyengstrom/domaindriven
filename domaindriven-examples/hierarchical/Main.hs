@@ -10,11 +10,12 @@ import DomainDriven
     , DomainDrivenServer (..)
     , Event
     , Model
-    , Persistence (..)
     , Query
     , QueryServer (..)
+    , ReadPersistence (..)
     , Stored (..)
     , WriteModel
+    , WritePersistence (..)
     , mapEvent
     , mapModel
     )
@@ -139,7 +140,7 @@ app
 app p =
     serveWithContext
         (Proxy @(DomainDrivenApi FullApi FullModel FullEvent))
-        (Persistence p :. EmptyContext)
+        (ReadPersistence p :. WritePersistence p :. EmptyContext)
         fullServer'
 
 main :: IO ()

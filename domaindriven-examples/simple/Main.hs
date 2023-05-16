@@ -9,11 +9,12 @@ import DomainDriven
     , DomainDrivenServer (..)
     , Event
     , Model
-    , Persistence (..)
     , Query
     , QueryServer (..)
+    , ReadPersistence (..)
     , Stored (..)
     , WriteModel
+    , WritePersistence (..)
     )
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 import GHC.Generics (Generic)
@@ -83,7 +84,7 @@ app
 app p =
     serveWithContext
         (Proxy @ServantCounterApi)
-        (Persistence p :. EmptyContext)
+        (ReadPersistence p :. WritePersistence p :. EmptyContext)
         counterServer
 
 main :: IO ()
