@@ -1,5 +1,6 @@
--- got it the wrong way around. this should presumably be domaindriven.servant.api
 {-# LANGUAGE AllowAmbiguousTypes #-}
+-- got it the wrong way around. this should presumably be domaindriven.servant.api
+{-# LANGUAGE UndecidableInstances #-}
 
 module DomainDriven.Server.Api where
 
@@ -16,6 +17,7 @@ import GHC.TypeLits
 import Generics.SOP hiding (fieldName)
 import Optics
 import Servant.API (JSON, StdMethod (GET, POST), Verb)
+import Servant.Client.Core
 import Servant.OpenApi
 import Prelude
 
@@ -112,3 +114,21 @@ instance IsOptional (Maybe t) where
 
 instance {-# OVERLAPPABLE #-} IsOptional t where
     isOptional = False
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (Cmd' model event (Verb method status cts ret))
+    where
+    type Client m (Cmd' model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (Query' model (Verb method status cts ret))
+    where
+    type Client m (Query' model (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma

@@ -23,6 +23,7 @@ import Generics.SOP.Type.Metadata
 import Servant
 import Servant.Auth.Internal.ThrowAll.SOP ()
 import Servant.Auth.Server.Internal.ThrowAll
+import Servant.Client.Generic
 import Servant.OpenApi
 import Servant.Server.Generic
 import Servant.Server.Internal.Delayed
