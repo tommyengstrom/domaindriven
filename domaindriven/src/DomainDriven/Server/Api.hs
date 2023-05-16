@@ -127,8 +127,26 @@ instance
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
+    => HasClient m (CbCmd' model event (Verb method status cts ret))
+    where
+    type Client m (CbCmd' model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
     => HasClient m (Query' model (Verb method status cts ret))
     where
     type Client m (Query' model (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CbQuery' model (Verb method status cts ret))
+    where
+    type Client m (CbQuery' model (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
