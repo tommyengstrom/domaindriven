@@ -23,6 +23,7 @@ import Generics.SOP.Type.Metadata
 import Servant
 import Servant.Auth.Internal.ThrowAll.SOP ()
 import Servant.Auth.Server.Internal.ThrowAll
+import Servant.Client.Core
 import Servant.Client.Generic
 import Servant.OpenApi
 import Servant.Server.Generic
@@ -223,3 +224,94 @@ instance
     => ThrowAll (DomainDrivenServer mkServerRecord model event m)
     where
     throwAll = gto . throwAll @(SOP I (GCode (DomainDrivenServer mkServerRecord model event m)))
+
+class
+    DomainDrivenApiHasClients
+        (m :: Type -> Type)
+        (mkApiRecord :: Type -> Type -> Type -> Type)
+        (apis :: [Api])
+        (infos :: [FieldInfo])
+    where
+    type Clients apis m :: [Type]
+    clientsWithRoute :: Request -> NP I (Clients apis m)
+    hoistClientsMonad
+        :: (forall x. mon x -> mon' x)
+        -> NP I (Clients apis mon)
+        -> NP I (Clients apis mon')
+
+instance DomainDrivenApiHasClients m mkApiRecord '[] '[] where
+    type Clients '[] m = '[]
+    clientsWithRoute _ = Nil
+    hoistClientsMonad _ Nil = Nil
+
+instance
+    ( HasClient m api
+    , DomainDrivenApiHasClients m mkApiRecord apis infos
+    , KnownSymbol label
+    , ApiTagFromLabel mkApiRecord
+    )
+    => DomainDrivenApiHasClients m mkApiRecord (api ': apis) ('FieldInfo label ': infos)
+    where
+    type Clients (api ': apis) m = Client m api ': Clients apis m
+
+    clientsWithRoute req =
+        I
+            ( clientWithRoute
+                (Proxy @m)
+                (Proxy @api)
+                (appendToPath (Text.pack $ apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label)) req)
+            )
+            :* clientsWithRoute @m @mkApiRecord @apis @infos req
+    hoistClientsMonad nt (I client :* clients) =
+        I (hoistClientMonad (Proxy @m) (Proxy @api) nt client)
+            :* hoistClientsMonad @m @mkApiRecord @apis @infos nt clients
+
+class DomainDrivenClientFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
+    recordOfClientsFromFields
+        :: NP I (Clients (GenericRecordFields (mkApiRecord AsApi)) m)
+        -> mkApiRecord (AsClientT m)
+    recordOfClientsToFields
+        :: mkApiRecord (AsClientT m)
+        -> NP I (Clients (GenericRecordFields (mkApiRecord AsApi)) m)
+
+instance
+    ( GHC.Generic (mkApiRecord (AsClientT m))
+    , GCode (mkApiRecord (AsClientT m))
+        ~ '[Clients (GenericRecordFields (mkApiRecord AsApi)) m]
+    , GFrom (mkApiRecord (AsClientT m))
+    , GTo (mkApiRecord (AsClientT m))
+    )
+    => DomainDrivenClientFields mkApiRecord m
+    where
+    recordOfClientsFromFields = gto . SOP . Z
+    recordOfClientsToFields x = case unSOP $ gfrom x of
+        Z servers -> servers
+        S y -> case y of {}
+
+instance
+    ( RunClient m
+    , DomainDrivenApiHasClients
+        m
+        mkApiRecord
+        (GenericRecordFields (mkApiRecord model event AsApi))
+        (GenericRecordFieldInfos (mkApiRecord model event AsApi))
+    , forall n. DomainDrivenClientFields (mkApiRecord model event) n
+    )
+    => HasClient m (DomainDrivenApi mkApiRecord model event)
+    where
+    type
+        Client m (DomainDrivenApi mkApiRecord model event) =
+            mkApiRecord model event (AsClientT m)
+    clientWithRoute _ _ =
+        recordOfClientsFromFields
+            . ( clientsWithRoute @m @mkApiRecord
+                    @(GenericRecordFields (mkApiRecord model event AsApi))
+                    @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
+              )
+    hoistClientMonad _ _ nt =
+        recordOfClientsFromFields
+            . hoistClientsMonad @m @mkApiRecord
+                @(GenericRecordFields (mkApiRecord model event AsApi))
+                @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
+                nt
+            . recordOfClientsToFields
