@@ -5,7 +5,8 @@
 module DomainDriven.Server.Api where
 
 import Data.Aeson
-import Data.Aeson.Key
+import Data.Aeson.Key as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types
 import Data.Function
 import Data.Kind
@@ -59,6 +60,23 @@ newtype JsonObject (fields :: [NamedField]) = JsonObject (NP Field (FieldTypes f
 class ParseFields (fields :: [NamedField]) where
     parseFields :: Object -> Parser (NP Field (FieldTypes fields))
 
+class UnparseFields (fields :: [NamedField]) where
+    unparseFields :: NP Field (FieldTypes fields) -> Object
+
+instance UnparseFields '[] where
+    unparseFields Nil = mempty
+
+instance
+    ( KnownSymbol name
+    , ToJSON a
+    , UnparseFields fields
+    )
+    => UnparseFields ('NamedField name a ': fields)
+    where
+    unparseFields (Field a :* fields) =
+        KeyMap.insert (Key.fromString (symbolVal $ Proxy @name)) (toJSON a) $
+            unparseFields @fields fields
+
 instance ParseFields '[] where
     parseFields _ = pure Nil
 
@@ -105,6 +123,9 @@ instance
                 & if isOptional @t
                     then id
                     else #required %~ (++ [fieldName])
+
+instance UnparseFields fields => ToJSON (JsonObject fields) where
+    toJSON (JsonObject fields) = Object $ unparseFields @fields fields
 
 class IsOptional t where
     isOptional :: Bool
