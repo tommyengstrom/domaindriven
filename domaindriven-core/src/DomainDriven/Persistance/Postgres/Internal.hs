@@ -10,10 +10,10 @@ import Data.Generics.Product
 import Data.IORef
 import Data.Int
 import Data.Sequence (Seq (..))
-import qualified Data.Sequence as Seq
+import Data.Sequence qualified as Seq
 import Data.String
 import Database.PostgreSQL.Simple as PG
-import qualified Database.PostgreSQL.Simple.Cursor as Cursor
+import Database.PostgreSQL.Simple.Cursor qualified as Cursor
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
@@ -21,8 +21,8 @@ import Lens.Micro
     ( to
     , (^.)
     )
-import qualified Streamly.Data.Unfold as Unfold
-import qualified Streamly.Prelude as S
+import Streamly.Data.Unfold qualified as Unfold
+import Streamly.Prelude qualified as S
 import UnliftIO (MonadUnliftIO (..))
 import UnliftIO.Pool
     ( LocalPool
@@ -57,7 +57,7 @@ data PostgresEventTrans model event = PostgresEventTrans
     }
     deriving (Generic)
 
-instance (FromJSON e) => ReadModel (PostgresEvent m e) where
+instance FromJSON e => ReadModel (PostgresEvent m e) where
     type Model (PostgresEvent m e) = m
     type Event (PostgresEvent m e) = e
     applyEvent pg = pg ^. field @"app"
@@ -207,7 +207,7 @@ createPostgresPersistance pool eventTable app' seed' = do
             }
 
 queryEvents
-    :: (FromJSON a)
+    :: FromJSON a
     => Connection
     -> EventTableName
     -> IO [(Stored a, EventNumber)]
@@ -221,7 +221,7 @@ queryEvents conn eventTable = do
             <> "\" order by event_number"
 
 queryEventsAfter
-    :: (FromJSON a)
+    :: FromJSON a
     => Connection
     -> EventTableName
     -> EventNumber
@@ -274,7 +274,7 @@ queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
 
 writeEvents
     :: forall a
-     . (ToJSON a)
+     . ToJSON a
     => Connection
     -> EventTableName
     -> [Stored a]
@@ -368,7 +368,8 @@ withIOTrans pg f = do
         giveBackConn `catchAll` \_ ->
             destroyResource (connectionPool pg) localPool conn
 
-    prepareTransaction :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
+    prepareTransaction
+        :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
     prepareTransaction conn localPool = do
         PG.begin conn
         pure $
@@ -403,7 +404,7 @@ mkEventStream chunkSize conn q = do
                 step
                 cursor
 
-getModel' :: forall e m. (FromJSON e) => PostgresEventTrans m e -> IO m
+getModel' :: forall e m. FromJSON e => PostgresEventTrans m e -> IO m
 getModel' pgt = do
     NumberedModel model lastEventNo <- readIORef (pgt ^. field @"modelIORef")
     hasNewEvents <-
@@ -415,7 +416,7 @@ getModel' pgt = do
 
 refreshModel
     :: forall m e
-     . (FromJSON e)
+     . FromJSON e
     => PostgresEventTrans m e
     -> IO (m, EventNumber)
 refreshModel pg = do

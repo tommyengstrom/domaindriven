@@ -3,7 +3,7 @@ module DomainDriven.Persistance.ForgetfulInMemory where
 import Data.List (foldl')
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
-import qualified Streamly.Prelude as S
+import Streamly.Prelude qualified as S
 import UnliftIO
 import Prelude
 

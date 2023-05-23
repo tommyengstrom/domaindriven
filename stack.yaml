@@ -1,8 +1,9 @@
-resolver: lts-20.7
+resolver: lts-20.19
 packages:
 - domaindriven-core
 - domaindriven
-extra-deps:
+- domaindriven-examples
+
 ghc-options:
   "$locals": -fwrite-ide-info
   '$everything': -haddock

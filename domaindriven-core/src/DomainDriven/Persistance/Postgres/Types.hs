@@ -7,8 +7,8 @@ import Data.Time
 import Data.Typeable
 import Data.UUID (UUID)
 import Database.PostgreSQL.Simple (Connection)
-import qualified Database.PostgreSQL.Simple as PG
-import qualified Database.PostgreSQL.Simple.FromField as FF
+import Database.PostgreSQL.Simple qualified as PG
+import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import UnliftIO.Pool (LocalPool)

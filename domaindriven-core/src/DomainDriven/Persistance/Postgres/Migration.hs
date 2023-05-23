@@ -11,8 +11,8 @@ import DomainDriven.Persistance.Postgres.Internal
     , mkEventStream
     )
 import DomainDriven.Persistance.Postgres.Types
-import qualified Streamly.Data.Unfold as Unfold
-import qualified Streamly.Prelude as S
+import Streamly.Data.Unfold qualified as Unfold
+import Streamly.Prelude qualified as S
 import UnliftIO (liftIO)
 import Prelude
 
