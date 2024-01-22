@@ -1,3 +1,5 @@
+{-# LANGUAGE InstanceSigs #-}
+
 module DomainDriven.Persistance.ForgetfulInMemory where
 
 import Data.List (foldl')
@@ -32,7 +34,7 @@ data ForgetfulInMemory model event = ForgetfulInMemory
 instance ReadModel (ForgetfulInMemory model e) where
     type Model (ForgetfulInMemory model e) = model
     type Event (ForgetfulInMemory model e) = e
-    applyEvent = apply 
+    applyEvent = apply
     getModel :: ForgetfulInMemory model e -> IO (Model (ForgetfulInMemory model e))
     getModel ff = readIORef $ stateRef ff
     getEventList ff = readIORef $ events ff

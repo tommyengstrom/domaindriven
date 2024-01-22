@@ -5,6 +5,7 @@
 
 module DomainDriven.Server.DomainDrivenApi where
 
+import Data.ByteString.Builder qualified as Builder
 import Data.Kind
 import Data.OpenApi (OpenApi, prependPath)
 import Data.Text qualified as Text
@@ -259,7 +260,10 @@ instance
             ( clientWithRoute
                 (Proxy @m)
                 (Proxy @api)
-                (appendToPath (Text.pack $ apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label)) req)
+                ( appendToPath
+                    (Builder.stringUtf8 $ apiTagFromLabel @mkApiRecord $ symbolVal (Proxy @label))
+                    req
+                )
             )
             :* clientsWithRoute @m @mkApiRecord @apis @infos req
     hoistClientsMonad nt (I client :* clients) =

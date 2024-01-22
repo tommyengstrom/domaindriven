@@ -27,8 +27,9 @@ import UnliftIO (MonadUnliftIO (..))
 import UnliftIO.Pool
     ( LocalPool
     , Pool
-    , createPool
     , destroyResource
+    , mkDefaultPoolConfig
+    , newPool
     , putResource
     , takeResource
     , withResource
@@ -123,11 +124,13 @@ createRetireFunction conn =
 
 simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
 simplePool' connInfo =
-    createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
+    -- createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
+    newPool =<< mkDefaultPoolConfig (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5
 
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
 simplePool getConn =
-    createPool (liftIO getConn) (liftIO . PG.close) 1 5 5
+    -- createPool (liftIO getConn) (liftIO . PG.close) 1 5 5
+    newPool =<< mkDefaultPoolConfig (liftIO getConn) (liftIO . PG.close) 1 5
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
