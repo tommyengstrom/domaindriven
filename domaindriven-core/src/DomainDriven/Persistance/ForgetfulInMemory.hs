@@ -32,7 +32,8 @@ data ForgetfulInMemory model event = ForgetfulInMemory
 instance ReadModel (ForgetfulInMemory model e) where
     type Model (ForgetfulInMemory model e) = model
     type Event (ForgetfulInMemory model e) = e
-    applyEvent ff = apply ff
+    applyEvent = apply 
+    getModel :: ForgetfulInMemory model e -> IO (Model (ForgetfulInMemory model e))
     getModel ff = readIORef $ stateRef ff
     getEventList ff = readIORef $ events ff
     getEventStream ff = do
