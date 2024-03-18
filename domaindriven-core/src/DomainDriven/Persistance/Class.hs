@@ -12,7 +12,7 @@ import Data.Kind
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
-import Streamly.Prelude (SerialT)
+import Streamly.Data.Stream.Prelude (Stream)
 import System.Random
 import UnliftIO
 import Prelude
@@ -23,7 +23,7 @@ class ReadModel p where
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: p -> IO (Model p)
     getEventList :: p -> IO [Stored (Event p)]
-    getEventStream :: p -> SerialT IO (Stored (Event p))
+    getEventStream :: p -> Stream IO (Stored (Event p))
 
 type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
 

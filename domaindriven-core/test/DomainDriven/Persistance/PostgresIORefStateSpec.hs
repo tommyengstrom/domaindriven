@@ -18,7 +18,7 @@ import DomainDriven.Persistance.Postgres.Internal
     )
 import DomainDriven.Persistance.Postgres.Migration
 import GHC.Generics (Generic)
-import Streamly.Prelude qualified as S
+import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO.Pool
 import Prelude
@@ -62,7 +62,8 @@ setupPersistance
     -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
-    pool <- createPool (mkTestConn) close 1 5 1
+    poolCfg <- mkDefaultPoolConfig (mkTestConn) close 1 5
+    pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
 
@@ -88,7 +89,8 @@ tableNames et = case et of
 
 withPool :: (Pool Connection -> IO a) -> IO a
 withPool f = do
-    pool <- createPool (mkTestConn) close 1 5 1
+    poolCfg <- mkDefaultPoolConfig (mkTestConn) close 1 5
+    pool <- newPool poolCfg
     r <- f pool
     destroyAllResources pool
     pure r
@@ -135,7 +137,7 @@ streamingSpec = describe "steaming" $ do
         _ <- withResource pool $ \conn ->
             writeEvents conn (getEventTableName eventTable) storedEvs
         evList <- getEventList p
-        evStream <- S.toList $ getEventStream p
+        evStream <- Stream.toList $ getEventStream p
         -- pPrint evList
         evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
         fmap storedEvent evStream `shouldBe` fmap storedEvent evList

@@ -21,8 +21,10 @@ import Lens.Micro
     ( to
     , (^.)
     )
+import Streamly.Data.Fold qualified as Fold
+import Streamly.Data.Stream.Prelude (Stream)
+import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
-import Streamly.Prelude qualified as S
 import UnliftIO (MonadUnliftIO (..))
 import UnliftIO.Pool
     ( LocalPool
@@ -301,10 +303,10 @@ writeEvents conn eventTable storedEvents = do
             ("select coalesce(max(event_number),1) from \"" <> fromString eventTable <> "\"")
 
 getEventStream'
-    :: FromJSON event => PostgresEventTrans model event -> S.SerialT IO (Stored event)
+    :: FromJSON event => PostgresEventTrans model event -> Stream IO (Stored event)
 getEventStream' pgt =
-    S.map fst $
-        mkEventStream
+    fst
+        <$> mkEventStream
             (pgt ^. field @"chunkSize")
             (pgt ^. field @"transaction" . field @"connection")
             (pgt ^. field @"eventTableName" . to mkEventQuery)
@@ -312,12 +314,12 @@ getEventStream' pgt =
 -- | A transaction that is always rolled back at the end.
 -- This is useful when using cursors as they can only be used inside a transaction.
 withStreamReadTransaction
-    :: forall t m a model event
-     . (S.IsStream t, S.MonadAsync m, MonadCatch m)
+    :: forall m a model event
+     . (Stream.MonadAsync m, MonadCatch m)
     => PostgresEvent model event
-    -> (PostgresEventTrans model event -> t m a)
-    -> t m a
-withStreamReadTransaction pg = S.bracket startTrans rollbackTrans
+    -> (PostgresEventTrans model event -> Stream m a)
+    -> Stream m a
+withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans model event)
     startTrans = liftIO $ do
@@ -390,7 +392,7 @@ mkEventStream
     => ChunkSize
     -> Connection
     -> EventQuery
-    -> S.SerialT IO (Stored event, EventNumber)
+    -> Stream IO (Stored event, EventNumber)
 mkEventStream chunkSize conn q = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
@@ -400,12 +402,17 @@ mkEventStream chunkSize conn q = do
                 Left a -> pure $ Just (a, cursor)
                 Right a -> pure $ Just (a, cursor)
 
-    cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
-    S.mapM fromEventRow $
-        S.unfoldMany Unfold.fromList . fmap toList $
-            S.unfoldrM
-                step
-                cursor
+    -- cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
+    Stream.bracketIO
+        (Cursor.declareCursor conn (getPgQuery q))
+        (Cursor.closeCursor)
+        ( \cursor ->
+            Stream.mapM fromEventRow $
+                Stream.unfoldMany Unfold.fromList . fmap toList $
+                    Stream.unfoldrM
+                        step
+                        cursor
+        )
 
 getModel' :: forall e m. FromJSON e => PostgresEventTrans m e -> IO m
 getModel' pgt = do
@@ -426,8 +433,7 @@ refreshModel pg = do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     exclusiveLock (pg ^. field @"transaction") (pg ^. field @"eventTableName")
     NumberedModel model lastEventNo <- readIORef (pg ^. field @"modelIORef")
-    let eventStream :: S.SerialT IO (Stored e, EventNumber)
-        eventStream =
+    let eventStream =
             mkEventStream
                 (pg ^. field @"chunkSize")
                 (pg ^. field @"transaction" . field @"connection")
@@ -438,9 +444,11 @@ refreshModel pg = do
             NumberedModel ((pg ^. field @"app") m ev) evNumber
 
     NumberedModel newModel lastNewEventNo <-
-        S.foldl'
-            applyModel
-            (NumberedModel model lastEventNo)
+        Stream.fold
+            ( Fold.foldl'
+                applyModel
+                (NumberedModel model lastEventNo)
+            )
             eventStream
 
     _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newModel lastNewEventNo
