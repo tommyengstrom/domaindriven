@@ -101,7 +101,7 @@ test-suite domaindriven-core-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      DomainDriven.Persistance.PostgresIORefStateSpec
+      DomainDriven.Persistance.PostgresSpec
       Paths_domaindriven_core
   hs-source-dirs:
       test

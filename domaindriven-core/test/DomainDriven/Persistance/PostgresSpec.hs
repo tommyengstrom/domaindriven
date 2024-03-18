@@ -1,4 +1,4 @@
-module DomainDriven.Persistance.PostgresIORefStateSpec where
+module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Exception (SomeException)
 import Control.Monad
@@ -22,8 +22,6 @@ import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO.Pool
 import Prelude
-
--- import           Text.Pretty.Simple
 
 eventTable :: EventTable
 eventTable =
@@ -62,7 +60,10 @@ setupPersistance
     -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
-    poolCfg <- mkDefaultPoolConfig (mkTestConn) close 1 5
+    let stripesAndResources = 1
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig (mkTestConn) close 1.5 stripesAndResources
     pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
@@ -86,14 +87,6 @@ tableNames :: EventTable -> [EventTableName]
 tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
-
-withPool :: (Pool Connection -> IO a) -> IO a
-withPool f = do
-    poolCfg <- mkDefaultPoolConfig (mkTestConn) close 1 5
-    pool <- newPool poolCfg
-    r <- f pool
-    destroyAllResources pool
-    pure r
 
 writeEventsSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do

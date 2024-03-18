@@ -33,6 +33,7 @@ import UnliftIO.Pool
     , mkDefaultPoolConfig
     , newPool
     , putResource
+    , setNumStripes
     , takeResource
     , withResource
     )
@@ -124,15 +125,32 @@ createRetireFunction conn =
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
 
+-- | Because the default is crazy:
+--  "Set num resources to cores and crash if there are newer stripes"
+stripesAndResources :: Int
+stripesAndResources = 5
+
 simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
-simplePool' connInfo =
+simplePool' connInfo = do
     -- createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
-    newPool =<< mkDefaultPoolConfig (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5
+
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig
+                (liftIO $ PG.connect connInfo)
+                (liftIO . PG.close)
+                1.5
+                stripesAndResources
+    newPool poolCfg
 
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
-simplePool getConn =
+simplePool getConn = do
     -- createPool (liftIO getConn) (liftIO . PG.close) 1 5 5
-    newPool =<< mkDefaultPoolConfig (liftIO getConn) (liftIO . PG.close) 1 5
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig (liftIO getConn) (liftIO . PG.close) 1.5 stripesAndResources
+
+    newPool poolCfg
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
