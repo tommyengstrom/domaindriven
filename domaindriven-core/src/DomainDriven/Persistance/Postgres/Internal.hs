@@ -131,7 +131,8 @@ simplePool' connInfo = simplePool (PG.connect connInfo)
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
 simplePool getConn = do
     --  Using stripesAndResources because the default is crazy:
-    --  "Set num resources to cores and crash if there are fewer stripes"
+    -- https://github.com/scrive/pool/pull/16
+    --  "Set number of stripes to number of cores and crash if there are fewer resources"
     let stripesAndResources :: Int
         stripesAndResources = 5
     poolCfg <-
@@ -411,7 +412,6 @@ mkEventStream chunkSize conn q = do
                 Left a -> pure $ Just (a, cursor)
                 Right a -> pure $ Just (a, cursor)
 
-    -- cursor <- liftIO $ Cursor.declareCursor conn (getPgQuery q)
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
         (Cursor.closeCursor)
