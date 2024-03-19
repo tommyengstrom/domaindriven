@@ -1,9 +1,11 @@
+{-# LANGUAGE InstanceSigs #-}
+
 module DomainDriven.Persistance.ForgetfulInMemory where
 
 import Data.List (foldl')
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
-import Streamly.Prelude qualified as S
+import Streamly.Data.Stream.Prelude qualified as Stream
 import UnliftIO
 import Prelude
 
@@ -32,12 +34,15 @@ data ForgetfulInMemory model event = ForgetfulInMemory
 instance ReadModel (ForgetfulInMemory model e) where
     type Model (ForgetfulInMemory model e) = model
     type Event (ForgetfulInMemory model e) = e
-    applyEvent ff = apply ff
+    applyEvent = apply
+    getModel :: ForgetfulInMemory model e -> IO (Model (ForgetfulInMemory model e))
     getModel ff = readIORef $ stateRef ff
     getEventList ff = readIORef $ events ff
-    getEventStream ff = do
-        l <- liftIO $ getEventList ff
-        S.fromList l
+    getEventStream ff =
+        Stream.bracketIO
+            (getEventList ff)
+            (const (pure ()))
+            Stream.fromList
 
 instance WriteModel (ForgetfulInMemory model e) where
     transactionalUpdate ff evalCmd =

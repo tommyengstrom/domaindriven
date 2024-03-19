@@ -1,18 +1,19 @@
 module DomainDriven.Persistance.Postgres.Migration where
 
+import Control.Monad
 import Data.Aeson
 import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal
-    ( createEventTable'
-    , mkEventQuery
+    ( mkEventQuery
     , mkEventStream
     )
 import DomainDriven.Persistance.Postgres.Types
+import Streamly.Data.Fold qualified as Fold
+import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
-import Streamly.Prelude qualified as S
 import UnliftIO (liftIO)
 import Prelude
 
@@ -28,7 +29,8 @@ migrate1to1
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
-migrate1to1 conn prevTName tName f = migrate1toMany conn prevTName tName (pure . f)
+migrate1to1 conn prevTName tName f = do
+    migrate1toMany conn prevTName tName (pure . f)
 
 migrate1toMany
     :: forall a b
@@ -39,10 +41,10 @@ migrate1toMany
     -> (Stored a -> [Stored b])
     -> IO ()
 migrate1toMany conn prevTName tName f = do
-    _ <- createEventTable' conn tName
-    S.mapM_ (liftIO . writeIt)
-        . S.unfoldMany Unfold.fromList
-        $ S.map (f . fst)
+    Stream.fold Fold.drain
+        . Stream.mapM (liftIO . writeIt)
+        . Stream.unfoldMany Unfold.fromList
+        $ fmap (f . fst)
         $ mkEventStream 1 conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
@@ -66,12 +68,13 @@ migrate1toManyWithState
     -> state
     -> IO ()
 migrate1toManyWithState conn prevTName tName f initialState = do
-    _ <- createEventTable' conn tName
-    S.mapM_ (liftIO . writeIt)
-        . S.unfoldMany Unfold.fromList
-        . S.map snd
-        $ S.scanl' (\b -> f (fst b)) (initialState, [])
-        $ S.map fst
+    Stream.fold
+        Fold.drain
+        . Stream.mapM (liftIO . writeIt)
+        . Stream.unfoldMany Unfold.fromList
+        . fmap snd
+        $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
+        $ fmap fst
         $ mkEventStream 1 conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64

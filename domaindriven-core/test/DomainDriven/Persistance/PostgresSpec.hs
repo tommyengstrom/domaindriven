@@ -1,8 +1,10 @@
-module DomainDriven.Persistance.PostgresIORefStateSpec where
+module DomainDriven.Persistance.PostgresSpec where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException)
 import Control.Monad
 import Data.Aeson (FromJSON, ToJSON, Value)
+import Data.Foldable
 import Data.String (fromString)
 import Data.Time
 import Data.Traversable
@@ -18,17 +20,18 @@ import DomainDriven.Persistance.Postgres.Internal
     )
 import DomainDriven.Persistance.Postgres.Migration
 import GHC.Generics (Generic)
-import Streamly.Prelude qualified as S
+import GHC.IO.Unsafe (unsafePerformIO)
+import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
+import UnliftIO (concurrently, try)
 import UnliftIO.Pool
 import Prelude
 
--- import           Text.Pretty.Simple
-
 eventTable :: EventTable
 eventTable =
-    MigrateUsing (\_ _ _ -> pure ()) . MigrateUsing (\_ _ _ -> pure ()) $
-        InitialVersion
+    MigrateUsing (\_ _ _ -> pure ())
+        . MigrateUsing (\_ _ _ -> pure ())
+        $ InitialVersion
             "test_events"
 
 eventTable2 :: EventTable
@@ -44,6 +47,7 @@ spec = do
         writeEventsSpec
         queryEventsSpec
         migrationSpec -- make sure migrationSpec is run last!
+    around setupPersistance migrationConcurrencySpec
 
 type TestModel = Int
 
@@ -62,7 +66,11 @@ setupPersistance
     -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
-    pool <- createPool (mkTestConn) close 1 5 1
+    let stripesAndResources = 5
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig (mkTestConn) close 1 stripesAndResources
+    pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
 
@@ -78,20 +86,20 @@ mkTestConn =
             }
 
 dropEventTables :: Connection -> IO ()
-dropEventTables conn = void . for (tableNames eventTable2) $ \n ->
-    void $ execute_ conn ("drop table if exists \"" <> fromString n <> "\"")
+dropEventTables conn = do
+    testTables <-
+        query_
+            conn
+            "select table_name from information_schema.tables where table_name like 'test_events_v%'"
+            :: IO [Only String]
+    traverse_
+        (\t -> execute_ conn ("drop table \"" <> fromString (fromOnly t) <> "\""))
+        testTables
 
 tableNames :: EventTable -> [EventTableName]
 tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
-
-withPool :: (Pool Connection -> IO a) -> IO a
-withPool f = do
-    pool <- createPool (mkTestConn) close 1 5 1
-    r <- f pool
-    destroyAllResources pool
-    pure r
 
 writeEventsSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
@@ -135,7 +143,7 @@ streamingSpec = describe "steaming" $ do
         _ <- withResource pool $ \conn ->
             writeEvents conn (getEventTableName eventTable) storedEvs
         evList <- getEventList p
-        evStream <- S.toList $ getEventStream p
+        evStream <- Stream.toList $ getEventStream p
         -- pPrint evList
         evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
         fmap storedEvent evStream `shouldBe` fmap storedEvent evList
@@ -182,6 +190,7 @@ migrationSpec = describe "migrate1to1" $ do
             queryEvents @TestEvent conn (getEventTableName eventTable2)
 
         fmap fst evs' `shouldBe` fmap fst evs
+
     it "Can no longer write new events to old table after migration" $ \(_p, pool) -> do
         uuid <- V4.nextRandom
         let ev =
@@ -203,16 +212,14 @@ migrationSpec = describe "migrate1to1" $ do
         void . withResource pool $ \conn -> writeEvents conn (getEventTableName eventTable2) [ev]
 
     it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
-        let eventTable3 :: EventTable
-            eventTable3 = MigrateUsing undefined eventTable2
+        let eventTableBroken :: EventTable
+            eventTableBroken = MigrateUsing undefined eventTable2
 
-        print $ tableNames eventTable3
-
-        postgresWriteModel pool eventTable3 applyTestEvent 0
+        postgresWriteModel pool eventTableBroken applyTestEvent 0
             `shouldThrow` const @_ @SomeException True
         conn <- mkTestConn
 
-        case tableNames eventTable3 of
+        case tableNames eventTableBroken of
             failedMig : prevMig : _ -> do
                 [Only prevExists] <-
                     query_ @(Only Bool) conn $
@@ -227,3 +234,54 @@ migrationSpec = describe "migrate1to1" $ do
                 prevExists `shouldBe` True
                 brokenExists `shouldBe` False
             _ -> fail "Unexpectedly lacking table versions!"
+
+migrationConcurrencySpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
+migrationConcurrencySpec = describe "Event table is locked during migration" $ do
+    it "migrate1to1" $ \(m0, pool) -> migrationTest m0 pool mig1to1
+    it "migrate1toMany" $ \(m0, pool) -> migrationTest m0 pool mig1toMany
+    it "migrate1toManyWithState" $ \(m0, pool) -> migrationTest m0 pool mig1toManyState
+  where
+    migrationTest
+        :: PostgresEvent TestModel TestEvent
+        -> Pool Connection
+        -> EventMigration
+        -> IO ()
+    migrationTest m0 pool mig = do
+        let cmd :: Int -> IO (Int -> Int, [TestEvent])
+            cmd _ = pure $ (id, [AddOne])
+
+        i <- replicateM 5 (transactionalUpdate m0 cmd)
+        length i `shouldBe` 5
+        (result, _) <-
+            concurrently
+                ( do
+                    threadDelay 100000 -- sleep a bit and let the migration start
+                    try @IO @SqlError $ transactionalUpdate m0 cmd
+                )
+                (postgresWriteModel pool (MigrateUsing mig eventTable2) applyTestEvent 0)
+        result `shouldSatisfy` \case
+            Right _ -> False
+            Left err -> sqlErrorMsg err == "Event table has been retired."
+
+    mig1to1 :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
+    mig1to1 prevName name conn = migrate1to1 @Value conn prevName name slowId
+
+    mig1toMany :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
+    mig1toMany prevName name conn = migrate1toMany @Value conn prevName name (pure . slowId)
+
+    mig1toManyState :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
+    mig1toManyState prevName name conn = do
+        putStrLn "mig1toManyState"
+        migrate1toManyWithState @Value
+            conn
+            prevName
+            name
+            (\s ev -> (s, [slowId ev]))
+            ()
+        putStrLn "mig1toManyState is done"
+
+    slowId :: a -> a
+    slowId a = unsafePerformIO $ do
+        -- putStrLn "Migrating slowly..."
+        threadDelay 250000
+        pure a

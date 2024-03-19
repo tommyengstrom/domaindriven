@@ -18,33 +18,33 @@ category: Web
 description:         Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 
 dependencies:
-- aeson >= 2.0.3 && < 2.2
-- base >= 4.7 && < 5
+- aeson
+- base
 - domaindriven-core
 - domaindriven
-- async >= 2.2.4 && < 2.3
-- bytestring >= 0.11.3 && < 0.12
-- containers >= 0.6.5.1 && < 0.7
-- deepseq >= 1.4.6.1 && < 1.5
-- exceptions >= 0.10.4 && < 0.11
-- generic-lens >= 2.2.1.0 && < 2.3
-- http-types >= 0.12.3 && < 0.13
-- microlens >= 0.4.12.0 && < 0.5
-- mtl >= 2.2.2 && < 2.3
-- postgresql-simple >= 0.6.4 && < 0.7
-- random >= 1.2.1.1 && < 1.3
+- async
+- bytestring
+- containers
+- deepseq
+- exceptions
+- generic-lens
+- http-types
+- microlens
+- mtl
+- postgresql-simple
+- random
 - generics-sop
 - servant-server
 - warp
-- streamly >= 0.8.1.1 && < 0.9
-- template-haskell >= 2.18.0.0 && < 2.19
-- time  >= 1.11.1 && < 1.12
-- transformers >=  0.5.6.2 && < 0.6
-- unliftio >= 0.2.0.1 && < 0.3
-- unliftio-pool >= 0.2.2.0 && < 0.3
-- unordered-containers >= 0.2.19.1 && < 0.3
-- uuid >= 1.3.15 && < 1.4
-- vector >= 0.12.3.1 && < 0.14
+- streamly
+- template-haskell
+- time
+- transformers
+- unliftio
+- unliftio-pool
+- unordered-containers
+- uuid
+- vector
 
 
 default-extensions:
