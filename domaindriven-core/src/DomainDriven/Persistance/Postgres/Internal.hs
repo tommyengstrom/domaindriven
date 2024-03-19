@@ -197,6 +197,7 @@ runMigrations trans et = do
         (InitialVersion _, [Only False]) -> createTable
         (MigrateUsing mig prevEt, [Only False]) -> do
             runMigrations trans prevEt
+            exclusiveLock trans (getEventTableName prevEt)
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
             retireTable conn (getEventTableName prevEt)

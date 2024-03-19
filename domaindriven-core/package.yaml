@@ -68,6 +68,7 @@ ghc-options:
 - -Wredundant-constraints
 - -Wincomplete-record-updates
 - -Wincomplete-patterns
+- -Wunused-packages
 
 library:
   source-dirs: src
@@ -110,5 +111,6 @@ tests:
     - postgresql-simple
     - streamly
     - time
+    - unliftio
     - unliftio-pool
     - uuid
