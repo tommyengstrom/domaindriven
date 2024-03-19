@@ -70,8 +70,7 @@ migrate1toManyWithState
 migrate1toManyWithState conn prevTName tName f initialState = do
     Stream.fold
         Fold.drain
-        . Stream.mapM
-            (liftIO . writeIt)
+        . Stream.mapM (liftIO . writeIt)
         . Stream.unfoldMany Unfold.fromList
         . fmap snd
         $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))

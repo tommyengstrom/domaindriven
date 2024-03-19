@@ -125,27 +125,15 @@ createRetireFunction conn =
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
 
--- | Because the default is crazy:
---  "Set num resources to cores and crash if there are newer stripes"
-stripesAndResources :: Int
-stripesAndResources = 5
-
 simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
-simplePool' connInfo = do
-    -- createPool (liftIO $ PG.connect connInfo) (liftIO . PG.close) 1 5 5
-
-    poolCfg <-
-        setNumStripes (Just stripesAndResources)
-            <$> mkDefaultPoolConfig
-                (liftIO $ PG.connect connInfo)
-                (liftIO . PG.close)
-                1.5
-                stripesAndResources
-    newPool poolCfg
+simplePool' connInfo = simplePool (PG.connect connInfo)
 
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
 simplePool getConn = do
-    -- createPool (liftIO getConn) (liftIO . PG.close) 1 5 5
+    --  Using stripesAndResources because the default is crazy:
+    --  "Set num resources to cores and crash if there are fewer stripes"
+    let stripesAndResources :: Int
+        stripesAndResources = 5
     poolCfg <-
         setNumStripes (Just stripesAndResources)
             <$> mkDefaultPoolConfig (liftIO getConn) (liftIO . PG.close) 1.5 stripesAndResources
@@ -196,7 +184,9 @@ runMigrations trans et = do
         (MigrateUsing{}, [Only True]) -> pure ()
         (InitialVersion _, [Only False]) -> createTable
         (MigrateUsing mig prevEt, [Only False]) -> do
+            -- Ensure migrations are done up until the previous table
             runMigrations trans prevEt
+            -- Then lock lock the previous table before we start
             exclusiveLock trans (getEventTableName prevEt)
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
