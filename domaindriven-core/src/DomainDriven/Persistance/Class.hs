@@ -20,18 +20,21 @@ import Prelude
 class ReadModel p where
     type Model p :: Type
     type Event p :: Type
+    type Index p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: p -> IO (Model p)
-    getEventList :: p -> IO [Stored (Event p)]
-    getEventStream :: p -> Stream IO (Stored (Event p))
+    getModel :: p -> Index p -> IO (Model p)
+    getEventList :: p -> Index p -> IO [Stored (Event p)]
+    getEventStream :: p -> Index p -> Stream IO (Stored (Event p))
 
-type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
+type TransactionalUpdate model event m a =
+    (model -> m (model -> a, [event])) -> m a
 
 class ReadModel p => WriteModel p where
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
         => p
+        -> Index p
         -> TransactionalUpdate (Model p) (Event p) m a
 
 -- | Wrapper for stored data
