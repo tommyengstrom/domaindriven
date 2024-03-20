@@ -9,6 +9,7 @@ import DomainDriven
     , DomainDrivenApi
     , DomainDrivenServer (..)
     , Event
+    , Index
     , Model
     , Query
     , QueryServer (..)
@@ -92,8 +93,8 @@ data TextApi model event mode = TextApi
     deriving (Generic, ApiTagFromLabel)
 
 data FullApi model event mode = FullApi
-    { number :: mode :- DomainDrivenApi NumberApi model event
-    , text :: mode :- DomainDrivenApi TextApi model event
+    { number :: mode :- DomainDrivenApi NumberApi model () event
+    , text :: mode :- DomainDrivenApi TextApi model () event
     }
     deriving (Generic, ApiTagFromLabel)
 
@@ -127,19 +128,20 @@ fullServer =
         }
 
 fullServer'
-    :: Monad m => ServerT (DomainDrivenApi FullApi FullModel FullEvent) m
+    :: Monad m => ServerT (DomainDrivenApi FullApi FullModel () FullEvent) m
 fullServer' = DomainDrivenServer fullServer
 
 app
     :: ( Model p ~ FullModel
        , Event p ~ FullEvent
+       , Index p ~ ()
        , WriteModel p
        )
     => p
     -> Application
 app p =
     serveWithContext
-        (Proxy @(DomainDrivenApi FullApi FullModel FullEvent))
+        (Proxy @(DomainDrivenApi FullApi FullModel () FullEvent))
         (ReadPersistence p :. WritePersistence p :. EmptyContext)
         fullServer'
 
