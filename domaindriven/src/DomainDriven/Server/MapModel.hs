@@ -35,14 +35,14 @@ class MapEvent serverFrom serverTo where
         -> serverTo
 
 instance
-    ( serverFrom ~ DomainDrivenServer mkServer modelTo eventFrom m
+    ( serverFrom ~ DomainDrivenServer mkServer modelTo index eventFrom m
     , MapModelAndEvent
-        (DomainDrivenServer mkServer modelTo eventFrom m)
-        (DomainDrivenServer mkServer modelTo eventTo m)
+        (DomainDrivenServer mkServer modelTo index eventFrom m)
+        (DomainDrivenServer mkServer modelTo index eventTo m)
     )
     => MapEvent
         serverFrom
-        (DomainDrivenServer mkServer modelTo eventTo m)
+        (DomainDrivenServer mkServer modelTo index eventTo m)
     where
     mapEvent = mapModelAndEvent id
 
@@ -53,14 +53,14 @@ class MapModel serverFrom serverTo where
         -> serverTo
 
 instance
-    ( serverFrom ~ DomainDrivenServer mkServer modelFrom eventTo m
+    ( serverFrom ~ DomainDrivenServer mkServer modelFrom index eventTo m
     , MapModelAndEvent
-        (DomainDrivenServer mkServer modelFrom eventTo m)
-        (DomainDrivenServer mkServer modelTo eventTo m)
+        (DomainDrivenServer mkServer modelFrom index eventTo m)
+        (DomainDrivenServer mkServer modelTo index eventTo m)
     )
     => MapModel
         serverFrom
-        (DomainDrivenServer mkServer modelTo eventTo m)
+        (DomainDrivenServer mkServer modelTo index eventTo m)
     where
     mapModel f = mapModelAndEvent f id
 
@@ -72,17 +72,21 @@ instance
         modelTo
         eventFrom
         eventTo
-        (DomainDrivenServer mkServerTo modelFrom eventFrom mTo)
-        (DomainDrivenServer mkServerTo modelTo eventTo mTo)
+        (DomainDrivenServer mkServerTo modelFrom index eventFrom mTo)
+        (DomainDrivenServer mkServerTo modelTo index eventTo mTo)
     )
     => MapModelAndEvent
-        (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom)
-        (DomainDrivenServer mkServerTo modelTo eventTo mTo)
+        (DomainDrivenServer mkServerFrom modelFrom index eventFrom mFrom)
+        (DomainDrivenServer mkServerTo modelTo index eventTo mTo)
     where
-    type ModelFrom (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom) = modelFrom
-    type ModelTo (DomainDrivenServer mkServerTo modelTo eventTo mTo) = modelTo
-    type EventFrom (DomainDrivenServer mkServerFrom modelFrom eventFrom mFrom) = eventFrom
-    type EventTo (DomainDrivenServer mkServerTo modelTo eventTo mTo) = eventTo
+    type
+        ModelFrom (DomainDrivenServer mkServerFrom modelFrom index eventFrom mFrom) =
+            modelFrom
+    type ModelTo (DomainDrivenServer mkServerTo modelTo index eventTo mTo) = modelTo
+    type
+        EventFrom (DomainDrivenServer mkServerFrom modelFrom index eventFrom mFrom) =
+            eventFrom
+    type EventTo (DomainDrivenServer mkServerTo modelTo index eventTo mTo) = eventTo
     mapModelAndEvent = mapModelAndEvent'
 
 class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo where
@@ -219,24 +223,24 @@ instance
         S xs -> case xs of {}
 
 instance
-    ( GHC.Generic (DomainDrivenServer mkServer modelFrom eventFrom m)
-    , GHC.Generic (DomainDrivenServer mkServer modelTo eventTo m)
-    , GFrom (DomainDrivenServer mkServer modelFrom eventFrom m)
-    , GTo (DomainDrivenServer mkServer modelTo eventTo m)
+    ( GHC.Generic (DomainDrivenServer mkServer modelFrom index eventFrom m)
+    , GHC.Generic (DomainDrivenServer mkServer modelTo index eventTo m)
+    , GFrom (DomainDrivenServer mkServer modelFrom index eventFrom m)
+    , GTo (DomainDrivenServer mkServer modelTo index eventTo m)
     , MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (SOP I (GCode (DomainDrivenServer mkServer modelFrom eventFrom m)))
-        (SOP I (GCode (DomainDrivenServer mkServer modelTo eventTo m)))
+        (SOP I (GCode (DomainDrivenServer mkServer modelFrom index eventFrom m)))
+        (SOP I (GCode (DomainDrivenServer mkServer modelTo index eventTo m)))
     )
     => MapModelAndEvent'
         modelFrom
         modelTo
         eventFrom
         eventTo
-        (DomainDrivenServer mkServer modelFrom eventFrom m)
-        (DomainDrivenServer mkServer modelTo eventTo m)
+        (DomainDrivenServer mkServer modelFrom index eventFrom m)
+        (DomainDrivenServer mkServer modelTo index eventTo m)
     where
     mapModelAndEvent' proj inj = gto . mapModelAndEvent' proj inj . gfrom

@@ -46,6 +46,7 @@ data
     DomainDrivenApi
         (mkApiRecord :: Type -> Type -> Type -> Type)
         (model :: Type)
+        (index :: Type)
         (event :: Type)
 
 class ApiTagFromLabel (mkApiRecord :: Type -> Type -> Type -> Type) where
@@ -59,6 +60,7 @@ newtype
     DomainDrivenServer
         (mkServerRecord :: Type -> Type -> Type -> Type)
         (model :: Type)
+        (index :: Type)
         (event :: Type)
         (m :: Type -> Type) = DomainDrivenServer
     { unDomainDrivenServer
@@ -67,7 +69,7 @@ newtype
 
 deriving newtype instance
     GHC.Generic (mkServerRecord model event (AsServerT m))
-    => GHC.Generic (DomainDrivenServer mkServerRecord model event m)
+    => GHC.Generic (DomainDrivenServer mkServerRecord model index event m)
 
 class DomainDrivenServerFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
     recordOfServersFromFields
@@ -95,6 +97,7 @@ class
     DomainDrivenApiHasServers
         (mkApiRecord :: Type -> Type -> Type -> Type)
         (model :: Type)
+        (index :: Type)
         (event :: Type)
         (apis :: [Api])
         (infos :: [FieldInfo])
@@ -110,20 +113,21 @@ class
         -> NP I (ServerTs apis m)
         -> NP I (ServerTs apis n)
 
-instance DomainDrivenApiHasServers mkApiRecord model event '[] '[] context where
+instance DomainDrivenApiHasServers mkApiRecord model index event '[] '[] context where
     type ServerTs '[] m = '[]
     taggedSumOfRoutes _ _ = StaticRouter mempty mempty
     hoistTaggedServersWithContext _ Nil = Nil
 
 instance
     ( HasServer api context
-    , DomainDrivenApiHasServers mkApiRecord model event apis infos context
+    , DomainDrivenApiHasServers mkApiRecord model index event apis infos context
     , KnownSymbol label
     , ApiTagFromLabel mkApiRecord
     )
     => DomainDrivenApiHasServers
         mkApiRecord
         model
+        index
         event
         (api ': apis)
         ('FieldInfo label ': infos)
@@ -138,32 +142,35 @@ instance
                 $ route (Proxy @api) context
                 $ (\(I server :* _) -> server) <$> delayedServers
             )
-            ( taggedSumOfRoutes @mkApiRecord @model @event @apis @infos context $
+            ( taggedSumOfRoutes @mkApiRecord @model @index @event @apis @infos context $
                 (\(_ :* servers) -> servers) <$> delayedServers
             )
 
     hoistTaggedServersWithContext nt (I server :* servers) =
         I (hoistServerWithContext (Proxy @api) (Proxy @context) nt server)
-            :* hoistTaggedServersWithContext @mkApiRecord @model @event @apis @infos @context nt servers
+            :* hoistTaggedServersWithContext @mkApiRecord @model @index @event @apis @infos @context
+                nt
+                servers
 
 instance
     ( DomainDrivenApiHasServers
         mkApiRecord
         model
+        index
         event
         (GenericRecordFields (mkApiRecord model event AsApi))
         (GenericRecordFieldInfos (mkApiRecord model event AsApi))
         context
     , forall m. DomainDrivenServerFields (mkApiRecord model event) m
     )
-    => HasServer (DomainDrivenApi mkApiRecord model event) context
+    => HasServer (DomainDrivenApi mkApiRecord model index event) context
     where
     type
-        ServerT (DomainDrivenApi mkApiRecord model event) m =
-            DomainDrivenServer mkApiRecord model event m
+        ServerT (DomainDrivenApi mkApiRecord model index event) m =
+            DomainDrivenServer mkApiRecord model index event m
 
     route _ context delayedServer =
-        taggedSumOfRoutes @mkApiRecord @model @event
+        taggedSumOfRoutes @mkApiRecord @model @index @event
             @(GenericRecordFields (mkApiRecord model event AsApi))
             @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
             context
@@ -172,7 +179,7 @@ instance
     hoistServerWithContext _ _ nt servers =
         DomainDrivenServer
             . recordOfServersFromFields
-            . hoistTaggedServersWithContext @mkApiRecord @model @event
+            . hoistTaggedServersWithContext @mkApiRecord @model @index @event
                 @(GenericRecordFields (mkApiRecord model event AsApi))
                 @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
                 @context
@@ -218,13 +225,13 @@ instance
             @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
 
 instance
-    ( GHC.Generic (DomainDrivenServer mkServerRecord model event m)
-    , GTo (DomainDrivenServer mkServerRecord model event m)
-    , ThrowAll (SOP I (GCode (DomainDrivenServer mkServerRecord model event m)))
+    ( GHC.Generic (DomainDrivenServer mkServerRecord model index event m)
+    , GTo (DomainDrivenServer mkServerRecord model index event m)
+    , ThrowAll (SOP I (GCode (DomainDrivenServer mkServerRecord model index event m)))
     )
-    => ThrowAll (DomainDrivenServer mkServerRecord model event m)
+    => ThrowAll (DomainDrivenServer mkServerRecord model index event m)
     where
-    throwAll = gto . throwAll @(SOP I (GCode (DomainDrivenServer mkServerRecord model event m)))
+    throwAll = gto . throwAll @(SOP I (GCode (DomainDrivenServer mkServerRecord model index event m)))
 
 class
     DomainDrivenApiHasClients
@@ -301,10 +308,10 @@ instance
         (GenericRecordFieldInfos (mkApiRecord model event AsApi))
     , forall n. DomainDrivenClientFields (mkApiRecord model event) n
     )
-    => HasClient m (DomainDrivenApi mkApiRecord model event)
+    => HasClient m (DomainDrivenApi mkApiRecord model index event)
     where
     type
-        Client m (DomainDrivenApi mkApiRecord model event) =
+        Client m (DomainDrivenApi mkApiRecord model index event) =
             mkApiRecord model event (AsClientT m)
     clientWithRoute _ _ =
         recordOfClientsFromFields
