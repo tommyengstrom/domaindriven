@@ -10,8 +10,11 @@ import DomainDriven.Persistance.Class as X
     )
 import DomainDriven.Server.Api as X
     ( CbCmd
+    , CbCmdI
     , CbQuery
+    , CbQueryI
     , Cmd
+    , CmdI
     , Field (..)
     , JsonObject (..)
     , NamedField (..)
@@ -31,7 +34,9 @@ import DomainDriven.Server.Server as X
     ( CbCmdServer (..)
     , CbQueryServer (..)
     , CmdServer (..)
+    , CmdServerI (..)
     , QueryServer (..)
+    , QueryServerI (..)
     , ReadPersistence (..)
     , WritePersistence (..)
     )

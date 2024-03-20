@@ -112,11 +112,11 @@ instance
         modelTo
         eventFrom
         eventTo
-        (CbCmdServer modelFrom' index eventFrom' mFrom aFrom)
-        (CbCmdServer modelTo' index eventTo' mTo aTo)
+        (CbCmdServerI modelFrom' index eventFrom' mFrom aFrom)
+        (CbCmdServerI modelTo' index eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (CbCmd index server) =
-        CbCmd index $ \transact ->
+    mapModelAndEvent' proj inj (CbCmdI index server) =
+        CbCmdI index $ \transact ->
             server
                 ( \action -> transact $
                     \model -> ((. proj) *** map inj) <$> action (proj model)
@@ -136,11 +136,11 @@ instance
         modelTo
         eventFrom
         eventTo
-        (CmdServer modelFrom' index eventFrom' mFrom aFrom)
-        (CmdServer modelTo' index eventTo' mTo aTo)
+        (CmdServerI modelFrom' index eventFrom' mFrom aFrom)
+        (CmdServerI modelTo' index eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (Cmd index server) =
-        Cmd index $ \model -> ((. proj) *** map inj) <$> server (proj model)
+    mapModelAndEvent' proj inj (CmdI index server) =
+        CmdI index $ \model -> ((. proj) *** map inj) <$> server (proj model)
 
 instance
     ( modelFrom ~ modelFrom'
@@ -153,10 +153,10 @@ instance
         modelTo
         eventFrom
         eventTo
-        (QueryServer modelFrom' index mFrom aFrom)
-        (QueryServer modelTo' index mTo aTo)
+        (QueryServerI modelFrom' index mFrom aFrom)
+        (QueryServerI modelTo' index mTo aTo)
     where
-    mapModelAndEvent' proj _ (Query index server) = Query index $ server . proj
+    mapModelAndEvent' proj _ (QueryI index server) = QueryI index $ server . proj
 
 instance
     ( modelFrom ~ modelFrom'
@@ -169,10 +169,10 @@ instance
         modelTo
         eventFrom
         eventTo
-        (CbQueryServer modelFrom' index mFrom aFrom)
-        (CbQueryServer modelTo' index mTo aTo)
+        (CbQueryServerI modelFrom' index mFrom aFrom)
+        (CbQueryServerI modelTo' index mTo aTo)
     where
-    mapModelAndEvent' proj _ (CbQuery index server) = CbQuery index $ \model -> server (proj <$> model)
+    mapModelAndEvent' proj _ (CbQueryI index server) = CbQueryI index $ \model -> server (proj <$> model)
 
 instance
     (aFrom ~ aTo, MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo)
