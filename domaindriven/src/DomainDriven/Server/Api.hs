@@ -23,9 +23,9 @@ import Servant.OpenApi
 import Prelude
 
 type Cmd model event a = Cmd' model () event (Verb 'POST 200 '[JSON] a)
-type CbCmd model event a = CbCmd' model event (Verb 'POST 200 '[JSON] a)
-type CbQuery model a = CbQuery' model (Verb 'GET 200 '[JSON] a)
-type Query model a = Query' model (Verb 'GET 200 '[JSON] a)
+type CbCmd model event a = CbCmd' model () event (Verb 'POST 200 '[JSON] a)
+type CbQuery model a = CbQuery' model () (Verb 'GET 200 '[JSON] a)
+type Query model a = Query' model () (Verb 'GET 200 '[JSON] a)
 
 data Cmd' (model :: Type) (index :: Type) (event :: Type) (verb :: Type)
 
