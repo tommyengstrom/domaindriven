@@ -2,7 +2,10 @@
 
 module DomainDriven.Persistance.ForgetfulInMemory where
 
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HM
 import Data.List (foldl')
+import Data.Maybe
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import Streamly.Data.Stream.Prelude qualified as Stream
@@ -14,43 +17,47 @@ createForgetful
     => (model -> Stored event -> model)
     -> model
     -- ^ initial model
-    -> m (ForgetfulInMemory model event)
+    -> m (ForgetfulInMemory model index event)
 createForgetful appEvent m0 = do
-    state <- newIORef m0
-    evs <- newIORef []
+    state <- newIORef HM.empty
+    evs <- newIORef HM.empty
     lock <- newQSem 1
     pure $ ForgetfulInMemory state appEvent m0 evs lock
 
 -- | STM state without event persistance
-data ForgetfulInMemory model event = ForgetfulInMemory
-    { stateRef :: IORef model
+data ForgetfulInMemory model index event = ForgetfulInMemory
+    { stateRef :: IORef (HashMap index model)
     , apply :: model -> Stored event -> model
     , seed :: model
-    , events :: IORef [Stored event]
+    , events :: IORef (HashMap index [Stored event])
     , lock :: QSem
     }
     deriving (Generic)
 
-instance ReadModel (ForgetfulInMemory model e) where
-    type Model (ForgetfulInMemory model e) = model
-    type Event (ForgetfulInMemory model e) = e
+instance ReadModel (ForgetfulInMemory model index e) where
+    type Model (ForgetfulInMemory model index e) = model
+    type Event (ForgetfulInMemory model index e) = e
+    type Index (ForgetfulInMemory model index e) = index
     applyEvent = apply
-    getModel :: ForgetfulInMemory model e -> IO (Model (ForgetfulInMemory model e))
-    getModel ff = readIORef $ stateRef ff
-    getEventList ff = readIORef $ events ff
-    getEventStream ff =
+    getModel ff index = do
+        models <- readIORef $ stateRef ff
+        case HM.lookup index models of
+            Just model -> pure model
+            Nothing -> pure $ seed ff
+    getEventList ff index = fromMaybe [] . HM.lookup index <$> readIORef (events ff)
+    getEventStream ff index =
         Stream.bracketIO
-            (getEventList ff)
+            (getEventList ff index)
             (const (pure ()))
             Stream.fromList
 
-instance WriteModel (ForgetfulInMemory model e) where
-    transactionalUpdate ff evalCmd =
+instance WriteModel (ForgetfulInMemory model index e) where
+    transactionalUpdate ff index evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
-            model <- readIORef $ stateRef ff
+            model <- liftIO $ getModel ff index
             (returnFun, evs) <- evalCmd model
             storedEvs <- traverse toStored evs
             let newModel = foldl' (apply ff) model storedEvs
-            modifyIORef (events ff) (<> storedEvs)
-            writeIORef (stateRef ff) newModel
+            modifyIORef (events ff) (HM.update (\a -> Just $ a <> storedEvs) index)
+            modifyIORef (stateRef ff) (HM.insert index newModel)
             pure $ returnFun newModel
