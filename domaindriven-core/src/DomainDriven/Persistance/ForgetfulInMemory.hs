@@ -4,6 +4,7 @@ module DomainDriven.Persistance.ForgetfulInMemory where
 
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
+import Data.Hashable (Hashable)
 import Data.List (foldl')
 import Data.Maybe
 import DomainDriven.Persistance.Class
@@ -34,7 +35,7 @@ data ForgetfulInMemory model index event = ForgetfulInMemory
     }
     deriving (Generic)
 
-instance ReadModel (ForgetfulInMemory model index e) where
+instance (Eq index, Hashable index) => ReadModel (ForgetfulInMemory model index e) where
     type Model (ForgetfulInMemory model index e) = model
     type Event (ForgetfulInMemory model index e) = e
     type Index (ForgetfulInMemory model index e) = index
@@ -51,7 +52,7 @@ instance ReadModel (ForgetfulInMemory model index e) where
             (const (pure ()))
             Stream.fromList
 
-instance WriteModel (ForgetfulInMemory model index e) where
+instance (Hashable index, Eq index) => WriteModel (ForgetfulInMemory model index e) where
     transactionalUpdate ff index evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
             model <- liftIO $ getModel ff index
