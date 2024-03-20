@@ -22,31 +22,65 @@ import Servant.Client.Core
 import Servant.OpenApi
 import Prelude
 
-type Cmd model event a = Cmd' model () event (Verb 'POST 200 '[JSON] a)
-type CbCmd model event a = CbCmd' model () event (Verb 'POST 200 '[JSON] a)
-type CbQuery model a = CbQuery' model () (Verb 'GET 200 '[JSON] a)
-type Query model a = Query' model () (Verb 'GET 200 '[JSON] a)
+--------------------------------------------------------------------------------
+-- Normal commands and queries                                                --
+--------------------------------------------------------------------------------
+type Cmd model event a = Cmd' model event (Verb 'POST 200 '[JSON] a)
+type CbCmd model event a = CbCmd' model event (Verb 'POST 200 '[JSON] a)
+type CbQuery model a = CbQuery' model (Verb 'GET 200 '[JSON] a)
+type Query model a = Query' model (Verb 'GET 200 '[JSON] a)
 
-data Cmd' (model :: Type) (index :: Type) (event :: Type) (verb :: Type)
+data Cmd' (model :: Type) (event :: Type) (verb :: Type)
 
-data Query' (model :: Type) (index :: Type) (verb :: Type)
+data Query' (model :: Type) (verb :: Type)
 
-data CbQuery' (model :: Type) (index :: Type) (verb :: Type)
+data CbQuery' (model :: Type) (verb :: Type)
 
-data CbCmd' (model :: Type) (index :: Type) (event :: Type) (verb :: Type)
+data CbCmd' (model :: Type) (event :: Type) (verb :: Type)
 
-instance HasOpenApi verb => HasOpenApi (Cmd' model index event verb) where
+instance HasOpenApi verb => HasOpenApi (Cmd' model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (CbCmd' model index event verb) where
+instance HasOpenApi verb => HasOpenApi (CbCmd' model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (Query' model index verb) where
+instance HasOpenApi verb => HasOpenApi (Query' model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
-instance HasOpenApi verb => HasOpenApi (CbQuery' model index verb) where
+instance HasOpenApi verb => HasOpenApi (CbQuery' model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
+--------------------------------------------------------------------------------
+-- Indexed commands and queries                                               --
+--------------------------------------------------------------------------------
+type CmdI model index event a = CmdI' model index event (Verb 'POST 200 '[JSON] a)
+type CbCmdI model index event a = CbCmdI' model index event (Verb 'POST 200 '[JSON] a)
+type CbQueryI model index a = CbQueryI' model index (Verb 'GET 200 '[JSON] a)
+type QueryI model index a = QueryI' model index (Verb 'GET 200 '[JSON] a)
+
+data CmdI' (model :: Type) (index :: Type) (event :: Type) (verb :: Type)
+
+data QueryI' (model :: Type) (index :: Type) (verb :: Type)
+
+data CbQueryI' (model :: Type) (index :: Type) (verb :: Type)
+
+data CbCmdI' (model :: Type) (index :: Type) (event :: Type) (verb :: Type)
+
+instance HasOpenApi verb => HasOpenApi (CmdI' model index event verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+
+instance HasOpenApi verb => HasOpenApi (CbCmdI' model index event verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+
+instance HasOpenApi verb => HasOpenApi (QueryI' model index verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+
+instance HasOpenApi verb => HasOpenApi (CbQueryI' model index verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+
+--------------------------------------------------------------------------------
+-- NamedField - anonymous JSON objects                                        --
+--------------------------------------------------------------------------------
 data NamedField = NamedField Symbol Type
 
 type family FieldTypes (fields :: [NamedField]) :: [Type] where
@@ -139,35 +173,71 @@ instance {-# OVERLAPPABLE #-} IsOptional t where
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
-    => HasClient m (Cmd' model index event (Verb method status cts ret))
+    => HasClient m (CmdI' model index event (Verb method status cts ret))
     where
-    type Client m (Cmd' model index event (Verb method status cts ret)) = m ret
+    type Client m (CmdI' model index event (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
 
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
-    => HasClient m (CbCmd' model index event (Verb method status cts ret))
+    => HasClient m (CbCmdI' model index event (Verb method status cts ret))
     where
-    type Client m (CbCmd' model index event (Verb method status cts ret)) = m ret
+    type Client m (CbCmdI' model index event (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
 
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
-    => HasClient m (Query' model index (Verb method status cts ret))
+    => HasClient m (QueryI' model index (Verb method status cts ret))
     where
-    type Client m (Query' model index (Verb method status cts ret)) = m ret
+    type Client m (QueryI' model index (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
 
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
-    => HasClient m (CbQuery' model index (Verb method status cts ret))
+    => HasClient m (CbQueryI' model index (Verb method status cts ret))
     where
-    type Client m (CbQuery' model index (Verb method status cts ret)) = m ret
+    type Client m (CbQueryI' model index (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (Cmd' model event (Verb method status cts ret))
+    where
+    type Client m (Cmd' model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CbCmd' model event (Verb method status cts ret))
+    where
+    type Client m (CbCmd' model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (Query' model (Verb method status cts ret))
+    where
+    type Client m (Query' model (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CbQuery' model (Verb method status cts ret))
+    where
+    type Client m (CbQuery' model (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
