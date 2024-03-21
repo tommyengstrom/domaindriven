@@ -10,6 +10,7 @@ import Data.Kind
 import DomainDriven.Server.DomainDrivenApi
 import DomainDriven.Server.Server
 import GHC.Generics qualified as GHC
+import GHC.TypeLits
 import Generics.SOP.BasicFunctors
 import Generics.SOP.GGP
 import Generics.SOP.NP hiding (Projection)
@@ -96,13 +97,101 @@ class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo 
         -> serverFrom
         -> serverTo
 
+-- FIXME: Do we more instances here now that there is a specific instance for `NP I '[]`?
 instance
     {-# OVERLAPPABLE #-}
-    serverFrom ~ serverTo
+    ( serverFrom ~ serverTo
+    , TypeError
+        ( Text "Missing mapModelAndEvent' instance for: "
+            :$$: ShowType serverFrom
+            :$$: Text " to: "
+            :$$: ShowType serverTo
+        )
+    )
     => MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo
     where
     mapModelAndEvent' _ _ = id
 
+instance MapModelAndEvent' modelFrom modelTo eventFrom eventTo (NP I '[]) (NP I '[]) where
+    mapModelAndEvent' _ _ = id
+
+------------------------------
+instance
+    ( modelFrom ~ modelFrom'
+    , eventFrom ~ eventFrom'
+    , modelTo ~ modelTo'
+    , eventTo ~ eventTo'
+    , aFrom ~ aTo
+    , mFrom ~ mTo
+    )
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (CbCmdServer modelFrom' eventFrom' mFrom aFrom)
+        (CbCmdServer modelTo' eventTo' mTo aTo)
+    where
+    mapModelAndEvent' proj inj (CbCmd server) =
+        CbCmd $ \transact ->
+            server
+                ( \action -> transact $
+                    \model -> ((. proj) *** map inj) <$> action (proj model)
+                )
+
+instance
+    ( modelFrom ~ modelFrom'
+    , eventFrom ~ eventFrom'
+    , modelTo ~ modelTo'
+    , eventTo ~ eventTo'
+    , aFrom ~ aTo
+    , mFrom ~ mTo
+    , Functor mFrom
+    )
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (CmdServer modelFrom' eventFrom' mFrom aFrom)
+        (CmdServer modelTo' eventTo' mTo aTo)
+    where
+    mapModelAndEvent' proj inj (Cmd server) =
+        Cmd $ \model -> ((. proj) *** map inj) <$> server (proj model)
+
+instance
+    ( modelFrom ~ modelFrom'
+    , modelTo ~ modelTo'
+    , aFrom ~ aTo
+    , mFrom ~ mTo
+    )
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (QueryServer modelFrom' mFrom aFrom)
+        (QueryServer modelTo' mTo aTo)
+    where
+    mapModelAndEvent' proj _ (Query server) = Query $ server . proj
+
+instance
+    ( modelFrom ~ modelFrom'
+    , modelTo ~ modelTo'
+    , aFrom ~ aTo
+    , mFrom ~ mTo
+    )
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (CbQueryServer modelFrom' mFrom aFrom)
+        (CbQueryServer modelTo' mTo aTo)
+    where
+    mapModelAndEvent' proj _ (CbQuery server) = CbQuery $ \model -> server (proj <$> model)
+
+------------------------------------
 instance
     ( modelFrom ~ modelFrom'
     , eventFrom ~ eventFrom'
