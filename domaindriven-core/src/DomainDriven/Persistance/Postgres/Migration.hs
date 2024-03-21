@@ -1,10 +1,14 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+
 module DomainDriven.Persistance.Postgres.Migration where
 
 import Control.Monad
 import Data.Aeson
+import Data.Foldable
 import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
+import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal
     ( mkEventQuery
@@ -18,34 +22,53 @@ import UnliftIO (liftIO)
 import Prelude
 
 migrateValue1to1
-    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
-migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+    :: forall index
+     . ( FF.FromField index
+       , Show index
+       )
+    => Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Value -> Value)
+    -> IO ()
+migrateValue1to1 conn prevTName tName f =
+    migrate1to1 @_ @_ @index conn prevTName tName (fmap f)
 
 migrate1to1
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall a b index
+     . ( FromJSON a
+       , ToJSON b
+       , FF.FromField index
+       , Show index
+       )
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
 migrate1to1 conn prevTName tName f = do
-    migrate1toMany conn prevTName tName (pure . f)
+    migrate1toMany @_ @_ @index conn prevTName tName (pure . f)
 
 migrate1toMany
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall a b index
+     . ( FromJSON a
+       , ToJSON b
+       , FF.FromField index
+       , Show index
+       )
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> [Stored b])
     -> IO ()
 migrate1toMany conn prevTName tName f = do
-    Stream.fold Fold.drain
-        . Stream.mapM (liftIO . writeIt)
-        . Stream.unfoldMany Unfold.fromList
-        $ fmap (f . fst)
-        $ mkEventStream 1 conn (mkEventQuery prevTName)
+    indices <- fetchThemIndices conn prevTName :: IO [index]
+    for_ indices $ \i ->
+        Stream.fold Fold.drain
+            . Stream.mapM (liftIO . writeIt)
+            . Stream.unfoldMany Unfold.fromList
+            $ fmap (f . fst)
+            $ mkEventStream 1 conn (mkEventQuery prevTName i)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =
@@ -59,8 +82,12 @@ migrate1toMany conn prevTName tName f = do
             (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
 
 migrate1toManyWithState
-    :: forall a b state
-     . (FromJSON a, ToJSON b)
+    :: forall a b state index
+     . ( FromJSON a
+       , ToJSON b
+       , FF.FromField index
+       , Show index
+       )
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -68,14 +95,16 @@ migrate1toManyWithState
     -> state
     -> IO ()
 migrate1toManyWithState conn prevTName tName f initialState = do
-    Stream.fold
-        Fold.drain
-        . Stream.mapM (liftIO . writeIt)
-        . Stream.unfoldMany Unfold.fromList
-        . fmap snd
-        $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
-        $ fmap fst
-        $ mkEventStream 1 conn (mkEventQuery prevTName)
+    indices <- fetchThemIndices conn prevTName :: IO [index]
+    for_ indices $ \i ->
+        Stream.fold
+            Fold.drain
+            . Stream.mapM (liftIO . writeIt)
+            . Stream.unfoldMany Unfold.fromList
+            . fmap snd
+            $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
+            $ fmap fst
+            $ mkEventStream 1 conn (mkEventQuery prevTName i)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =
@@ -87,3 +116,14 @@ migrate1toManyWithState conn prevTName tName f initialState = do
                    \values (?, ?, ?)"
             )
             (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+
+fetchThemIndices
+    :: forall index
+     . FF.FromField index
+    => Connection
+    -> EventTableName
+    -> IO [index]
+fetchThemIndices conn etName = fmap fromOnly <$> PG.query_ conn q
+  where
+    q :: PG.Query
+    q = "select distinct index from \"" <> fromString etName <> "\" order by index;"

@@ -103,6 +103,7 @@ createEventTable' conn eventTable =
             <> fromString eventTable
             <> "\" \
                \( id uuid primary key\
+               \, index varchar unique\
                \, event_number bigint not null generated always as identity\
                \, timestamp timestamptz not null default now()\
                \, event jsonb not null\
@@ -222,7 +223,8 @@ createPostgresPersistance pool eventTable app' seed' = do
             }
 
 queryEvents
-    :: (Show index, FromJSON a)
+    :: forall a index
+     . (Show index, FromJSON a)
     => Connection
     -> EventTableName
     -> index
