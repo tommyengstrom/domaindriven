@@ -65,7 +65,7 @@ counterServers =
 -- 4. Define the final API type using `DomainDrivenApi`, which uses the labels of the
 -- record to add a path piece to the final endpoints.
 
-type ServantCounterApi = DomainDrivenApi CounterApi CounterModel CounterEvent
+type ServantCounterApi = DomainDrivenApi CounterApi CounterModel () CounterEvent
 
 -- 5. Define the server.
 -- The `HasServer` instance for `DomainDrivenApi` with covert it into a `DomainDrivenServer`
