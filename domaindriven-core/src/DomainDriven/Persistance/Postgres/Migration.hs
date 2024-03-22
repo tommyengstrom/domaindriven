@@ -8,10 +8,10 @@ import Data.Foldable
 import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
-import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal
-    ( mkEventQuery
+    ( IsPgIndex (..)
+    , mkEventQuery
     , mkEventStream
     )
 import DomainDriven.Persistance.Postgres.Types
@@ -23,9 +23,7 @@ import Prelude
 
 migrateValue1to1
     :: forall index
-     . ( FF.FromField index
-       , Show index
-       )
+     . IsPgIndex index
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -38,8 +36,7 @@ migrate1to1
     :: forall a b index
      . ( FromJSON a
        , ToJSON b
-       , FF.FromField index
-       , Show index
+       , IsPgIndex index
        )
     => Connection
     -> PreviousEventTableName
@@ -53,8 +50,7 @@ migrate1toMany
     :: forall a b index
      . ( FromJSON a
        , ToJSON b
-       , FF.FromField index
-       , Show index
+       , IsPgIndex index
        )
     => Connection
     -> PreviousEventTableName
@@ -65,27 +61,29 @@ migrate1toMany conn prevTName tName f = do
     indices <- fetchThemIndices conn prevTName :: IO [index]
     for_ indices $ \i ->
         Stream.fold Fold.drain
-            . Stream.mapM (liftIO . writeIt)
+            . Stream.mapM (liftIO . writeIt i)
             . Stream.unfoldMany Unfold.fromList
             $ f . fst <$> mkEventStream 50 conn (mkEventQuery prevTName i)
   where
-    writeIt :: Stored b -> IO Int64
-    writeIt event =
+    writeIt :: index -> Stored b -> IO Int64
+    writeIt index event =
         PG.executeMany
             conn
             ( "insert into \""
                 <> fromString tName
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
+                <> "\" (id, index, timestamp, event) \
+                   \values (?, ?, ?, ?)"
             )
-            (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+            ( fmap
+                (\x -> (storedUUID x, toPgIndex index, storedTimestamp x, encode $ storedEvent x))
+                [event]
+            )
 
 migrate1toManyWithState
     :: forall a b state index
      . ( FromJSON a
        , ToJSON b
-       , FF.FromField index
-       , Show index
+       , IsPgIndex index
        )
     => Connection
     -> PreviousEventTableName
@@ -98,31 +96,34 @@ migrate1toManyWithState conn prevTName tName f initialState = do
     for_ indices $ \i ->
         Stream.fold
             Fold.drain
-            . Stream.mapM (liftIO . writeIt)
+            . Stream.mapM (liftIO . writeIt i)
             . Stream.unfoldMany Unfold.fromList
             . fmap snd
             $ Stream.scan (Fold.foldl' (f . fst) (initialState, []))
             $ fst
                 <$> mkEventStream 50 conn (mkEventQuery prevTName i)
   where
-    writeIt :: Stored b -> IO Int64
-    writeIt event =
+    writeIt :: index -> Stored b -> IO Int64
+    writeIt index event =
         PG.executeMany
             conn
             ( "insert into \""
                 <> fromString tName
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
+                <> "\" (id, index, timestamp, event) \
+                   \values (?, ?, ?, ?)"
             )
-            (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+            ( fmap
+                (\x -> (storedUUID x, toPgIndex index, storedTimestamp x, encode $ storedEvent x))
+                [event]
+            )
 
 fetchThemIndices
     :: forall index
-     . FF.FromField index
+     . IsPgIndex index
     => Connection
     -> EventTableName
     -> IO [index]
-fetchThemIndices conn etName = fmap fromOnly <$> PG.query_ conn q
+fetchThemIndices conn etName = fmap (fromPgIndex . fromOnly) <$> PG.query_ conn q
   where
     q :: PG.Query
     q = "select distinct index from \"" <> fromString etName <> "\" order by index;"
