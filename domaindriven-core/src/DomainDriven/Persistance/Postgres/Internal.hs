@@ -16,6 +16,8 @@ import Data.Maybe
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
+import Data.Text (Text)
+import Data.Text qualified as T
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
 import DomainDriven.Persistance.Class
@@ -65,8 +67,18 @@ data PostgresEventTrans model index event = PostgresEventTrans
     }
     deriving (Generic)
 
+class Hashable a => IsPgIndex a where
+    toPgIndex :: a -> Text -- FIXME: Should not be Text
+    fromPgIndex :: Text -> a
+    toQuery :: a -> Query
+    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
+
+instance IsPgIndex SingleModel where
+    toPgIndex = const "0"
+    fromPgIndex _ = SingleModel
+
 instance
-    (Hashable index, Show index, FromJSON event)
+    (IsPgIndex index, FromJSON event)
     => ReadModel (PostgresEvent model index event)
     where
     type Model (PostgresEvent model index event) = model
@@ -97,17 +109,21 @@ createEventTable pgt = do
             (pgt ^. field @"eventTableName")
 
 createEventTable' :: Connection -> EventTableName -> IO Int64
-createEventTable' conn eventTable =
+createEventTable' conn eventTable = do
     execute_ conn $
         "create table if not exists \""
             <> fromString eventTable
             <> "\" \
                \( id uuid primary key\
-               \, index varchar unique\
+               \, index varchar not null\
                \, event_number bigint not null generated always as identity\
                \, timestamp timestamptz not null default now()\
                \, event jsonb not null\
                \);"
+    execute_ conn $
+        "create index on \""
+            <> fromString eventTable
+            <> "\" (index, event_number);"
 
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
@@ -224,7 +240,7 @@ createPostgresPersistance pool eventTable app' seed' = do
 
 queryEvents
     :: forall a index
-     . (Show index, FromJSON a)
+     . (IsPgIndex index, FromJSON a)
     => Connection
     -> EventTableName
     -> index
@@ -237,11 +253,11 @@ queryEvents conn eventTable index = do
         "select id, event_number,timestamp,event from \""
             <> fromString eventTable
             <> "\" where index = "
-            <> fromString (show index)
+            <> toQuery index
             <> " order by event_number"
 
 queryEventsAfter
-    :: (Show index, FromJSON a)
+    :: (IsPgIndex index, FromJSON a)
     => Connection
     -> EventTableName
     -> index
@@ -254,7 +270,7 @@ queryEventsAfter conn eventTable index (EventNumber lastEvent) =
             ( "select id, event_number,timestamp,event from \""
                 <> fromString eventTable
                 <> "\" where index = "
-                <> fromString (show index)
+                <> toQuery index
                 <> " and event_number > "
                 <> fromString (show lastEvent)
                 <> " order by event_number"
@@ -263,25 +279,30 @@ queryEventsAfter conn eventTable index (EventNumber lastEvent) =
 newtype EventQuery = EventQuery {getPgQuery :: PG.Query}
     deriving (Show, Generic)
 
-mkEventsAfterQuery :: Show index => EventTableName -> index -> EventNumber -> EventQuery
+mkEventsAfterQuery
+    :: IsPgIndex index
+    => EventTableName
+    -> index
+    -> EventNumber
+    -> EventQuery
 mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
     EventQuery $
         "select id, event_number,timestamp,event from \""
             <> fromString eventTable
             <> "\" where index = "
-            <> fromString (show index)
+            <> toQuery index
             <> " and event_number > "
             <> fromString (show lastEvent)
             <> " order by event_number"
 
-mkEventQuery :: Show index => EventTableName -> index -> EventQuery
+mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
 mkEventQuery eventTable index =
     EventQuery $
         "select id, event_number,timestamp,event from \""
             <> fromString eventTable
-            <> " where index = "
-            <> fromString (show index)
-            <> "\" order by event_number"
+            <> "\" where index = "
+            <> toQuery index
+            <> " order by event_number"
 
 headMay :: [a] -> Maybe a
 headMay = \case
@@ -289,7 +310,7 @@ headMay = \case
     [] -> Nothing
 
 queryHasEventsAfter
-    :: Show index
+    :: IsPgIndex index
     => Connection
     -> EventTableName
     -> index
@@ -303,28 +324,31 @@ queryHasEventsAfter conn eventTable index (EventNumber lastEvent) =
         "select count(*) > 0 from \""
             <> fromString eventTable
             <> "\" where index = "
-            <> fromString (show index)
+            <> toQuery index
             <> " and event_number > "
             <> fromString (show lastEvent)
 
 writeEvents
-    :: forall a
-     . ToJSON a
+    :: forall a index
+     . ( ToJSON a
+       , IsPgIndex index
+       )
     => Connection
     -> EventTableName
+    -> index
     -> [Stored a]
     -> IO EventNumber
-writeEvents conn eventTable storedEvents = do
+writeEvents conn eventTable index storedEvents = do
     _ <-
         executeMany
             conn
             ( "insert into \""
                 <> fromString eventTable
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
+                <> "\" (id, index, timestamp, event) \
+                   \values (?, ?, ?, ?)"
             )
             ( fmap
-                (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
+                (\x -> (storedUUID x, toPgIndex index, storedTimestamp x, encode $ storedEvent x))
                 storedEvents
             )
     foldl' max 0 . fmap fromOnly
@@ -334,7 +358,7 @@ writeEvents conn eventTable storedEvents = do
 
 getEventStream'
     :: ( FromJSON event
-       , Show index
+       , IsPgIndex index
        )
     => PostgresEventTrans model index event
     -> index
@@ -455,8 +479,7 @@ mkEventStream chunkSize conn q = do
 getModel'
     :: forall event index model
      . ( FromJSON event
-       , Hashable index
-       , Show index
+       , IsPgIndex index
        )
     => PostgresEventTrans model index event
     -> index
@@ -476,8 +499,7 @@ getModel' pgt index = do
 refreshModel
     :: forall model index event
      . ( FromJSON event
-       , Hashable index
-       , Show index
+       , IsPgIndex index
        )
     => PostgresEventTrans model index event
     -> index
@@ -518,7 +540,7 @@ exclusiveLock (OngoingTransaction conn _) etName =
 
 getCurrentState
     :: forall pg index model
-     . ( Hashable index
+     . ( IsPgIndex index
        , HasField' "modelIORef" pg (IORef (HashMap index (NumberedModel model)))
        , HasField' "seed" pg model
        )
@@ -532,8 +554,7 @@ getCurrentState pg index =
 instance
     ( ToJSON event
     , FromJSON event
-    , Hashable index
-    , Show index
+    , IsPgIndex index
     )
     => WriteModel (PostgresEvent model index event)
     where
@@ -550,6 +571,7 @@ instance
                 writeEvents
                     (pgt ^. field @"transaction" . to connection)
                     eventTable
+                    index
                     storedEvs
             atomicModifyIORef
                 (pg ^. field @"modelIORef")

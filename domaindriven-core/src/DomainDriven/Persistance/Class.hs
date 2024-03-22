@@ -8,7 +8,9 @@ module DomainDriven.Persistance.Class where
 import Control.DeepSeq (NFData)
 import Control.Monad.Reader
 import Data.Aeson
+import Data.Hashable (Hashable)
 import Data.Kind
+import Data.Text (Text)
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
@@ -16,6 +18,12 @@ import Streamly.Data.Stream.Prelude (Stream)
 import System.Random
 import UnliftIO
 import Prelude
+
+data SingleModel = SingleModel
+    deriving (Show, Eq, Ord, Generic, Hashable)
+
+data IndexedModel = Indexd Text
+    deriving (Show, Eq, Ord, Generic, Hashable)
 
 class ReadModel p where
     type Model p :: Type

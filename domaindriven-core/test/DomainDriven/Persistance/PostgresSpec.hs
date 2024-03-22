@@ -38,7 +38,7 @@ eventTable2 :: EventTable
 eventTable2 = MigrateUsing mig eventTable
   where
     mig :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-    mig prevName name conn = migrate1to1 @Value @_ @() conn prevName name id
+    mig prevName name conn = migrate1to1 @Value @_ @SingleModel conn prevName name id
 
 spec :: Spec
 spec = do
@@ -62,7 +62,7 @@ applyTestEvent m ev = case storedEvent ev of
     SubtractOne -> m - 1
 
 setupPersistance
-    :: ((PostgresEvent TestModel () TestEvent, Pool Connection) -> IO ())
+    :: ((PostgresEvent TestModel SingleModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistance test = do
     dropEventTables =<< mkTestConn
@@ -101,7 +101,8 @@ tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
 
-writeEventsSpec :: SpecWith (PostgresEvent TestModel () TestEvent, Pool Connection)
+writeEventsSpec
+    :: SpecWith (PostgresEvent TestModel SingleModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
     let ev1 :: Stored TestEvent
         ev1 =
@@ -112,11 +113,11 @@ writeEventsSpec = describe "queryEvents" $ do
                 }
 
     it "Can write event to database" $ \(_p, pool) -> withResource pool $ \conn -> do
-        i <- writeEvents conn (getEventTableName eventTable) [ev1]
+        i <- writeEvents conn (getEventTableName eventTable) SingleModel [ev1]
         i `shouldBe` 1
 
     it "Writing the same event again fails" $ \(_p, pool) -> withResource pool $ \conn -> do
-        writeEvents conn (getEventTableName eventTable) [ev1]
+        writeEvents conn (getEventTableName eventTable) SingleModel [ev1]
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
 
@@ -130,29 +131,30 @@ writeEventsSpec = describe "queryEvents" $ do
                 (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
                 evs
         _ <- withResource pool $ \conn ->
-            writeEvents conn (getEventTableName eventTable) storedEvs
-        evs' <- getEventList p ()
+            writeEvents conn (getEventTableName eventTable) SingleModel storedEvs
+        evs' <- getEventList p SingleModel
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
-streamingSpec :: SpecWith (PostgresEvent TestModel () TestEvent, Pool Connection)
+streamingSpec :: SpecWith (PostgresEvent TestModel SingleModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
     it "getEventList and getEventStream yields the same result" $ \(p, pool) -> do
         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
             enKey <- mkId
             pure $ Stored AddOne (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
         _ <- withResource pool $ \conn ->
-            writeEvents conn (getEventTableName eventTable) storedEvs
-        evList <- getEventList p ()
-        evStream <- Stream.toList $ getEventStream p ()
+            writeEvents conn (getEventTableName eventTable) SingleModel storedEvs
+        evList <- getEventList p SingleModel
+        evStream <- Stream.toList $ getEventStream p SingleModel
         -- pPrint evList
         evList `shouldSatisfy` (== 10) . length -- must be at least two to verify order
         fmap storedEvent evStream `shouldBe` fmap storedEvent evList
         evStream `shouldBe` evList
 
-queryEventsSpec :: SpecWith (PostgresEvent TestModel () TestEvent, Pool Connection)
+queryEventsSpec
+    :: SpecWith (PostgresEvent TestModel SingleModel TestEvent, Pool Connection)
 queryEventsSpec = describe "queryEvents" $ do
     it "Can query events" $ \(_p, pool) -> withResource pool $ \conn -> do
-        evs <- queryEvents @TestEvent conn (getEventTableName eventTable) ()
+        evs <- queryEvents @TestEvent conn (getEventTableName eventTable) SingleModel
         evs `shouldSatisfy` (>= 1) . length
     it "Events come out in the right order" $ \(_p, pool) -> withResource pool $ \conn -> do
         -- write few more events before
@@ -164,6 +166,7 @@ queryEventsSpec = describe "queryEvents" $ do
                 writeEvents
                     conn
                     (getEventTableName eventTable)
+                    SingleModel
                     [Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
 
             id2 <- mkId
@@ -171,23 +174,24 @@ queryEventsSpec = describe "queryEvents" $ do
             writeEvents
                 conn
                 (getEventTableName eventTable)
+                SingleModel
                 [Stored ev2 (UTCTime (fromGregorian 2020 10 18) 1) id2]
 
-        evs <- queryEvents @TestEvent conn (getEventTableName eventTable) ()
+        evs <- queryEvents @TestEvent conn (getEventTableName eventTable) SingleModel
         evs `shouldSatisfy` (> 1) . length
         let event_numbers = fmap snd evs
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
-migrationSpec :: SpecWith (PostgresEvent TestModel () TestEvent, Pool Connection)
+migrationSpec :: SpecWith (PostgresEvent TestModel SingleModel TestEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
     it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
         evs <- withResource pool $ \conn ->
-            queryEvents @TestEvent conn (getEventTableName eventTable) ()
+            queryEvents @TestEvent conn (getEventTableName eventTable) SingleModel
         evs `shouldSatisfy` (>= 1) . length
 
-        _ <- postgresWriteModel @() pool eventTable2 applyTestEvent 0
+        _ <- postgresWriteModel @SingleModel pool eventTable2 applyTestEvent 0
         evs' <- withResource pool $ \conn ->
-            queryEvents @TestEvent conn (getEventTableName eventTable2) ()
+            queryEvents @TestEvent conn (getEventTableName eventTable2) SingleModel
 
         fmap fst evs' `shouldBe` fmap fst evs
 
@@ -198,7 +202,9 @@ migrationSpec = describe "migrate1to1" $ do
                     AddOne
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
-        withResource pool (\conn -> writeEvents conn (getEventTableName eventTable) [ev])
+        withResource
+            pool
+            (\conn -> writeEvents conn (getEventTableName eventTable) SingleModel [ev])
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
     it "But can write to the new table" $ \(_p, pool) -> do
@@ -209,7 +215,7 @@ migrationSpec = describe "migrate1to1" $ do
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
 
-        void . withResource pool $ \conn -> writeEvents conn (getEventTableName eventTable2) [ev]
+        void . withResource pool $ \conn -> writeEvents conn (getEventTableName eventTable2) SingleModel [ev]
 
     it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
         let eventTableBroken :: EventTable
@@ -236,14 +242,14 @@ migrationSpec = describe "migrate1to1" $ do
             _ -> fail "Unexpectedly lacking table versions!"
 
 migrationConcurrencySpec
-    :: SpecWith (PostgresEvent TestModel () TestEvent, Pool Connection)
+    :: SpecWith (PostgresEvent TestModel SingleModel TestEvent, Pool Connection)
 migrationConcurrencySpec = describe "Event table is locked during migration" $ do
     it "migrate1to1" $ \(m0, pool) -> migrationTest m0 pool mig1to1
     it "migrate1toMany" $ \(m0, pool) -> migrationTest m0 pool mig1toMany
     it "migrate1toManyWithState" $ \(m0, pool) -> migrationTest m0 pool mig1toManyState
   where
     migrationTest
-        :: PostgresEvent TestModel () TestEvent
+        :: PostgresEvent TestModel SingleModel TestEvent
         -> Pool Connection
         -> EventMigration
         -> IO ()
@@ -251,13 +257,13 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         let cmd :: Int -> IO (Int -> Int, [TestEvent])
             cmd _ = pure $ (id, [AddOne])
 
-        i <- replicateM 5 (transactionalUpdate m0 () cmd)
+        i <- replicateM 5 (transactionalUpdate m0 SingleModel cmd)
         length i `shouldBe` 5
         (result, _) <-
             concurrently
                 ( do
                     threadDelay 100000 -- sleep a bit and let the migration start
-                    try @IO @SqlError $ transactionalUpdate m0 () cmd
+                    try @IO @SqlError $ transactionalUpdate m0 SingleModel cmd
                 )
                 (postgresWriteModel pool (MigrateUsing mig eventTable2) applyTestEvent 0)
         result `shouldSatisfy` \case
@@ -265,15 +271,15 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
             Left err -> sqlErrorMsg err == "Event table has been retired."
 
     mig1to1 :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-    mig1to1 prevName name conn = migrate1to1 @Value @_ @() conn prevName name slowId
+    mig1to1 prevName name conn = migrate1to1 @Value @_ @SingleModel conn prevName name slowId
 
     mig1toMany :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-    mig1toMany prevName name conn = migrate1toMany @Value @_ @() conn prevName name (pure . slowId)
+    mig1toMany prevName name conn = migrate1toMany @Value @_ @SingleModel conn prevName name (pure . slowId)
 
     mig1toManyState :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
     mig1toManyState prevName name conn = do
         putStrLn "mig1toManyState"
-        migrate1toManyWithState @Value @_ @_ @()
+        migrate1toManyWithState @Value @_ @_ @SingleModel
             conn
             prevName
             name
