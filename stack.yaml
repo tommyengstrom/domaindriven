@@ -8,3 +8,6 @@ ghc-options:
   "$locals": -fwrite-ide-info
   '$everything': -haddock
     -hiedir=.hie
+
+
+system-ghc: true

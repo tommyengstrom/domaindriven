@@ -73,9 +73,13 @@ class Hashable a => IsPgIndex a where
     toQuery :: a -> Query
     toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
 
-instance IsPgIndex SingleModel where
+instance IsPgIndex NoIndex where
     toPgIndex = const "0"
-    fromPgIndex _ = SingleModel
+    fromPgIndex _ = NoIndex
+
+instance IsPgIndex Indexed where
+    toPgIndex (Indexed t) = t
+    fromPgIndex = Indexed
 
 instance
     (IsPgIndex index, FromJSON event)
@@ -110,16 +114,17 @@ createEventTable pgt = do
 
 createEventTable' :: Connection -> EventTableName -> IO Int64
 createEventTable' conn eventTable = do
-    execute_ conn $
-        "create table if not exists \""
-            <> fromString eventTable
-            <> "\" \
-               \( id uuid primary key\
-               \, index varchar not null\
-               \, event_number bigint not null generated always as identity\
-               \, timestamp timestamptz not null default now()\
-               \, event jsonb not null\
-               \);"
+    _ <-
+        execute_ conn $
+            "create table if not exists \""
+                <> fromString eventTable
+                <> "\" \
+                   \( id uuid primary key\
+                   \, index varchar not null\
+                   \, event_number bigint not null generated always as identity\
+                   \, timestamp timestamptz not null default now()\
+                   \, event jsonb not null\
+                   \);"
     execute_ conn $
         "create index on \""
             <> fromString eventTable

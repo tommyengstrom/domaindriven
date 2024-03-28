@@ -19,11 +19,12 @@ import System.Random
 import UnliftIO
 import Prelude
 
-data SingleModel = SingleModel
+data NoIndex = NoIndex
     deriving (Show, Eq, Ord, Generic, Hashable)
 
-data IndexedModel = Indexd Text
-    deriving (Show, Eq, Ord, Generic, Hashable)
+newtype Indexed = Indexed Text
+    deriving stock (Show, Generic)
+    deriving newtype (Eq, Ord, Hashable)
 
 class ReadModel p where
     type Model p :: Type
