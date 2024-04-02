@@ -48,6 +48,7 @@ spec = do
         queryEventsSpec
         migrationSpec -- make sure migrationSpec is run last!
     around setupPersistance migrationConcurrencySpec
+    around setupPersistanceIndexed indexedSpec
 
 type TestModel = Int
 
@@ -69,7 +70,20 @@ setupPersistance test = do
     let stripesAndResources = 5
     poolCfg <-
         setNumStripes (Just stripesAndResources)
-            <$> mkDefaultPoolConfig (mkTestConn) close 1 stripesAndResources
+            <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
+    pool <- newPool poolCfg
+    p <- postgresWriteModel pool eventTable applyTestEvent 0
+    test (p{chunkSize = 2}, pool)
+
+setupPersistanceIndexed
+    :: ((PostgresEvent TestModel Indexed TestEvent, Pool Connection) -> IO ())
+    -> IO ()
+setupPersistanceIndexed test = do
+    dropEventTables =<< mkTestConn
+    let stripesAndResources = 5
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
     pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
@@ -134,6 +148,29 @@ writeEventsSpec = describe "queryEvents" $ do
             writeEvents conn (getEventTableName eventTable) NoIndex storedEvs
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
+
+indexedSpec :: SpecWith (PostgresEvent TestModel Indexed TestEvent, Pool Connection)
+indexedSpec = describe "indexed" $ do
+    it "Indexed models are updated separately" $ \(p, pool) -> do
+        let evs1 = [AddOne, SubtractOne, AddOne]
+            evs2 = [AddOne, AddOne, AddOne]
+
+        storedEvs1 <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                evs1
+        storedEvs2 <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                evs2
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) (Indexed "1") storedEvs1
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) (Indexed "2") storedEvs2
+        m1 <- getModel p (Indexed "1")
+        m2 <- getModel p (Indexed "2")
+        m1 `shouldBe` 1
+        m2 `shouldBe` 3
 
 streamingSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
@@ -255,7 +292,7 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -> IO ()
     migrationTest m0 pool mig = do
         let cmd :: Int -> IO (Int -> Int, [TestEvent])
-            cmd _ = pure $ (id, [AddOne])
+            cmd _ = pure (id, [AddOne])
 
         i <- replicateM 5 (transactionalUpdate m0 NoIndex cmd)
         length i `shouldBe` 5
