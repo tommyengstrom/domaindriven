@@ -25,7 +25,7 @@ import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
-import UnliftIO (MonadUnliftIO (..))
+import UnliftIO (MonadUnliftIO (..), concurrently)
 import UnliftIO.Pool
     ( LocalPool
     , Pool
@@ -476,11 +476,17 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
             (returnFun, evs) <- runInIO $ cmd m
             NumberedModel m' _ <- readIORef (pg ^. field @"modelIORef")
             storedEvs <- traverse toStored evs
-            let newM = foldl' (pg ^. field @"app") m' storedEvs
-            lastEventNo <-
-                writeEvents
-                    (pgt ^. field @"transaction" . to connection)
-                    eventTable
-                    storedEvs
-            _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newM lastEventNo
-            pure $ returnFun newM
+            newNumberedModel <-
+                uncurry NumberedModel
+                    <$> concurrently
+                        ( Stream.fold
+                            (Fold.foldl' (pg ^. field @"app") m')
+                            (Stream.fromList storedEvs)
+                        )
+                        ( writeEvents
+                            (pgt ^. field @"transaction" . to connection)
+                            eventTable
+                            storedEvs
+                        )
+            _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
+            pure $ returnFun (model newNumberedModel)
