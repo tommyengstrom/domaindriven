@@ -17,9 +17,26 @@ import Streamly.Data.Unfold qualified as Unfold
 import UnliftIO (liftIO)
 import Prelude
 
+defaultChunkSize :: ChunkSize
+defaultChunkSize = 100
+
 migrateValue1to1
-    :: Connection -> PreviousEventTableName -> EventTableName -> (Value -> Value) -> IO ()
-migrateValue1to1 conn prevTName tName f = migrate1to1 conn prevTName tName (fmap f)
+    :: Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Value -> Value)
+    -> IO ()
+migrateValue1to1 = migrateValue1to1' defaultChunkSize
+
+migrateValue1to1'
+    :: ChunkSize
+    -> Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Value -> Value)
+    -> IO ()
+migrateValue1to1' chunkSize conn prevTName tName f =
+    migrate1to1' chunkSize conn prevTName tName (fmap f)
 
 migrate1to1
     :: forall a b
@@ -29,8 +46,19 @@ migrate1to1
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
-migrate1to1 conn prevTName tName f = do
-    migrate1toMany conn prevTName tName (pure . f)
+migrate1to1 = migrate1to1' defaultChunkSize
+
+migrate1to1'
+    :: forall a b
+     . (FromJSON a, ToJSON b)
+    => ChunkSize
+    -> Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Stored a -> Stored b)
+    -> IO ()
+migrate1to1' chunkSize conn prevTName tName f = do
+    migrate1toMany' chunkSize conn prevTName tName (pure . f)
 
 migrate1toMany
     :: forall a b
@@ -40,12 +68,23 @@ migrate1toMany
     -> EventTableName
     -> (Stored a -> [Stored b])
     -> IO ()
-migrate1toMany conn prevTName tName f = do
+migrate1toMany = migrate1toMany' defaultChunkSize
+
+migrate1toMany'
+    :: forall a b
+     . (FromJSON a, ToJSON b)
+    => ChunkSize
+    -> Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (Stored a -> [Stored b])
+    -> IO ()
+migrate1toMany' chunkSize conn prevTName tName f = do
     Stream.fold Fold.drain
         . Stream.mapM (liftIO . writeIt)
         . Stream.unfoldMany Unfold.fromList
         $ fmap (f . fst)
-        $ mkEventStream 50 conn (mkEventQuery prevTName)
+        $ mkEventStream chunkSize conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =
@@ -67,18 +106,28 @@ migrate1toManyWithState
     -> (state -> Stored a -> (state, [Stored b]))
     -> state
     -> IO ()
-migrate1toManyWithState conn prevTName tName f initialState = do
-    Stream.fold
-        Fold.drain
-        . Stream.mapM (liftIO . writeIt)
+migrate1toManyWithState = migrate1toManyWithState' defaultChunkSize
+
+migrate1toManyWithState'
+    :: forall a b state
+     . (FromJSON a, ToJSON b)
+    => ChunkSize
+    -> Connection
+    -> PreviousEventTableName
+    -> EventTableName
+    -> (state -> Stored a -> (state, [Stored b]))
+    -> state
+    -> IO ()
+migrate1toManyWithState' chunkSize conn prevTName tName f initialState =
+    Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt)))
         . Stream.unfoldMany Unfold.fromList
         . fmap snd
         $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
         $ fmap fst
-        $ mkEventStream 50 conn (mkEventQuery prevTName)
+        $ mkEventStream chunkSize conn (mkEventQuery prevTName)
   where
-    writeIt :: Stored b -> IO Int64
-    writeIt event =
+    writeIt :: [Stored b] -> IO Int64
+    writeIt events =
         PG.executeMany
             conn
             ( "insert into \""
@@ -86,4 +135,5 @@ migrate1toManyWithState conn prevTName tName f initialState = do
                 <> "\" (id, timestamp, event) \
                    \values (?, ?, ?)"
             )
-            (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+            ( (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) <$> events
+            )

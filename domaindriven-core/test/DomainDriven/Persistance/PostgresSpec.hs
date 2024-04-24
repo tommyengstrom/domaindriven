@@ -213,7 +213,7 @@ migrationSpec = describe "migrate1to1" $ do
 
     it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
         let eventTableBroken :: EventTable
-            eventTableBroken = MigrateUsing undefined eventTable2
+            eventTableBroken = MigrateUsing (\_ _ _ -> error "ops") eventTable2
 
         postgresWriteModel pool eventTableBroken applyTestEvent 0
             `shouldThrow` const @_ @SomeException True
