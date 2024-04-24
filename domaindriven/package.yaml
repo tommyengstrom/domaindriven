@@ -39,7 +39,6 @@ dependencies:
 
 
 default-extensions:
-- Arrows
 - ConstraintKinds
 - DataKinds
 - DeriveAnyClass
@@ -65,6 +64,7 @@ default-extensions:
 - RankNTypes
 - ScopedTypeVariables
 - StandaloneDeriving
+- StrictData
 - TupleSections
 - TypeApplications
 - TypeFamilyDependencies
@@ -82,6 +82,8 @@ ghc-options:
 - -Wredundant-constraints
 - -Wincomplete-record-updates
 - -Wincomplete-patterns
+- -Wunused-packages
+- -Wall-missed-specialisations
 
 library:
   source-dirs: src
