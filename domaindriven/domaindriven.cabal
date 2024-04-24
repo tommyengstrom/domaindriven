@@ -38,7 +38,6 @@ library
   hs-source-dirs:
       src
   default-extensions:
-      Arrows
       ConstraintKinds
       DataKinds
       DeriveAnyClass
@@ -64,13 +63,14 @@ library
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving
+      StrictData
       TupleSections
       TypeApplications
       TypeFamilyDependencies
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wall-missed-specialisations
   build-depends:
       aeson
     , async
@@ -115,7 +115,6 @@ test-suite domaindriven-test
   hs-source-dirs:
       test
   default-extensions:
-      Arrows
       ConstraintKinds
       DataKinds
       DeriveAnyClass
@@ -141,13 +140,14 @@ test-suite domaindriven-test
       RankNTypes
       ScopedTypeVariables
       StandaloneDeriving
+      StrictData
       TupleSections
       TypeApplications
       TypeFamilyDependencies
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wall-missed-specialisations -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
   build-depends:
       QuickCheck
     , aeson
