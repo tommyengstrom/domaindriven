@@ -45,7 +45,7 @@ migrate1toMany conn prevTName tName f = do
         . Stream.mapM (liftIO . writeIt)
         . Stream.unfoldMany Unfold.fromList
         $ fmap (f . fst)
-        $ mkEventStream 1 conn (mkEventQuery prevTName)
+        $ mkEventStream 50 conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =
@@ -75,7 +75,7 @@ migrate1toManyWithState conn prevTName tName f initialState = do
         . fmap snd
         $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
         $ fmap fst
-        $ mkEventStream 1 conn (mkEventQuery prevTName)
+        $ mkEventStream 50 conn (mkEventQuery prevTName)
   where
     writeIt :: Stored b -> IO Int64
     writeIt event =
