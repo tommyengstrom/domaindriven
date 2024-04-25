@@ -80,22 +80,7 @@ migrate1toMany'
     -> (Stored a -> [Stored b])
     -> IO ()
 migrate1toMany' chunkSize conn prevTName tName f = do
-    Stream.fold Fold.drain
-        . Stream.mapM (liftIO . writeIt)
-        . Stream.unfoldMany Unfold.fromList
-        $ fmap (f . fst)
-        $ mkEventStream chunkSize conn (mkEventQuery prevTName)
-  where
-    writeIt :: Stored b -> IO Int64
-    writeIt event =
-        PG.executeMany
-            conn
-            ( "insert into \""
-                <> fromString tName
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
-            )
-            (fmap (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) [event])
+    migrate1toManyWithState' chunkSize conn prevTName tName (\_ a -> ((), f a)) ()
 
 migrate1toManyWithState
     :: forall a b state
@@ -135,5 +120,12 @@ migrate1toManyWithState' chunkSize conn prevTName tName f initialState =
                 <> "\" (id, timestamp, event) \
                    \values (?, ?, ?)"
             )
-            ( (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x)) <$> events
+            ( fmap
+                ( \x ->
+                    ( storedUUID x
+                    , storedTimestamp x
+                    , encode $ storedEvent x
+                    )
+                )
+                events
             )
