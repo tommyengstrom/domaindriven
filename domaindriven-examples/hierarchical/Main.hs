@@ -147,5 +147,9 @@ main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running on port " <> show port
-    p <- createForgetful applyEvent (FullModel (NumberModel 0) (TextModel ""))
+    p <-
+        createForgetful
+            applyEvent
+            (FullModel (NumberModel 0) (TextModel ""))
+            (\_ _ -> pure ())
     run port (app p)

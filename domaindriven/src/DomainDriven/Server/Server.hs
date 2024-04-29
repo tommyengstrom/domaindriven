@@ -83,7 +83,7 @@ instance
                     mapServer
                         ( \(Cmd server) -> do
                             handlerRes <-
-                                liftIO . Control.Monad.Catch.try . transactionalUpdate p $
+                                liftIO . Control.Monad.Catch.try . runCmd p $
                                     either throwIO pure <=< runHandler . server
                             either throwError pure handlerRes
                         )
@@ -150,5 +150,5 @@ instance
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbCmd server) -> server $ transactionalUpdate p)
+                        (\(CbCmd server) -> server $ runCmd p)
                         delayedServer

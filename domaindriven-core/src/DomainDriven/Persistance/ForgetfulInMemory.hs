@@ -14,12 +14,14 @@ createForgetful
     => (model -> Stored event -> model)
     -> model
     -- ^ initial model
+    -> (model -> [Stored event] -> IO ())
+    -- ^ post update hook
     -> m (ForgetfulInMemory model event)
-createForgetful appEvent m0 = do
+createForgetful appEvent m0 hook = do
     state <- newIORef m0
     evs <- newIORef []
     lock <- newQSem 1
-    pure $ ForgetfulInMemory state appEvent m0 evs lock
+    pure $ ForgetfulInMemory state appEvent m0 evs lock hook
 
 -- | STM state without event persistance
 data ForgetfulInMemory model event = ForgetfulInMemory
@@ -28,6 +30,7 @@ data ForgetfulInMemory model event = ForgetfulInMemory
     , seed :: model
     , events :: IORef [Stored event]
     , lock :: QSem
+    , postUpdateHook' :: model -> [Stored event] -> IO ()
     }
     deriving (Generic)
 
@@ -45,6 +48,7 @@ instance ReadModel (ForgetfulInMemory model e) where
             Stream.fromList
 
 instance WriteModel (ForgetfulInMemory model e) where
+    postUpdateHook p model events = liftIO $ postUpdateHook' p model events
     transactionalUpdate ff evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
             model <- readIORef $ stateRef ff
@@ -53,4 +57,4 @@ instance WriteModel (ForgetfulInMemory model e) where
             let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff) (<> storedEvs)
             writeIORef (stateRef ff) newModel
-            pure $ returnFun newModel
+            pure (newModel, storedEvs, returnFun)

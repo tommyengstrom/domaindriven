@@ -25,7 +25,7 @@ import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
-import UnliftIO (MonadUnliftIO (..), async, concurrently)
+import UnliftIO (MonadUnliftIO (..), concurrently)
 import UnliftIO.Pool
     ( LocalPool
     , Pool
@@ -476,10 +476,10 @@ exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
-    postUpdateHook pg m e = (pg ^. field @"postUpdateHook'") m e
+    postUpdateHook pg m e = liftIO $ (pg ^. field @"postUpdateHook'") m e
 
-    transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
-        (model, events, returnFun) <- withIOTrans pg $ \pgt -> do
+    transactionalUpdate pg cmd = withRunInIO $ \runInIO ->
+        withIOTrans pg $ \pgt -> do
             let eventTable = pg ^. field @"eventTableName"
             exclusiveLock (pgt ^. field @"transaction") eventTable
             m <- getModel' pgt
@@ -500,5 +500,3 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
             pure $ (model newNumberedModel, storedEvs, returnFun)
-        _ <- async $ postUpdateHook pg model events
-        pure $ returnFun model

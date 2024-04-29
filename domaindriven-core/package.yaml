@@ -107,6 +107,7 @@ tests:
     - -Wall
     - -Wunused-packages
     dependencies:
+    - containers
     - domaindriven-core
     - hspec >=2.9 && <2.12
     - postgresql-simple >=0.6.4 && <0.8

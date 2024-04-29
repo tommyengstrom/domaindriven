@@ -199,7 +199,7 @@ postHookSpec processedEvents = describe "postUpdateHook" $ do
         events `shouldBe` Set.empty
 
     it "Post update hook is fired after events are written" $ \(p, _) -> do
-        i <- transactionalUpdate p $ \_ -> do
+        i <- runCmd p $ \_ -> do
             pure (id, [AddOne, AddOne, SubtractOne])
         i `shouldBe` 1
         threadDelay 100000 -- Ensure the hook has time to run
@@ -278,13 +278,13 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         let cmd :: Int -> IO (Int -> Int, [TestEvent])
             cmd _ = pure $ (id, [AddOne])
 
-        i <- replicateM 5 (transactionalUpdate m0 cmd)
+        i <- replicateM 5 (runCmd m0 cmd)
         length i `shouldBe` 5
         (result, _) <-
             concurrently
                 ( do
                     threadDelay 100000 -- sleep a bit and let the migration start
-                    try @IO @SqlError $ transactionalUpdate m0 cmd
+                    try @IO @SqlError $ runCmd m0 cmd
                 )
                 ( postgresWriteModel
                     pool

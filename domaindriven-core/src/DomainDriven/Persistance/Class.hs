@@ -28,12 +28,36 @@ class ReadModel p where
 type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
 
 class ReadModel p => WriteModel p where
-    postUpdateHook :: p -> Model p -> [Stored (Event p)] -> IO ()
+    -- | Hook to call after model has been updated.
+    -- This allows for setting up outgoing hooks in calling out to external systems.
+    -- This is run in asyncly after update is processed.
+    postUpdateHook :: MonadIO m => p -> Model p -> [Stored (Event p)] -> m ()
+
+    -- | How to perform a transactional update, returning what is required
+    -- for postUpdateHook and returning the result to the user
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
         => p
-        -> TransactionalUpdate (Model p) (Event p) m a
+        -> (Model p -> m (Model p -> a, [Event p]))
+        -> m
+            ( Model p
+            , -- \^ Updated model
+              [Stored (Event p)]
+            , -- \^ Stored events
+              (Model p -> a)
+            )
+        -- ^ How to create the return value from updated model
+
+runCmd
+    :: forall m a p
+     . (WriteModel p, MonadUnliftIO m)
+    => p
+    -> TransactionalUpdate (Model p) (Event p) m a
+runCmd p cmd = do
+    (model, events, returnFun) <- transactionalUpdate p cmd
+    _ <- async $ postUpdateHook p model events
+    pure $ returnFun model
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
