@@ -25,7 +25,7 @@ import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
-import UnliftIO (MonadUnliftIO (..), concurrently)
+import UnliftIO (MonadUnliftIO (..), async, concurrently)
 import UnliftIO.Pool
     ( LocalPool
     , Pool
@@ -47,6 +47,7 @@ data PostgresEvent model event = PostgresEvent
     , seed :: model
     , chunkSize :: ChunkSize
     -- ^ Number of events read from postgres per batch
+    , postUpdateHook' :: model -> [Stored event] -> IO ()
     }
     deriving (Generic)
 
@@ -143,14 +144,15 @@ simplePool getConn = do
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
-    :: (FromJSON e, WriteModel (PostgresEventTrans m e))
+    :: (FromJSON event, WriteModel (PostgresEventTrans model event))
     => Pool Connection
     -> EventTableName
-    -> (m -> Stored e -> m)
-    -> m
-    -> IO (PostgresEvent m e)
-postgresWriteModelNoMigration pool eventTable app' seed' = do
-    pg <- createPostgresPersistance pool eventTable app' seed'
+    -> (model -> Stored event -> model)
+    -> model
+    -> (model -> [Stored event] -> IO ())
+    -> IO (PostgresEvent model event)
+postgresWriteModelNoMigration pool eventTable app' seed' hook = do
+    pg <- createPostgresPersistance pool eventTable app' seed' hook
     withIOTrans pg createEventTable
     pure pg
 
@@ -158,11 +160,12 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 postgresWriteModel
     :: Pool Connection
     -> EventTable
-    -> (m -> Stored e -> m)
-    -> m
-    -> IO (PostgresEvent m e)
-postgresWriteModel pool eventTable app' seed' = do
-    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
+    -> (model -> Stored event -> model)
+    -> model
+    -> (model -> [Stored event] -> IO ())
+    -> IO (PostgresEvent model event)
+postgresWriteModel pool eventTable app' seed' hook = do
+    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed' hook
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
     pure pg
 
@@ -207,9 +210,13 @@ createPostgresPersistance
      . Pool Connection
     -> EventTableName
     -> (model -> Stored event -> model)
+    -- ^ Apply event
     -> model
+    -- ^ Initial model
+    -> (model -> [Stored event] -> IO ())
+    -- ^ Post update hook
     -> IO (PostgresEvent model event)
-createPostgresPersistance pool eventTable app' seed' = do
+createPostgresPersistance pool eventTable app' seed' hook = do
     ref <- newIORef $ NumberedModel seed' 0
     pure $
         PostgresEvent
@@ -219,6 +226,7 @@ createPostgresPersistance pool eventTable app' seed' = do
             , app = app'
             , seed = seed'
             , chunkSize = 50
+            , postUpdateHook' = hook
             }
 
 queryEvents
@@ -468,8 +476,10 @@ exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
+    postUpdateHook pg m e = (pg ^. field @"postUpdateHook'") m e
+
     transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
-        withIOTrans pg $ \pgt -> do
+        (model, events, returnFun) <- withIOTrans pg $ \pgt -> do
             let eventTable = pg ^. field @"eventTableName"
             exclusiveLock (pgt ^. field @"transaction") eventTable
             m <- getModel' pgt
@@ -489,4 +499,6 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                             storedEvs
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
-            pure $ returnFun (model newNumberedModel)
+            pure $ (model newNumberedModel, storedEvs, returnFun)
+        _ <- async $ postUpdateHook pg model events
+        pure $ returnFun model

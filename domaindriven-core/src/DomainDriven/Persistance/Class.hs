@@ -28,6 +28,7 @@ class ReadModel p where
 type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
 
 class ReadModel p => WriteModel p where
+    postUpdateHook :: p -> Model p -> [Stored (Event p)] -> IO ()
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
