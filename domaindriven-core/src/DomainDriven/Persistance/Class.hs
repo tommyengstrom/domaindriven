@@ -33,8 +33,8 @@ class ReadModel p => WriteModel p where
     -- This is run in asyncly after update is processed.
     postUpdateHook :: MonadIO m => p -> Model p -> [Stored (Event p)] -> m ()
 
-    -- | How to perform a transactional update, returning what is required
-    -- for postUpdateHook and returning the result to the user
+    -- | Update the model in a transaction. Note that this is never used directly;
+    -- runCmd calls transactionalUpdate and makes sure to call postUpdateHook afterwards.
     transactionalUpdate
         :: forall m a
          . MonadUnliftIO m
