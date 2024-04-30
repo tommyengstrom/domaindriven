@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-stack-${{ hashFiles('stack.yaml') }}
       - name: Build dependencies
         run: |
-            stack build domaindriven --only-dependencies --fast
+            stack build  --only-dependencies --fast
 
       - uses: actions/cache@v2
         name: Cache .stack-work
@@ -52,8 +52,8 @@ jobs:
           key: ${{ runner.os }}-stack-${{ hashFiles('services/claims/package.yaml') }}
       - name: Build domaindriven
         run: |
-            stack build domaindriven --fast
+            stack build --fast
       - name: Run tests
         run: |
-            stack test domaindriven --fast
+            stack test --fast
 
