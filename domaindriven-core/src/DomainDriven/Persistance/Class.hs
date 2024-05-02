@@ -25,7 +25,7 @@ class ReadModel p where
     getEventList :: p -> IO [Stored (Event p)]
     getEventStream :: p -> Stream IO (Stored (Event p))
 
-type TransactionalUpdate model event m a = (model -> m (model -> a, [event])) -> m a
+type RunCmd model event m a = (model -> m (model -> a, [event])) -> m a
 
 class ReadModel p => WriteModel p where
     -- | Hook to call after model has been updated.
@@ -53,7 +53,7 @@ runCmd
     :: forall m a p
      . (WriteModel p, MonadUnliftIO m)
     => p
-    -> TransactionalUpdate (Model p) (Event p) m a
+    -> RunCmd (Model p) (Event p) m a
 runCmd p cmd = do
     (model, events, returnFun) <- transactionalUpdate p cmd
     _ <- async $ postUpdateHook p model events
