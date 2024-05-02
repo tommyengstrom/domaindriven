@@ -144,7 +144,9 @@ test-suite domaindriven-core-test
     , base >=4.7 && <5
     , containers
     , domaindriven-core
+    , generic-lens >=2.2.1.0 && <2.3
     , hspec >=2.9 && <2.12
+    , microlens >=0.4.12.0 && <0.5
     , postgresql-simple >=0.6.4 && <0.8
     , streamly >=0.9 && <0.11
     , streamly-core ==0.2.*

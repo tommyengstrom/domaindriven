@@ -5,6 +5,7 @@ import Control.Exception (SomeException)
 import Control.Monad
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Foldable
+import Data.Generics.Product.Fields (field)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (fromString)
@@ -23,6 +24,7 @@ import DomainDriven.Persistance.Postgres.Internal
 import DomainDriven.Persistance.Postgres.Migration
 import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
+import Lens.Micro
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO (TVar, atomically, concurrently, modifyTVar, newTVarIO, readTVarIO, try)
@@ -84,7 +86,9 @@ setupPersistance postHook test = do
         setNumStripes (Just stripesAndResources)
             <$> mkDefaultPoolConfig (mkTestConn) close 1 stripesAndResources
     pool <- newPool poolCfg
-    p <- postgresWriteModel pool eventTable applyTestEvent 0 postHook
+    p <-
+        (set (field @"updateHook") postHook)
+            <$> postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
 
 mkTestConn :: IO Connection
@@ -193,7 +197,7 @@ queryEventsSpec = describe "queryEvents" $ do
 
 postHookSpec
     :: TVar (Set UUID) -> SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
-postHookSpec processedEvents = describe "postUpdateHook" $ do
+postHookSpec processedEvents = describe "updateHook" $ do
     it "Ensure we start with empty TVar" $ \_ -> do
         events <- readTVarIO processedEvents
         events `shouldBe` Set.empty
@@ -213,7 +217,7 @@ migrationSpec = describe "migrate1to1" $ do
             queryEvents @TestEvent conn (getEventTableName eventTable)
         evs `shouldSatisfy` (>= 1) . length
 
-        _ <- postgresWriteModel pool eventTable2 applyTestEvent 0 (\_ _ -> pure ())
+        _ <- postgresWriteModel pool eventTable2 applyTestEvent 0
         evs' <- withResource pool $ \conn ->
             queryEvents @TestEvent conn (getEventTableName eventTable2)
 
@@ -243,7 +247,7 @@ migrationSpec = describe "migrate1to1" $ do
         let eventTableBroken :: EventTable
             eventTableBroken = MigrateUsing (\_ _ _ -> error "ops") eventTable2
 
-        postgresWriteModel pool eventTableBroken applyTestEvent 0 (\_ _ -> pure ())
+        postgresWriteModel pool eventTableBroken applyTestEvent 0
             `shouldThrow` const @_ @SomeException True
         conn <- mkTestConn
 
@@ -291,7 +295,6 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
                     (MigrateUsing mig eventTable2)
                     applyTestEvent
                     0
-                    (\_ _ -> pure ())
                 )
         result `shouldSatisfy` \case
             Right _ -> False

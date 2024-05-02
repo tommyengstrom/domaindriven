@@ -91,5 +91,5 @@ main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running on port " <> show port
-    p <- createForgetful applyEvent (CounterModel 0) (\_ _ -> pure ())
+    p <- createForgetful applyEvent (CounterModel 0)
     run port (app p)

@@ -47,7 +47,7 @@ data PostgresEvent model event = PostgresEvent
     , seed :: model
     , chunkSize :: ChunkSize
     -- ^ Number of events read from postgres per batch
-    , postUpdateHook' :: model -> [Stored event] -> IO ()
+    , updateHook :: model -> [Stored event] -> IO ()
     }
     deriving (Generic)
 
@@ -149,10 +149,9 @@ postgresWriteModelNoMigration
     -> EventTableName
     -> (model -> Stored event -> model)
     -> model
-    -> (model -> [Stored event] -> IO ())
     -> IO (PostgresEvent model event)
-postgresWriteModelNoMigration pool eventTable app' seed' hook = do
-    pg <- createPostgresPersistance pool eventTable app' seed' hook
+postgresWriteModelNoMigration pool eventTable app' seed' = do
+    pg <- createPostgresPersistance pool eventTable app' seed'
     withIOTrans pg createEventTable
     pure pg
 
@@ -162,10 +161,9 @@ postgresWriteModel
     -> EventTable
     -> (model -> Stored event -> model)
     -> model
-    -> (model -> [Stored event] -> IO ())
     -> IO (PostgresEvent model event)
-postgresWriteModel pool eventTable app' seed' hook = do
-    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed' hook
+postgresWriteModel pool eventTable app' seed' = do
+    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
     pure pg
 
@@ -213,10 +211,8 @@ createPostgresPersistance
     -- ^ Apply event
     -> model
     -- ^ Initial model
-    -> (model -> [Stored event] -> IO ())
-    -- ^ Post update hook
     -> IO (PostgresEvent model event)
-createPostgresPersistance pool eventTable app' seed' hook = do
+createPostgresPersistance pool eventTable app' seed' = do
     ref <- newIORef $ NumberedModel seed' 0
     pure $
         PostgresEvent
@@ -226,7 +222,7 @@ createPostgresPersistance pool eventTable app' seed' hook = do
             , app = app'
             , seed = seed'
             , chunkSize = 50
-            , postUpdateHook' = hook
+            , updateHook = \_ _ -> pure ()
             }
 
 queryEvents
@@ -476,7 +472,7 @@ exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
-    postUpdateHook pg m e = liftIO $ (pg ^. field @"postUpdateHook'") m e
+    postUpdateHook pg m e = liftIO $ (pg ^. field @"updateHook") m e
 
     transactionalUpdate pg cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> do

@@ -88,23 +88,23 @@ ghc-options:
 library:
   source-dirs: src
   dependencies:
-    - random
-    - http-types
-    - bytestring
-    - template-haskell
-    - transformers
-    - unordered-containers
-    - vector
-    - unliftio
-    - streamly
-    - postgresql-simple
     - async
+    - bytestring
     - generic-lens
+    - http-types
     - microlens
-    - time
-    - unliftio-pool
-    - uuid
     - mtl
+    - postgresql-simple
+    - random
+    - streamly
+    - template-haskell
+    - time
+    - transformers
+    - unliftio
+    - unliftio-pool
+    - unordered-containers
+    - uuid
+    - vector
 
 tests:
   domaindriven-test:
@@ -118,13 +118,13 @@ tests:
     - -Wall
     - -Wunused-packages
     dependencies:
+    - async
     - domaindriven
     - hspec
+    - http-client
+    - mtl
     - QuickCheck
     - quickcheck-arbitrary-adt
     - quickcheck-classes
-    - warp
     - servant-client
-    - async
-    - mtl
-    - http-client
+    - warp
