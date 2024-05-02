@@ -7,6 +7,7 @@ import DomainDriven.Persistance.Class as X
     , Stored (..)
     , WriteModel (..)
     , mkId
+    , runCmd
     )
 import DomainDriven.Server.Api as X
     ( CbCmd
