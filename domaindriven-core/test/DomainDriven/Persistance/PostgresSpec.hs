@@ -57,11 +57,14 @@ spec = do
             -> TestModel
             -> [Stored TestEvent]
             -> IO ()
-        postHook _ _ evs =
+        postHook p m evs = do
             atomically $
                 modifyTVar processedEvents (<> Set.fromList (fmap storedUUID evs))
+            if m < 0
+                then void $ runCmd p $ \_ -> pure (id, [Reset])
+                else pure ()
+     in around (setupPersistance postHook) (postHookSpec processedEvents)
 
-    aroundAll (setupPersistance postHook) (postHookSpec processedEvents)
     around (setupPersistance noHook) migrationConcurrencySpec
 
 type TestModel = Int
@@ -69,12 +72,14 @@ type TestModel = Int
 data TestEvent
     = AddOne
     | SubtractOne
+    | Reset
     deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 applyTestEvent :: TestModel -> Stored TestEvent -> TestModel
 applyTestEvent m ev = case storedEvent ev of
     AddOne -> m + 1
     SubtractOne -> m - 1
+    Reset -> 0
 
 noHook :: PostgresEvent TestModel TestEvent -> TestModel -> [Stored TestEvent] -> IO ()
 noHook _ _ _ = pure ()
@@ -213,6 +218,15 @@ postHookSpec processedEvents = describe "updateHook" $ do
         threadDelay 100000 -- Ensure the hook has time to run
         events <- readTVarIO processedEvents
         Set.size events `shouldBe` 3
+
+    it "Hook that resets on negative works" $ \(p, _) -> do
+        -- the hook will check if the model is negative and reset it if so
+        m <- runCmd p $ \_ -> do
+            pure (id, [SubtractOne, SubtractOne, SubtractOne])
+        m `shouldBe` (-3)
+        threadDelay 100000 -- Ensure the hook has time to run
+        m' <- getModel p
+        m' `shouldBe` 0
 
 migrationSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
