@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -31,7 +32,12 @@ class ReadModel p => WriteModel p where
     -- | Hook to call after model has been updated.
     -- This allows for setting up outgoing hooks in calling out to external systems.
     -- This is run in asyncly after update is processed.
-    postUpdateHook :: MonadIO m => p -> Model p -> [Stored (Event p)] -> m ()
+    postUpdateHook
+        :: MonadIO m
+        => p
+        -> Model p
+        -> [Stored (Event p)]
+        -> m ()
 
     -- | Update the model in a transaction. Note that this is never used directly;
     -- runCmd calls transactionalUpdate and makes sure to call postUpdateHook afterwards.
@@ -50,7 +56,7 @@ class ReadModel p => WriteModel p where
         -- ^ How to create the return value from updated model
 
 runCmd
-    :: forall m a p
+    :: forall p m a
      . (WriteModel p, MonadUnliftIO m)
     => p
     -> RunCmd (Model p) (Event p) m a

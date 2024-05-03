@@ -47,7 +47,7 @@ data PostgresEvent model event = PostgresEvent
     , seed :: model
     , chunkSize :: ChunkSize
     -- ^ Number of events read from postgres per batch
-    , updateHook :: model -> [Stored event] -> IO ()
+    , updateHook :: PostgresEvent model event -> model -> [Stored event] -> IO ()
     }
     deriving (Generic)
 
@@ -222,7 +222,7 @@ createPostgresPersistance pool eventTable app' seed' = do
             , app = app'
             , seed = seed'
             , chunkSize = 50
-            , updateHook = \_ _ -> pure ()
+            , updateHook = \_ _ _ -> pure ()
             }
 
 queryEvents
@@ -472,7 +472,7 @@ exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
-    postUpdateHook pg m e = liftIO $ (pg ^. field @"updateHook") m e
+    postUpdateHook pg m e = liftIO $ (pg ^. field @"updateHook") pg m e
 
     transactionalUpdate pg cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> do

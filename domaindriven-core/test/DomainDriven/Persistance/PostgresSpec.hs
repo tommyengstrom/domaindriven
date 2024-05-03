@@ -52,8 +52,12 @@ spec = do
         queryEventsSpec
         migrationSpec -- make sure migrationSpec is run last!
     processedEvents <- runIO $ newTVarIO (Set.empty :: Set UUID)
-    let postHook :: TestModel -> [Stored TestEvent] -> IO ()
-        postHook _ evs =
+    let postHook
+            :: PostgresEvent TestModel TestEvent
+            -> TestModel
+            -> [Stored TestEvent]
+            -> IO ()
+        postHook _ _ evs =
             atomically $
                 modifyTVar processedEvents (<> Set.fromList (fmap storedUUID evs))
 
@@ -72,11 +76,11 @@ applyTestEvent m ev = case storedEvent ev of
     AddOne -> m + 1
     SubtractOne -> m - 1
 
-noHook :: TestModel -> [Stored TestEvent] -> IO ()
-noHook _ _ = pure ()
+noHook :: PostgresEvent TestModel TestEvent -> TestModel -> [Stored TestEvent] -> IO ()
+noHook _ _ _ = pure ()
 
 setupPersistance
-    :: (TestModel -> [Stored TestEvent] -> IO ())
+    :: (PostgresEvent TestModel TestEvent -> TestModel -> [Stored TestEvent] -> IO ())
     -> ((PostgresEvent TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistance postHook test = do
