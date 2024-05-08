@@ -47,6 +47,7 @@ data PostgresEvent model event = PostgresEvent
     , seed :: model
     , chunkSize :: ChunkSize
     -- ^ Number of events read from postgres per batch
+    , updateHook :: PostgresEvent model event -> model -> [Stored event] -> IO ()
     }
     deriving (Generic)
 
@@ -143,12 +144,12 @@ simplePool getConn = do
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
-    :: (FromJSON e, WriteModel (PostgresEventTrans m e))
+    :: (FromJSON event, WriteModel (PostgresEventTrans model event))
     => Pool Connection
     -> EventTableName
-    -> (m -> Stored e -> m)
-    -> m
-    -> IO (PostgresEvent m e)
+    -> (model -> Stored event -> model)
+    -> model
+    -> IO (PostgresEvent model event)
 postgresWriteModelNoMigration pool eventTable app' seed' = do
     pg <- createPostgresPersistance pool eventTable app' seed'
     withIOTrans pg createEventTable
@@ -158,9 +159,9 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 postgresWriteModel
     :: Pool Connection
     -> EventTable
-    -> (m -> Stored e -> m)
-    -> m
-    -> IO (PostgresEvent m e)
+    -> (model -> Stored event -> model)
+    -> model
+    -> IO (PostgresEvent model event)
 postgresWriteModel pool eventTable app' seed' = do
     pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
@@ -207,7 +208,9 @@ createPostgresPersistance
      . Pool Connection
     -> EventTableName
     -> (model -> Stored event -> model)
+    -- ^ Apply event
     -> model
+    -- ^ Initial model
     -> IO (PostgresEvent model event)
 createPostgresPersistance pool eventTable app' seed' = do
     ref <- newIORef $ NumberedModel seed' 0
@@ -219,6 +222,7 @@ createPostgresPersistance pool eventTable app' seed' = do
             , app = app'
             , seed = seed'
             , chunkSize = 50
+            , updateHook = \_ _ _ -> pure ()
             }
 
 queryEvents
@@ -468,7 +472,9 @@ exclusiveLock (OngoingTransaction conn _) etName =
     void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
-    transactionalUpdate pg cmd = withRunInIO $ \runInIO -> do
+    postUpdateHook pg m e = liftIO $ (pg ^. field @"updateHook") pg m e
+
+    transactionalUpdate pg cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> do
             let eventTable = pg ^. field @"eventTableName"
             exclusiveLock (pgt ^. field @"transaction") eventTable
@@ -489,4 +495,4 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                             storedEvs
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
-            pure $ returnFun (model newNumberedModel)
+            pure $ (model newNumberedModel, storedEvs, returnFun)

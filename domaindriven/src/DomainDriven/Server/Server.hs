@@ -27,7 +27,7 @@ newtype CbQueryServer (model :: Type) m a
     = CbQuery ((forall n. MonadIO n => n model) -> m a)
 
 newtype CbCmdServer (model :: Type) (event :: Type) m a
-    = CbCmd ((forall n b. MonadUnliftIO n => TransactionalUpdate model event n b) -> m a)
+    = CbCmd ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
     throwAll = Cmd . throwAll
@@ -83,7 +83,7 @@ instance
                     mapServer
                         ( \(Cmd server) -> do
                             handlerRes <-
-                                liftIO . Control.Monad.Catch.try . transactionalUpdate p $
+                                liftIO . Control.Monad.Catch.try . runCmd p $
                                     either throwIO pure <=< runHandler . server
                             either throwError pure handlerRes
                         )
@@ -150,5 +150,5 @@ instance
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbCmd server) -> server $ transactionalUpdate p)
+                        (\(CbCmd server) -> server $ runCmd p)
                         delayedServer
