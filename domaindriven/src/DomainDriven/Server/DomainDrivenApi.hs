@@ -30,6 +30,7 @@ import Servant.OpenApi
 import Servant.Server.Generic
 import Servant.Server.Internal.Delayed
 import Servant.Server.Internal.Router
+import Servant.Links
 import Prelude
 
 type Api = Type
@@ -319,3 +320,19 @@ instance
                 @(GenericRecordFieldInfos (mkApiRecord model event AsApi))
                 nt
             . recordOfClientsToFields
+-- instance
+--   ( HasLink (ToServantApi routes)
+--   , forall a. GLink routes a
+--   , ErrorIfNoGeneric routes
+--   ) => HasLink (NamedRoutes routes) where
+--
+--   type MkLink (NamedRoutes routes) a = routes (AsLink a)
+--
+--   toLink
+--     :: forall a. (Link -> a)
+--     -> Proxy (NamedRoutes routes)
+--     -> Link
+--     -> routes (AsLink a)
+--
+--   toLink toA _ l = case gLinkProof @routes @a of
+--     Dict -> fromServant $ toLink toA (Proxy @(ToServantApi routes)) l

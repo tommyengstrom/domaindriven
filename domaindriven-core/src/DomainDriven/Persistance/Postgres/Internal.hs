@@ -280,6 +280,7 @@ headMay = \case
     a : _ -> Just a
     [] -> Nothing
 
+headMa
 queryHasEventsAfter :: Connection -> EventTableName -> EventNumber -> IO Bool
 queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
     maybe True fromOnly . headMay <$> query_ conn q
@@ -418,13 +419,12 @@ mkEventStream chunkSize conn q = do
 
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
-        (Cursor.closeCursor)
-        ( \cursor ->
-            Stream.mapM fromEventRow $
-                Stream.unfoldMany Unfold.fromList . fmap toList $
-                    Stream.unfoldrM
-                        step
-                        cursor
+        Cursor.closeCursor
+        ( Stream.mapM fromEventRow
+            . Stream.unfoldMany Unfold.fromList
+            . fmap toList
+            . Stream.unfoldrM
+                step
         )
 
 getModel' :: forall e m. FromJSON e => PostgresEventTrans m e -> IO m
@@ -495,4 +495,4 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                             storedEvs
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
-            pure $ (model newNumberedModel, storedEvs, returnFun)
+            pure (model newNumberedModel, storedEvs, returnFun)

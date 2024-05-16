@@ -51,7 +51,7 @@ class ReadModel p => WriteModel p where
             , -- \^ Updated model
               [Stored (Event p)]
             , -- \^ Stored events
-              (Model p -> a)
+              Model p -> a
             )
         -- ^ How to create the return value from updated model
 

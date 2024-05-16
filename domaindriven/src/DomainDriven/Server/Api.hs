@@ -20,6 +20,7 @@ import Optics
 import Servant.API (JSON, StdMethod (GET, POST), Verb)
 import Servant.Client.Core
 import Servant.OpenApi
+import Servant.Links
 import Prelude
 
 type Cmd model event a = Cmd' model event (Verb 'POST 200 '[JSON] a)
@@ -171,3 +172,21 @@ instance
     type Client m (CbQuery' model (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
+
+instance HasLink (Cmd' model event verb) where
+    type MkLink (Cmd' model event verb) r = r
+    toLink toA _ = toA
+
+instance HasLink (CbCmd' model event verb) where
+    type MkLink (CbCmd' model event verb) r = r
+    toLink toA _ = toA
+
+instance HasLink (Query' model verb) where
+    type MkLink (Query' model verb) r = r
+    toLink toA _ = toA
+
+instance HasLink (CbQuery' model verb) where
+    type MkLink (CbQuery' model verb) r = r
+    toLink toA _ = toA
+
+
