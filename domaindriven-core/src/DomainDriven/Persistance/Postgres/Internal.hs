@@ -237,7 +237,11 @@ createPostgresPersistance pool eventTable app' seed' = do
             , seed = seed'
             , chunkSize = 50
             , updateHook = \_ _ _ -> pure ()
-            , logger = putStrLn . ("[Info] " <>) . show
+            , logger = \case
+                e@(DbTransactionDuration dt) -> when (dt > 1) $ putStrLn $ "[DomainDriven] " <> show e
+                e@(EventTableLockDuration dt) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                EventTableMigrationDuration etName dt -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
+                e@(WaitForConnectionDuration dt) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
             }
 
 queryEvents
