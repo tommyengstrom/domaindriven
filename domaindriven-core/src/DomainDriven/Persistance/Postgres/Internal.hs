@@ -383,10 +383,12 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
             giveBackConn = do
                 PG.rollback conn
                 putResource localPool conn
-        giveBackConn `catchAll` \_ ->
+                t1 <- getCurrentTime
+                pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
+        giveBackConn `catchAll` \_ -> do
+            t1 <- getCurrentTime
+            pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
             destroyResource (connectionPool pg) localPool conn
-        t1 <- getCurrentTime
-        pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
 
 
 withIOTrans
@@ -405,11 +407,6 @@ withIOTrans pg f = do
     bracket (prepareTransaction conn localPool) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
         writeIORef transactionCompleted True
-        t1 <- getCurrentTime
-        let difftime = diffUTCTime
-                t1
-                (pgt ^. field @"transaction" . field @"transactionStartTime")
-        pgt ^. field' @"logger" $ DbTransactionDuration difftime
         pure a
   where
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
@@ -422,10 +419,12 @@ withIOTrans pg f = do
                     True -> PG.commit conn
                     False -> PG.rollback conn
                 putResource localPool conn
-        giveBackConn `catchAll` \_ ->
+                t1 <- getCurrentTime
+                pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
+        giveBackConn `catchAll` \_ -> do
+            t1 <- getCurrentTime
+            pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
             destroyResource (connectionPool pg) localPool conn
-        t1 <- getCurrentTime
-        pgt ^. field' @"logger" $ DbTransactionDuration (diffUTCTime t1 t0)
 
     prepareTransaction
         :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
