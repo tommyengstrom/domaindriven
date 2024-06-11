@@ -53,6 +53,7 @@ data NumberedEvent e = NumberedEvent
 data OngoingTransaction = OngoingTransaction
     { connection :: Connection
     , localPool :: LocalPool Connection
+    , transactionStartTime :: UTCTime
     }
     deriving (Generic)
 
