@@ -94,7 +94,7 @@ class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo 
 
 instance
     {-# OVERLAPPABLE #-}
-    (serverFrom ~ serverTo)
+    serverFrom ~ serverTo
     => MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo
     where
     mapModelAndEvent' _ _ = id
@@ -115,8 +115,8 @@ instance
         (CbCmdServer modelFrom' eventFrom' mFrom aFrom)
         (CbCmdServer modelTo' eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (CbCmd server) =
-        CbCmd $ \transact ->
+    mapModelAndEvent' proj inj (CbCmd theCallStack server) =
+        CbCmd theCallStack $ \transact ->
             server
                 ( \action -> transact $
                     \model -> ((. proj) *** map inj) <$> action (proj model)
@@ -139,8 +139,8 @@ instance
         (CmdServer modelFrom' eventFrom' mFrom aFrom)
         (CmdServer modelTo' eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (Cmd server) =
-        Cmd $ \model -> ((. proj) *** map inj) <$> server (proj model)
+    mapModelAndEvent' proj inj (Cmd theCallStack server) =
+        Cmd theCallStack $ \model -> ((. proj) *** map inj) <$> server (proj model)
 
 instance
     ( modelFrom ~ modelFrom'
@@ -156,7 +156,7 @@ instance
         (QueryServer modelFrom' mFrom aFrom)
         (QueryServer modelTo' mTo aTo)
     where
-    mapModelAndEvent' proj _ (Query server) = Query $ server . proj
+    mapModelAndEvent' proj _ (Query theCallStack server) = Query theCallStack $ server . proj
 
 instance
     ( modelFrom ~ modelFrom'
@@ -172,11 +172,17 @@ instance
         (CbQueryServer modelFrom' mFrom aFrom)
         (CbQueryServer modelTo' mTo aTo)
     where
-    mapModelAndEvent' proj _ (CbQuery server) = CbQuery $ \model -> server (proj <$> model)
+    mapModelAndEvent' proj _ (CbQuery theCallStack server) = CbQuery theCallStack $ \model -> server (proj <$> model)
 
 instance
     (aFrom ~ aTo, MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo)
-    => MapModelAndEvent' modelFrom modelTo eventFrom eventTo (aFrom -> serverFrom) (aTo -> serverTo)
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (aFrom -> serverFrom)
+        (aTo -> serverTo)
     where
     mapModelAndEvent' proj inj server a = mapModelAndEvent' proj inj (server a)
 

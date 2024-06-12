@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 -- needed for context entry. todo: non-type-driven context lookup!
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -11,6 +12,7 @@ import Control.Monad.Except
 import Data.Kind
 import DomainDriven.Persistance.Class
 import DomainDriven.Server.Api
+import GHC.Stack
 import GHC.TypeLits
 import Servant hiding (inject)
 import Servant.Auth.Server
@@ -18,28 +20,44 @@ import Servant.Server.Internal.Delayed
 import UnliftIO hiding (Handler)
 import Prelude
 
-newtype CmdServer (model :: Type) (event :: Type) m a
-    = Cmd (model -> m (model -> a, [event]))
+data CmdServer (model :: Type) (event :: Type) m a
+    = Cmd CallStack (model -> m (model -> a, [event]))
 
-newtype QueryServer (model :: Type) m a = Query (model -> m a)
+mkCmd :: HasCallStack => (model -> m (model -> a, [event])) -> CmdServer model event m a
+mkCmd = Cmd callStack
 
-newtype CbQueryServer (model :: Type) m a
-    = CbQuery ((forall n. MonadIO n => n model) -> m a)
+data QueryServer (model :: Type) m a = Query CallStack (model -> m a)
 
-newtype CbCmdServer (model :: Type) (event :: Type) m a
-    = CbCmd ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+mkQuery :: HasCallStack => (model -> m a) -> QueryServer model m a
+mkQuery = Query callStack
+
+data CbQueryServer (model :: Type) m a
+    = CbQuery CallStack ((forall n. MonadIO n => n model) -> m a)
+
+mkCbQuery
+    :: HasCallStack => ((forall n. MonadIO n => n model) -> m a) -> CbQueryServer model m a
+mkCbQuery = CbQuery callStack
+
+data CbCmdServer (model :: Type) (event :: Type) m a
+    = CbCmd CallStack ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+
+mkCbCmdServer
+    :: HasCallStack
+    => ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+    -> CbCmdServer model event m a
+mkCbCmdServer = CbCmd callStack
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
-    throwAll = Cmd . throwAll
+    throwAll = Cmd callStack . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbCmdServer model event m a) where
-    throwAll err = CbCmd $ \_ -> throwAll err
+    throwAll err = CbCmd callStack $ \_ -> throwAll err
 
 instance MonadError ServerError m => ThrowAll (QueryServer model m a) where
-    throwAll = Query . throwAll
+    throwAll = Query callStack . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbQueryServer model m a) where
-    throwAll err = CbQuery $ \_ -> throwAll err
+    throwAll err = CbQuery callStack $ \_ -> throwAll err
 
 type family CanMutate (method :: StdMethod) :: Bool where
     CanMutate 'GET = 'False
@@ -74,14 +92,15 @@ instance
     type
         ServerT (Cmd' model event (Verb method status ctypes a)) m =
             CmdServer model event m a
-    hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
+    hoistServerWithContext _ _ f (Cmd theCallStack action) = Cmd theCallStack $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: WritePersistence model event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(Cmd server) -> do
+                        ( \(Cmd theCallStack server) -> do
+                            let ?callStack = theCallStack
                             handlerRes <-
                                 liftIO . Control.Monad.Catch.try . runCmd p $
                                     either throwIO pure <=< runHandler . server
@@ -97,14 +116,17 @@ instance
     where
     type ServerT (Query' model (Verb method status ctypes a)) m = QueryServer model m a
 
-    hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
+    hoistServerWithContext _ _ f (Query theCallStack action) = Query theCallStack $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: ReadPersistence model of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(Query server) -> server =<< liftIO (getModel p))
+                        ( \(Query theCallStack server) ->
+                            let ?callStack = theCallStack
+                             in server =<< liftIO (getModel p)
+                        )
                         delayedServer
 
 instance
@@ -117,14 +139,17 @@ instance
         ServerT (CbQuery' model (Verb method status ctypes a)) m =
             CbQueryServer model m a
 
-    hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \model -> f (action model)
+    hoistServerWithContext _ _ f (CbQuery theCallStack action) = CbQuery theCallStack $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: ReadPersistence model of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbQuery server) -> server $ liftIO $ getModel p)
+                        ( \(CbQuery theCallStack server) ->
+                            let ?callStack = theCallStack
+                             in server $ liftIO $ getModel p
+                        )
                         delayedServer
 
 instance
@@ -142,13 +167,16 @@ instance
                 m
                 a
 
-    hoistServerWithContext _ _ f (CbCmd action) =
-        CbCmd $ \transact -> f (action transact)
+    hoistServerWithContext _ _ f (CbCmd theCallStack action) =
+        CbCmd theCallStack $ \transact -> f (action transact)
 
     route _ context delayedServer =
         case getContextEntry context :: WritePersistence model event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbCmd server) -> server $ runCmd p)
+                        ( \(CbCmd theCallStack server) ->
+                            let ?callStack = theCallStack
+                             in server $ runCmd p
+                        )
                         delayedServer
