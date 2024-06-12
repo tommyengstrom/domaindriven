@@ -11,7 +11,7 @@ import Database.PostgreSQL.Simple qualified as PG
 import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
-import UnliftIO.Pool (LocalPool)
+import Data.Pool.Introspection as Pool
 import Prelude
 
 data PersistanceError
@@ -51,8 +51,8 @@ data NumberedEvent e = NumberedEvent
     deriving (Show, Generic)
 
 data OngoingTransaction = OngoingTransaction
-    { connection :: Connection
-    , localPool :: LocalPool Connection
+    { connectionResource :: Pool.Resource Connection
+    , localPool :: Pool.LocalPool Connection
     , transactionStartTime :: UTCTime
     }
     deriving (Generic)

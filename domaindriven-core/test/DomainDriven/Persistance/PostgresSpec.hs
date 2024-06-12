@@ -5,7 +5,6 @@ import Control.Exception (SomeException)
 import Control.Monad
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Foldable
-import Data.Generics.Product.Fields (field)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (fromString)
@@ -24,7 +23,6 @@ import DomainDriven.Persistance.Postgres.Internal
 import DomainDriven.Persistance.Postgres.Migration
 import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
-import Lens.Micro
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO (TVar, atomically, concurrently, modifyTVar, newTVarIO, readTVarIO, try)
@@ -95,10 +93,12 @@ setupPersistance postHook test = do
         setNumStripes (Just stripesAndResources)
             <$> mkDefaultPoolConfig (mkTestConn) close 1 stripesAndResources
     pool <- newPool poolCfg
-    p <-
-        (set (field @"updateHook") postHook)
-            <$> postgresWriteModel pool eventTable applyTestEvent 0
-    test (p{chunkSize = 2}, pool)
+    p <- postgresWriteModel pool eventTable applyTestEvent 0
+    test (p{chunkSize = 2
+                ,  logger = putStrLn . ("[DomainDriven] " <>) . show
+                , updateHook = postHook
+            }
+            , pool)
 
 mkTestConn :: IO Connection
 mkTestConn =

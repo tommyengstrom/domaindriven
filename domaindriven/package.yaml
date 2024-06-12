@@ -101,7 +101,7 @@ library:
     - time
     - transformers
     - unliftio
-    - unliftio-pool
+    - resource-pool
     - unordered-containers
     - uuid
     - vector
