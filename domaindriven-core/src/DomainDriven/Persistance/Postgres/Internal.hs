@@ -9,6 +9,7 @@ import Data.Foldable
 import Data.Generics.Product
 import Data.IORef
 import Data.Int
+import Data.List (intercalate)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -32,11 +33,16 @@ import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
 data LogEntry
-    = DbTransactionDuration CallStack NominalDiffTime
-    | EventTableLockDuration CallStack NominalDiffTime
+    = DbTransactionDuration PrettyCallStack NominalDiffTime
+    | EventTableLockDuration PrettyCallStack NominalDiffTime
     | EventTableMigrationDuration EventTableName NominalDiffTime
-    | WaitForConnectionDuration CallStack NominalDiffTime
+    | WaitForConnectionDuration PrettyCallStack NominalDiffTime
     deriving (Show, Generic)
+
+newtype PrettyCallStack = PrettyCallStack CallStack
+
+instance Show PrettyCallStack where
+    show (PrettyCallStack c) = unwords . lines $ prettyCallStack c
 
 data PostgresEvent model event = PostgresEvent
     { connectionPool :: Pool Connection
@@ -147,7 +153,8 @@ simplePool getConn = do
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
-    :: (FromJSON event, WriteModel (PostgresEventTrans model event))
+    :: HasCallStack
+    => (FromJSON event, WriteModel (PostgresEventTrans model event))
     => Pool Connection
     -> EventTableName
     -> (model -> Stored event -> model)
@@ -160,7 +167,8 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModel
-    :: Pool Connection
+    :: HasCallStack
+    => Pool Connection
     -> EventTable
     -> (model -> Stored event -> model)
     -> model
@@ -374,10 +382,12 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
                 PG.rollback conn
                 putResource localPool conn
                 t1 <- getCurrentTime
-                pgt ^. field' @"logger" $ DbTransactionDuration callStack (diffUTCTime t1 t0)
+                pgt ^. field' @"logger" $
+                    DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
-            pgt ^. field' @"logger" $ DbTransactionDuration callStack (diffUTCTime t1 t0)
+            pgt ^. field' @"logger" $
+                DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
             destroyResource (connectionPool pg) localPool conn
 
 withIOTrans
@@ -392,7 +402,8 @@ withIOTrans pg f = do
         t0 <- getCurrentTime
         r <- takeResource (connectionPool pg)
         t1 <- getCurrentTime
-        pg ^. field @"logger" $ WaitForConnectionDuration callStack (diffUTCTime t1 t0)
+        pg ^. field @"logger" $
+            WaitForConnectionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
         pure r
     bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
@@ -411,10 +422,12 @@ withIOTrans pg f = do
                     False -> PG.rollback conn
                 Pool.putResource localPool conn
                 t1 <- getCurrentTime
-                pgt ^. field' @"logger" $ DbTransactionDuration callStack (diffUTCTime t1 t0)
+                pgt ^. field' @"logger" $
+                    DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
-            pgt ^. field' @"logger" $ DbTransactionDuration callStack (diffUTCTime t1 t0)
+            pgt ^. field' @"logger" $
+                DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
             destroyResource (connectionPool pg) localPool conn
 
     prepareTransaction
@@ -511,7 +524,8 @@ withExclusiveLock pgt a = do
     exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName")
     r <- a
     t1 <- getCurrentTime
-    pgt ^. field' @"logger" $ EventTableLockDuration callStack (diffUTCTime t1 t0)
+    pgt ^. field' @"logger" $
+        EventTableLockDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
     pure r
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where

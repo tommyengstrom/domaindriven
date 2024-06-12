@@ -2,23 +2,7 @@ module Main where
 
 import Data.Aeson
 import Data.Generics.Labels ()
-import DomainDriven
-    ( ApiTagFromLabel (..)
-    , Cmd
-    , CmdServer (..)
-    , DomainDrivenApi
-    , DomainDrivenServer (..)
-    , Event
-    , Model
-    , Query
-    , QueryServer (..)
-    , ReadPersistence (..)
-    , Stored (..)
-    , WriteModel
-    , WritePersistence (..)
-    , mapEvent
-    , mapModel
-    )
+import DomainDriven hiding (applyEvent)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 
 import GHC.Generics (Generic)
@@ -102,15 +86,15 @@ data FullApi model event mode = FullApi
 numberServer :: Monad m => NumberApi NumberModel NumberEvent (AsServerT m)
 numberServer =
     NumberApi
-        { set = \i -> Cmd $ \_ -> pure (getNumber, [SetNumber i])
-        , get = Query (pure . getNumber)
+        { set = \i -> mkCmd $ \_ -> pure (getNumber, [SetNumber i])
+        , get = mkQuery (pure . getNumber)
         }
 
 textServer :: Monad m => TextApi TextModel TextEvent (AsServerT m)
 textServer =
     TextApi
-        { set = \t -> Cmd $ \_ -> pure (getText, [SetText t])
-        , get = Query (pure . getText)
+        { set = \t -> mkCmd $ \_ -> pure (getText, [SetText t])
+        , get = mkQuery (pure . getText)
         }
 
 fullServer :: Monad m => FullApi FullModel FullEvent (AsServerT m)

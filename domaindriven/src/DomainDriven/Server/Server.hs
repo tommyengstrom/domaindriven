@@ -31,33 +31,32 @@ data QueryServer (model :: Type) m a = Query CallStack (model -> m a)
 mkQuery :: HasCallStack => (model -> m a) -> QueryServer model m a
 mkQuery = Query callStack
 
-data CbQueryServer (model :: Type) m a
-    = CbQuery CallStack ((forall n. MonadIO n => n model) -> m a)
+newtype CbQueryServer (model :: Type) m a
+    = CbQuery ((forall n. (HasCallStack, MonadIO n) => n model) -> m a)
 
 mkCbQuery
-    :: HasCallStack => ((forall n. MonadIO n => n model) -> m a) -> CbQueryServer model m a
-mkCbQuery = CbQuery callStack
+    :: ((forall n. (HasCallStack, MonadIO n) => n model) -> m a) -> CbQueryServer model m a
+mkCbQuery = CbQuery
 
-data CbCmdServer (model :: Type) (event :: Type) m a
-    = CbCmd CallStack ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+newtype CbCmdServer (model :: Type) (event :: Type) m a
+    = CbCmd ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a)
 
 mkCbCmdServer
-    :: HasCallStack
-    => ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+    :: ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a)
     -> CbCmdServer model event m a
-mkCbCmdServer = CbCmd callStack
+mkCbCmdServer = CbCmd
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
     throwAll = Cmd callStack . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbCmdServer model event m a) where
-    throwAll err = CbCmd callStack $ \_ -> throwAll err
+    throwAll err = CbCmd $ \_ -> throwAll err
 
 instance MonadError ServerError m => ThrowAll (QueryServer model m a) where
     throwAll = Query callStack . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbQueryServer model m a) where
-    throwAll err = CbQuery callStack $ \_ -> throwAll err
+    throwAll err = CbQuery $ \_ -> throwAll err
 
 type family CanMutate (method :: StdMethod) :: Bool where
     CanMutate 'GET = 'False
@@ -139,16 +138,14 @@ instance
         ServerT (CbQuery' model (Verb method status ctypes a)) m =
             CbQueryServer model m a
 
-    hoistServerWithContext _ _ f (CbQuery theCallStack action) = CbQuery theCallStack $ \model -> f (action model)
+    hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: ReadPersistence model of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbQuery theCallStack server) ->
-                            let ?callStack = theCallStack
-                             in server $ liftIO $ getModel p
+                        ( \(CbQuery server) -> server (liftIO $ getModel p)
                         )
                         delayedServer
 
@@ -167,16 +164,14 @@ instance
                 m
                 a
 
-    hoistServerWithContext _ _ f (CbCmd theCallStack action) =
-        CbCmd theCallStack $ \transact -> f (action transact)
+    hoistServerWithContext _ _ f (CbCmd action) =
+        CbCmd $ \transact -> f (action transact)
 
     route _ context delayedServer =
         case getContextEntry context :: WritePersistence model event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbCmd theCallStack server) ->
-                            let ?callStack = theCallStack
-                             in server $ runCmd p
+                        ( \(CbCmd server) -> server $ runCmd p
                         )
                         delayedServer

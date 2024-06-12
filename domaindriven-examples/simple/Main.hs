@@ -1,21 +1,7 @@
 module Main where
 
 import Data.Aeson
-import DomainDriven
-    ( ApiTagFromLabel (..)
-    , Cmd
-    , CmdServer (..)
-    , DomainDrivenApi
-    , DomainDrivenServer (..)
-    , Event
-    , Model
-    , Query
-    , QueryServer (..)
-    , ReadPersistence (..)
-    , Stored (..)
-    , WriteModel
-    , WritePersistence (..)
-    )
+import DomainDriven hiding (applyEvent)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (run)
@@ -56,9 +42,9 @@ data CounterApi model event mode = CounterApi
 counterServers :: forall m. Monad m => CounterApi CounterModel CounterEvent (AsServerT m)
 counterServers =
     CounterApi
-        { current = Query (pure . getCounter)
-        , increase = Cmd $ \_ -> pure (getCounter, [Increase])
-        , decrease = Cmd $ \_ -> pure (getCounter, [Decrease])
+        { current = mkQuery (pure . getCounter)
+        , increase = mkCmd $ \_ -> pure (getCounter, [Increase])
+        , decrease = mkCmd $ \_ -> pure (getCounter, [Decrease])
         }
 
 -- 4. Define the final API type using `DomainDrivenApi`, which uses the labels of the

@@ -115,8 +115,8 @@ instance
         (CbCmdServer modelFrom' eventFrom' mFrom aFrom)
         (CbCmdServer modelTo' eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (CbCmd theCallStack server) =
-        CbCmd theCallStack $ \transact ->
+    mapModelAndEvent' proj inj (CbCmd server) =
+        CbCmd $ \transact ->
             server
                 ( \action -> transact $
                     \model -> ((. proj) *** map inj) <$> action (proj model)
@@ -172,7 +172,7 @@ instance
         (CbQueryServer modelFrom' mFrom aFrom)
         (CbQueryServer modelTo' mTo aTo)
     where
-    mapModelAndEvent' proj _ (CbQuery theCallStack server) = CbQuery theCallStack $ \model -> server (proj <$> model)
+    mapModelAndEvent' proj _ (CbQuery server) = CbQuery $ \model -> server (proj <$> model)
 
 instance
     (aFrom ~ aTo, MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo)
