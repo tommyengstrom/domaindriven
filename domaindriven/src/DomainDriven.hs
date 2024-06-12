@@ -30,9 +30,13 @@ import DomainDriven.Server.MapModel as X
     )
 import DomainDriven.Server.Server as X
     ( CbCmdServer (..)
+    , mkCbCmdServer
     , CbQueryServer (..)
+    , mkCbQuery
     , CmdServer (..)
+    , mkQuery
     , QueryServer (..)
+    , mkCmd
     , ReadPersistence (..)
     , WritePersistence (..)
     )
