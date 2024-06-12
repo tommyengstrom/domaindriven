@@ -90,11 +90,14 @@ setupPersistance postHook test = do
     dropEventTables =<< mkTestConn
     pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
-    test (p{chunkSize = 2
-                ,  logger = putStrLn . ("[DomainDriven] " <>) . show
-                , updateHook = postHook
+    test
+        ( p
+            { chunkSize = 2
+            , logger = putStrLn . ("[DomainDriven] " <>) . show
+            , updateHook = postHook
             }
-            , pool)
+        , pool
+        )
 
 mkTestConn :: IO Connection
 mkTestConn =

@@ -13,6 +13,7 @@ import Data.Kind
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
+import GHC.Stack
 import Streamly.Data.Stream.Prelude (Stream)
 import System.Random
 import UnliftIO
@@ -22,9 +23,9 @@ class ReadModel p where
     type Model p :: Type
     type Event p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: p -> IO (Model p)
+    getModel :: HasCallStack => p -> IO (Model p)
     getEventList :: p -> IO [Stored (Event p)]
-    getEventStream :: p -> Stream IO (Stored (Event p))
+    getEventStream :: HasCallStack => p -> Stream IO (Stored (Event p))
 
 type RunCmd model event m a = (model -> m (model -> a, [event])) -> m a
 
@@ -42,7 +43,8 @@ class ReadModel p => WriteModel p where
     -- | Update the model in a transaction. Note that this is never used directly;
     -- runCmd calls transactionalUpdate and makes sure to call postUpdateHook afterwards.
     transactionalUpdate
-        :: forall m a
+        :: HasCallStack
+        => forall m a
          . MonadUnliftIO m
         => p
         -> (Model p -> m (Model p -> a, [Event p]))
@@ -56,11 +58,12 @@ class ReadModel p => WriteModel p where
         -- ^ How to create the return value from updated model
 
 runCmd
-    :: forall p m a
+    :: HasCallStack
+    => forall p m a
      . (WriteModel p, MonadUnliftIO m)
     => p
     -> RunCmd (Model p) (Event p) m a
-runCmd p cmd = do
+runCmd p cmd = withFrozenCallStack $ do
     (model, events, returnFun) <- transactionalUpdate p cmd
     _ <- async $ postUpdateHook p model events
     pure $ returnFun model

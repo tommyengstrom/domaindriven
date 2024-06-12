@@ -1,7 +1,0 @@
-packages:
-  domaindriven/
-  domaindriven-core/
-  domaindriven-examples/
-
-tests: True
-optimization: False
