@@ -88,11 +88,7 @@ setupPersistance
     -> IO ()
 setupPersistance postHook test = do
     dropEventTables =<< mkTestConn
-    let stripesAndResources = 5
-    poolCfg <-
-        setNumStripes (Just stripesAndResources)
-            <$> mkDefaultPoolConfig (mkTestConn) close 1 stripesAndResources
-    pool <- newPool poolCfg
+    pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test
         ( p

@@ -137,16 +137,10 @@ simplePool' connInfo = simplePool (PG.connect connInfo)
 
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
 simplePool getConn = do
-    --  Using stripesAndResources because the default is crazy:
-    -- https://github.com/scrive/pool/pull/16
-    --  "Set number of stripes to number of cores and crash if there are fewer resources"
-    let stripesAndResources :: Int
-        stripesAndResources = 5
-
-        poolCfg :: Pool.PoolConfig Connection
-        poolCfg =
-            Pool.setNumStripes (Just stripesAndResources) $
-                Pool.defaultPoolConfig (liftIO getConn) (liftIO . PG.close) 60 stripesAndResources
+    -- Using a single stripe to ensures all thread can use all connections
+    let poolCfg :: Pool.PoolConfig Connection
+        poolCfg = Pool.setNumStripes (Just 1)
+                $ Pool.defaultPoolConfig (liftIO getConn) (liftIO . PG.close) 60 5
 
     liftIO $ Pool.newPool poolCfg
 
