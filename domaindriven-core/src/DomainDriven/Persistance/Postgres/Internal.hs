@@ -9,7 +9,6 @@ import Data.Foldable
 import Data.Generics.Product
 import Data.IORef
 import Data.Int
-import Data.List (intercalate)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
