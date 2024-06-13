@@ -103,7 +103,7 @@ mkTestConn :: IO Connection
 mkTestConn =
     connect $
         ConnectInfo
-            { connectHost = "/var/run/postgresql"
+            { connectHost = "localhost"
             , connectPort = 5432
             , connectUser = "postgres"
             , connectPassword = "postgres"

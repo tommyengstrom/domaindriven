@@ -35,7 +35,7 @@ getConn :: IO PG.Connection
 getConn =
     PG.connect $
         PG.ConnectInfo
-            { connectHost = "/var/run/postgresql"
+            { connectHost = "localhost"
             , connectPort = 5432
             , connectUser = "postgres"
             , connectPassword = "postgres"
