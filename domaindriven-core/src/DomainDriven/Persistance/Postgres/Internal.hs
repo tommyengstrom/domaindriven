@@ -32,10 +32,10 @@ import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
 data LogEntry
-    = DbTransactionDuration PrettyCallStack NominalDiffTime
-    | EventTableLockDuration PrettyCallStack NominalDiffTime
-    | EventTableMigrationDuration EventTableName NominalDiffTime
-    | WaitForConnectionDuration PrettyCallStack NominalDiffTime
+    = DbTransactionDuration NominalDiffTime PrettyCallStack
+    | EventTableLockDuration NominalDiffTime PrettyCallStack
+    | EventTableMigrationDuration NominalDiffTime EventTableName
+    | WaitForConnectionDuration NominalDiffTime PrettyCallStack
     deriving (Show, Generic)
 
 newtype PrettyCallStack = PrettyCallStack CallStack
@@ -200,7 +200,7 @@ runMigrations logger trans et = do
             mig (getEventTableName prevEt) (getEventTableName et) conn
             retireTable conn (getEventTableName prevEt)
             t1 <- getCurrentTime
-            logger $ EventTableMigrationDuration (getEventTableName et) (diffUTCTime t1 t0)
+            logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
         (_, r) -> fail $ "Unexpected table query result: " <> show r
   where
     conn :: Connection
@@ -232,10 +232,10 @@ createPostgresPersistance pool eventTable app' seed' = do
             , chunkSize = 50
             , updateHook = \_ _ _ -> pure ()
             , logger = \case
-                e@(DbTransactionDuration _ dt) -> when (dt > 1) $ putStrLn $ "[DomainDriven] " <> show e
-                e@(EventTableLockDuration _ dt) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
-                EventTableMigrationDuration etName dt -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
-                e@(WaitForConnectionDuration _ dt) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                e@(DbTransactionDuration dt _) -> when (dt > 1) $ putStrLn $ "[DomainDriven] " <> show e
+                e@(EventTableLockDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                EventTableMigrationDuration dt etName -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
+                e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
             }
 
 queryEvents
@@ -377,11 +377,11 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
                 putResource localPool conn
                 t1 <- getCurrentTime
                 pgt ^. field' @"logger" $
-                    DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+                    DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
             pgt ^. field' @"logger" $
-                DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+                DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
 withIOTrans
@@ -397,7 +397,7 @@ withIOTrans pg f = do
         r <- takeResource (connectionPool pg)
         t1 <- getCurrentTime
         pg ^. field @"logger" $
-            WaitForConnectionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+            WaitForConnectionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
         pure r
     bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
@@ -417,11 +417,11 @@ withIOTrans pg f = do
                 Pool.putResource localPool conn
                 t1 <- getCurrentTime
                 pgt ^. field' @"logger" $
-                    DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+                    DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
             pgt ^. field' @"logger" $
-                DbTransactionDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+                DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
     prepareTransaction
@@ -459,13 +459,11 @@ mkEventStream chunkSize conn q = do
 
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
-        (Cursor.closeCursor)
-        ( \cursor ->
-            Stream.mapM fromEventRow $
-                Stream.unfoldMany Unfold.fromList . fmap toList $
-                    Stream.unfoldrM
-                        step
-                        cursor
+        Cursor.closeCursor
+        ( Stream.mapM fromEventRow
+            . Stream.unfoldMany Unfold.fromList
+            . fmap toList
+            . Stream.unfoldrM step
         )
 
 getModel' :: forall e m. FromJSON e => PostgresEventTrans m e -> IO m
@@ -519,7 +517,7 @@ withExclusiveLock pgt a = do
     r <- a
     t1 <- getCurrentTime
     pgt ^. field' @"logger" $
-        EventTableLockDuration (PrettyCallStack callStack) (diffUTCTime t1 t0)
+        EventTableLockDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
     pure r
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
@@ -544,4 +542,4 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                             storedEvs
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
-            pure $ (model newNumberedModel, storedEvs, returnFun)
+            pure (model newNumberedModel, storedEvs, returnFun)
