@@ -139,8 +139,8 @@ instance
         (CmdServer modelFrom' eventFrom' mFrom aFrom)
         (CmdServer modelTo' eventTo' mTo aTo)
     where
-    mapModelAndEvent' proj inj (Cmd theCallStack server) =
-        Cmd theCallStack $ \model -> ((. proj) *** map inj) <$> server (proj model)
+    mapModelAndEvent' proj inj (Cmd server) =
+        Cmd $ \model -> ((. proj) *** map inj) <$> server (proj model)
 
 instance
     ( modelFrom ~ modelFrom'
@@ -156,7 +156,7 @@ instance
         (QueryServer modelFrom' mFrom aFrom)
         (QueryServer modelTo' mTo aTo)
     where
-    mapModelAndEvent' proj _ (Query theCallStack server) = Query theCallStack $ server . proj
+    mapModelAndEvent' proj _ (Query server) = Query $ server . proj
 
 instance
     ( modelFrom ~ modelFrom'
