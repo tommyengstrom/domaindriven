@@ -86,15 +86,15 @@ data FullApi model event mode = FullApi
 numberServer :: Monad m => NumberApi NumberModel NumberEvent (AsServerT m)
 numberServer =
     NumberApi
-        { set = \i -> mkCmd $ \_ -> pure (getNumber, [SetNumber i])
-        , get = mkQuery (pure . getNumber)
+        { set = \i -> Cmd $ \_ -> pure (getNumber, [SetNumber i])
+        , get = Query (pure . getNumber)
         }
 
 textServer :: Monad m => TextApi TextModel TextEvent (AsServerT m)
 textServer =
     TextApi
-        { set = \t -> mkCmd $ \_ -> pure (getText, [SetText t])
-        , get = mkQuery (pure . getText)
+        { set = \t -> Cmd $ \_ -> pure (getText, [SetText t])
+        , get = Query (pure . getText)
         }
 
 fullServer :: Monad m => FullApi FullModel FullEvent (AsServerT m)

@@ -35,9 +35,5 @@ import DomainDriven.Server.Server as X
     , QueryServer (..)
     , ReadPersistence (..)
     , WritePersistence (..)
-    , mkCbCmdServer
-    , mkCbQuery
-    , mkCmd
-    , mkQuery
     )
 import Generics.SOP.NP as X (NP (..))

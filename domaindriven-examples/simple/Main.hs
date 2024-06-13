@@ -42,9 +42,9 @@ data CounterApi model event mode = CounterApi
 counterServers :: forall m. Monad m => CounterApi CounterModel CounterEvent (AsServerT m)
 counterServers =
     CounterApi
-        { current = mkQuery (pure . getCounter)
-        , increase = mkCmd $ \_ -> pure (getCounter, [Increase])
-        , decrease = mkCmd $ \_ -> pure (getCounter, [Decrease])
+        { current = Query (pure . getCounter)
+        , increase = Cmd $ \_ -> pure (getCounter, [Increase])
+        , decrease = Cmd $ \_ -> pure (getCounter, [Decrease])
         }
 
 -- 4. Define the final API type using `DomainDrivenApi`, which uses the labels of the

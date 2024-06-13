@@ -20,40 +20,27 @@ import Servant.Server.Internal.Delayed
 import UnliftIO hiding (Handler)
 import Prelude
 
-data CmdServer (model :: Type) (event :: Type) m a
-    = Cmd CallStack (model -> m (model -> a, [event]))
+data CmdServer (model :: Type) (event :: Type) m a where
+    Cmd :: HasCallStack => (model -> m (model -> a, [event])) -> CmdServer model event m a
 
-mkCmd :: HasCallStack => (model -> m (model -> a, [event])) -> CmdServer model event m a
-mkCmd = Cmd callStack
+data QueryServer (model :: Type) m a where
+  Query :: HasCallStack => (model -> m a) -> QueryServer model m a
 
-data QueryServer (model :: Type) m a = Query CallStack (model -> m a)
+data CbQueryServer (model :: Type) m a where
+  CbQuery :: ((forall n. (HasCallStack, MonadIO n) => n model) -> m a) -> CbQueryServer model m a
 
-mkQuery :: HasCallStack => (model -> m a) -> QueryServer model m a
-mkQuery = Query callStack
+data CbCmdServer (model :: Type) (event :: Type) m a where
+  CbCmd :: ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a) -> CbCmdServer model event m a
 
-newtype CbQueryServer (model :: Type) m a
-    = CbQuery ((forall n. (HasCallStack, MonadIO n) => n model) -> m a)
-
-mkCbQuery
-    :: ((forall n. (HasCallStack, MonadIO n) => n model) -> m a) -> CbQueryServer model m a
-mkCbQuery = CbQuery
-
-newtype CbCmdServer (model :: Type) (event :: Type) m a
-    = CbCmd ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a)
-
-mkCbCmdServer
-    :: ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a)
-    -> CbCmdServer model event m a
-mkCbCmdServer = CbCmd
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
-    throwAll = Cmd callStack . throwAll
+    throwAll = Cmd . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbCmdServer model event m a) where
     throwAll err = CbCmd $ \_ -> throwAll err
 
 instance MonadError ServerError m => ThrowAll (QueryServer model m a) where
-    throwAll = Query callStack . throwAll
+    throwAll = Query . throwAll
 
 instance MonadError ServerError m => ThrowAll (CbQueryServer model m a) where
     throwAll err = CbQuery $ \_ -> throwAll err
@@ -91,15 +78,14 @@ instance
     type
         ServerT (Cmd' model event (Verb method status ctypes a)) m =
             CmdServer model event m a
-    hoistServerWithContext _ _ f (Cmd theCallStack action) = Cmd theCallStack $ \model -> f (action model)
+    hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: WritePersistence model event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(Cmd theCallStack server) -> do
-                            let ?callStack = theCallStack
+                        ( \(Cmd server) -> do
                             handlerRes <-
                                 liftIO . Control.Monad.Catch.try . runCmd p $
                                     either throwIO pure <=< runHandler . server
@@ -115,16 +101,14 @@ instance
     where
     type ServerT (Query' model (Verb method status ctypes a)) m = QueryServer model m a
 
-    hoistServerWithContext _ _ f (Query theCallStack action) = Query theCallStack $ \model -> f (action model)
+    hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
 
     route _ context delayedServer =
         case getContextEntry context :: ReadPersistence model of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(Query theCallStack server) ->
-                            let ?callStack = theCallStack
-                             in server =<< liftIO (getModel p)
+                        ( \(Query server) -> server =<< liftIO (getModel p)
                         )
                         delayedServer
 
