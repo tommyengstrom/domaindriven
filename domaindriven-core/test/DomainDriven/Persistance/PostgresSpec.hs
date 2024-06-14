@@ -1,3 +1,6 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Missing NOINLINE pragma" #-}
 module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Concurrent (threadDelay)
@@ -5,6 +8,7 @@ import Control.Exception (SomeException)
 import Control.Monad
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Foldable
+import Data.List qualified as L
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (fromString)
@@ -16,7 +20,8 @@ import Database.PostgreSQL.Simple
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
-    ( getEventTableName
+    ( LogEntry (..)
+    , getEventTableName
     , queryEvents
     , writeEvents
     )
@@ -58,12 +63,11 @@ spec = do
         postHook p m evs = do
             atomically $
                 modifyTVar processedEvents (<> Set.fromList (fmap storedUUID evs))
-            if m < 0
-                then void $ runCmd p $ \_ -> pure (id, [Reset])
-                else pure ()
+            when (m < 0) (void $ runCmd p $ \_ -> pure (id, [Reset]))
      in around (setupPersistance postHook) (postHookSpec processedEvents)
 
     around (setupPersistance noHook) migrationConcurrencySpec
+    around (setupPersistance noHook) loggingSpec
 
 type TestModel = Int
 
@@ -93,7 +97,7 @@ setupPersistance postHook test = do
     test
         ( p
             { chunkSize = 2
-            , logger = putStrLn . ("[DomainDriven] " <>) . show
+            , logger = const $ pure () -- putStrLn . ("[DomainDriven] " <>) . show
             , updateHook = postHook
             }
         , pool
@@ -163,8 +167,7 @@ streamingSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
     it "getEventList and getEventStream yields the same result" $ \(p, pool) -> do
         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
-            enKey <- mkId
-            pure $ Stored AddOne (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) enKey
+            Stored AddOne (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) <$> mkId
         _ <- withResource pool $ \conn ->
             writeEvents conn (getEventTableName eventTable) storedEvs
         evList <- getEventList p
@@ -178,7 +181,7 @@ queryEventsSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
 queryEventsSpec = describe "queryEvents" $ do
     it "Can query events" $ \(_p, pool) -> withResource pool $ \conn -> do
         evs <- queryEvents @TestEvent conn (getEventTableName eventTable)
-        evs `shouldSatisfy` (>= 1) . length
+        evs `shouldSatisfy` not . null
     it "Events come out in the right order" $ \(_p, pool) -> withResource pool $ \conn -> do
         -- write few more events before
         --
@@ -232,7 +235,7 @@ migrationSpec = describe "migrate1to1" $ do
     it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
         evs <- withResource pool $ \conn ->
             queryEvents @TestEvent conn (getEventTableName eventTable)
-        evs `shouldSatisfy` (>= 1) . length
+        evs `shouldSatisfy` not . null
 
         _ <- postgresWriteModel pool eventTable2 applyTestEvent 0
         evs' <- withResource pool $ \conn ->
@@ -297,7 +300,7 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -> IO ()
     migrationTest m0 pool mig = do
         let cmd :: Int -> IO (Int -> Int, [TestEvent])
-            cmd _ = pure $ (id, [AddOne])
+            cmd _ = pure (id, [AddOne])
 
         i <- replicateM 5 (runCmd m0 cmd)
         length i `shouldBe` 5
@@ -339,3 +342,33 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -- putStrLn "Migrating slowly..."
         threadDelay 250000
         pure a
+
+loggingSpec :: SpecWith (PostgresEvent TestModel TestEvent, Pool Connection)
+loggingSpec = describe "Callstacks" $ do
+    it "Callstack for runCmd reference this file" $ \(p', _) -> do
+        (logVar, p) <- withStmLogger p'
+        _ <- runCmd p $ \_ -> pure (id, [AddOne])
+        referencesThisFile =<< readTVarIO logVar
+    it "Callstack for getModel reference this file" $ \(p', _) -> do
+        (logVar, p) <- withStmLogger p'
+        _ <- getModel p
+        referencesThisFile =<< readTVarIO logVar
+    it "Callstack for getEventStream references this file" $ \(p', _) -> do
+        (logVar, p) <- withStmLogger p'
+        _ <- Stream.toList $ getEventStream p
+        referencesThisFile =<< readTVarIO logVar
+    it "Callstack for getEventList references this file" $ \(p', _) -> do
+        (logVar, p) <- withStmLogger p'
+        _ <- getEventList p
+        referencesThisFile =<< readTVarIO logVar
+  where
+    referencesThisFile :: [LogEntry] -> IO ()
+    referencesThisFile logs = do
+        let thisFile = "DomainDriven/Persistance/PostgresSpec.hs"
+        logs `shouldSatisfy` all ((thisFile `L.isInfixOf`) . show)
+    withStmLogger
+        :: PostgresEvent TestModel TestEvent
+        -> IO (TVar [LogEntry], PostgresEvent TestModel TestEvent)
+    withStmLogger p = do
+        logVar <- newTVarIO []
+        pure (logVar, p{logger = \s -> atomically $ modifyTVar logVar (s :)})

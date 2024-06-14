@@ -31,17 +31,35 @@ import Streamly.Data.Unfold qualified as Unfold
 import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
+-- | Log entries for the persistance layer.
+-- Not that OneLineCallStack has contains the CallStack, but prints only the call site.
 data LogEntry
-    = DbTransactionDuration NominalDiffTime PrettyCallStack
-    | EventTableLockDuration NominalDiffTime PrettyCallStack
+    = DbTransactionDuration NominalDiffTime OneLineCallStack
+    | EventTableLockDuration NominalDiffTime OneLineCallStack
     | EventTableMigrationDuration NominalDiffTime EventTableName
-    | WaitForConnectionDuration NominalDiffTime PrettyCallStack
+    | WaitForConnectionDuration NominalDiffTime OneLineCallStack
     deriving (Show, Generic)
 
-newtype PrettyCallStack = PrettyCallStack CallStack
+newtype OneLineCallStack = OneLineCallStack CallStack
 
-instance Show PrettyCallStack where
-    show (PrettyCallStack c) = unwords . lines $ prettyCallStack c
+instance Show OneLineCallStack where
+    show (OneLineCallStack c) = showOnlyCallSite c
+
+-- | An attempt to create short and informative log messages
+showOnlyCallSite :: CallStack -> String
+showOnlyCallSite stack = go (getCallStack stack)
+  where
+    go :: [(String, SrcLoc)] -> String
+    go = \case
+        [(fun, srcLoc)] ->
+            "from "
+                <> show fun
+                <> " called on line "
+                <> show (srcLoc ^. field @"srcLocStartLine")
+                <> " in "
+                <> show (srcLoc ^. field @"srcLocFile")
+        _ : xs -> go xs
+        [] -> ""
 
 data PostgresEvent model event = PostgresEvent
     { connectionPool :: Pool Connection
@@ -377,11 +395,11 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
                 putResource localPool conn
                 t1 <- getCurrentTime
                 pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
             pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
 withIOTrans
@@ -397,7 +415,7 @@ withIOTrans pg f = do
         r <- takeResource (connectionPool pg)
         t1 <- getCurrentTime
         pg ^. field @"logger" $
-            WaitForConnectionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+            WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
         pure r
     bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
@@ -417,11 +435,11 @@ withIOTrans pg f = do
                 Pool.putResource localPool conn
                 t1 <- getCurrentTime
                 pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
         giveBackConn `catchAll` \_ -> do
             t1 <- getCurrentTime
             pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
     prepareTransaction
@@ -510,14 +528,14 @@ exclusiveLock (OngoingTransaction connR _ _) etName =
     void $
         execute_ (Pool.resource connR) ("lock \"" <> fromString etName <> "\" in exclusive mode")
 
-withExclusiveLock :: PostgresEventTrans m e -> IO a -> IO a
+withExclusiveLock :: HasCallStack => PostgresEventTrans m e -> IO a -> IO a
 withExclusiveLock pgt a = do
     t0 <- getCurrentTime
     exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName")
     r <- a
     t1 <- getCurrentTime
     pgt ^. field' @"logger" $
-        EventTableLockDuration (diffUTCTime t1 t0) (PrettyCallStack callStack)
+        EventTableLockDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
     pure r
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
