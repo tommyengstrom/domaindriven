@@ -90,6 +90,7 @@ library
     , optics
     , postgresql-simple
     , random
+    , resource-pool
     , servant
     , servant-auth-server
     , servant-client-core
@@ -101,7 +102,6 @@ library
     , time
     , transformers
     , unliftio
-    , unliftio-pool
     , unordered-containers
     , uuid
     , vector

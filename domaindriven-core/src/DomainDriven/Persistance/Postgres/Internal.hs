@@ -9,14 +9,17 @@ import Data.Foldable
 import Data.Generics.Product
 import Data.IORef
 import Data.Int
+import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
+import Data.Time
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
+import GHC.Stack
 import Lens.Micro
     ( to
     , (^.)
@@ -26,18 +29,37 @@ import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
 import UnliftIO (MonadUnliftIO (..), concurrently)
-import UnliftIO.Pool
-    ( LocalPool
-    , Pool
-    , destroyResource
-    , mkDefaultPoolConfig
-    , newPool
-    , putResource
-    , setNumStripes
-    , takeResource
-    , withResource
-    )
 import Prelude
+
+-- | Log entries for the persistance layer.
+-- Not that OneLineCallStack has contains the CallStack, but prints only the call site.
+data LogEntry
+    = DbTransactionDuration NominalDiffTime OneLineCallStack
+    | EventTableLockDuration NominalDiffTime OneLineCallStack
+    | EventTableMigrationDuration NominalDiffTime EventTableName
+    | WaitForConnectionDuration NominalDiffTime OneLineCallStack
+    deriving (Show, Generic)
+
+newtype OneLineCallStack = OneLineCallStack CallStack
+
+instance Show OneLineCallStack where
+    show (OneLineCallStack c) = showOnlyCallSite c
+
+-- | An attempt to create short and informative log messages
+showOnlyCallSite :: CallStack -> String
+showOnlyCallSite stack = go (getCallStack stack)
+  where
+    go :: [(String, SrcLoc)] -> String
+    go = \case
+        [(fun, srcLoc)] ->
+            "from "
+                <> show fun
+                <> " called on line "
+                <> show (srcLoc ^. field @"srcLocStartLine")
+                <> " in "
+                <> show (srcLoc ^. field @"srcLocFile")
+        _ : xs -> go xs
+        [] -> ""
 
 data PostgresEvent model event = PostgresEvent
     { connectionPool :: Pool Connection
@@ -48,6 +70,7 @@ data PostgresEvent model event = PostgresEvent
     , chunkSize :: ChunkSize
     -- ^ Number of events read from postgres per batch
     , updateHook :: PostgresEvent model event -> model -> [Stored event] -> IO ()
+    , logger :: LogEntry -> IO ()
     }
     deriving (Generic)
 
@@ -58,6 +81,7 @@ data PostgresEventTrans model event = PostgresEventTrans
     , app :: model -> Stored event -> model
     , seed :: model
     , chunkSize :: ChunkSize
+    , logger :: LogEntry -> IO ()
     -- ^ Number of events read from postgres per batch
     }
     deriving (Generic)
@@ -69,7 +93,7 @@ instance FromJSON e => ReadModel (PostgresEvent m e) where
     getModel pg = withIOTrans pg getModel'
 
     getEventList pg = withResource (connectionPool pg) $ \conn ->
-        fmap fst <$> queryEvents conn (pg ^. field @"eventTableName")
+        fmap fst <$> queryEvents (Pool.resource conn) (pg ^. field @"eventTableName")
 
     getEventStream pg = withStreamReadTransaction pg getEventStream'
 
@@ -92,7 +116,7 @@ createEventTable pgt = do
                     let etName = pgt ^. field @"eventTableName"
                     _ <-
                         createEventTable'
-                            (pgt ^. field @"transaction" . to connection)
+                            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
                             etName
                     void $ refreshModel pgt
                 )
@@ -131,20 +155,18 @@ simplePool' connInfo = simplePool (PG.connect connInfo)
 
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
 simplePool getConn = do
-    --  Using stripesAndResources because the default is crazy:
-    -- https://github.com/scrive/pool/pull/16
-    --  "Set number of stripes to number of cores and crash if there are fewer resources"
-    let stripesAndResources :: Int
-        stripesAndResources = 5
-    poolCfg <-
-        setNumStripes (Just stripesAndResources)
-            <$> mkDefaultPoolConfig (liftIO getConn) (liftIO . PG.close) 1.5 stripesAndResources
+    -- Using a single stripe to ensures all thread can use all connections
+    let poolCfg :: Pool.PoolConfig Connection
+        poolCfg =
+            Pool.setNumStripes (Just 1) $
+                Pool.defaultPoolConfig (liftIO getConn) (liftIO . PG.close) 60 5
 
-    newPool poolCfg
+    liftIO $ Pool.newPool poolCfg
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration
-    :: (FromJSON event, WriteModel (PostgresEventTrans model event))
+    :: HasCallStack
+    => (FromJSON event, WriteModel (PostgresEventTrans model event))
     => Pool Connection
     -> EventTableName
     -> (model -> Stored event -> model)
@@ -157,14 +179,15 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModel
-    :: Pool Connection
+    :: HasCallStack
+    => Pool Connection
     -> EventTable
     -> (model -> Stored event -> model)
     -> model
     -> IO (PostgresEvent model event)
 postgresWriteModel pool eventTable app' seed' = do
     pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
-    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"transaction") eventTable
+    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
     pure pg
 
 newtype Exists = Exists
@@ -173,8 +196,8 @@ newtype Exists = Exists
     deriving (Show, Eq, Generic)
     deriving anyclass (FromRow)
 
-runMigrations :: OngoingTransaction -> EventTable -> IO ()
-runMigrations trans et = do
+runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
+runMigrations logger trans et = do
     tableExistQuery <-
         query
             conn
@@ -187,16 +210,19 @@ runMigrations trans et = do
         (InitialVersion _, [Only False]) -> createTable
         (MigrateUsing mig prevEt, [Only False]) -> do
             -- Ensure migrations are done up until the previous table
-            runMigrations trans prevEt
+            runMigrations logger trans prevEt
             -- Then lock lock the previous table before we start
             exclusiveLock trans (getEventTableName prevEt)
+            t0 <- getCurrentTime
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
             retireTable conn (getEventTableName prevEt)
+            t1 <- getCurrentTime
+            logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
         (_, r) -> fail $ "Unexpected table query result: " <> show r
   where
     conn :: Connection
-    conn = connection trans
+    conn = trans ^. field @"connectionResource" . field @"resource"
 
     createTable :: IO ()
     createTable = do
@@ -223,6 +249,11 @@ createPostgresPersistance pool eventTable app' seed' = do
             , seed = seed'
             , chunkSize = 50
             , updateHook = \_ _ _ -> pure ()
+            , logger = \case
+                e@(DbTransactionDuration dt _) -> when (dt > 1) $ putStrLn $ "[DomainDriven] " <> show e
+                e@(EventTableLockDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                EventTableMigrationDuration dt etName -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
+                e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
             }
 
 queryEvents
@@ -322,14 +353,15 @@ getEventStream' pgt =
     fst
         <$> mkEventStream
             (pgt ^. field @"chunkSize")
-            (pgt ^. field @"transaction" . field @"connection")
+            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
             (pgt ^. field @"eventTableName" . to mkEventQuery)
 
 -- | A transaction that is always rolled back at the end.
 -- This is useful when using cursors as they can only be used inside a transaction.
 withStreamReadTransaction
     :: forall m a model event
-     . (Stream.MonadAsync m, MonadCatch m)
+     . HasCallStack
+    => (Stream.MonadAsync m, MonadCatch m)
     => PostgresEvent model event
     -> (PostgresEventTrans model event -> Stream m a)
     -> Stream m a
@@ -337,68 +369,95 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans model event)
     startTrans = liftIO $ do
-        (conn, localPool) <- takeResource (connectionPool pg)
-        PG.begin conn
+        (connR, localPool) <- takeResource (connectionPool pg)
+        t0 <- getCurrentTime
+        PG.begin $ Pool.resource connR
         pure $
             PostgresEventTrans
-                { transaction = OngoingTransaction conn localPool
+                { transaction = OngoingTransaction connR localPool t0
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
                 , app = pg ^. field @"app"
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
+                , logger = pg ^. field @"logger"
                 }
 
     rollbackTrans :: PostgresEventTrans model event -> m ()
     rollbackTrans pgt = liftIO $ do
         -- Nothing changes. We just need the transaction to be able to stream events.
-        let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
+        let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
+            conn = Pool.resource connR
 
             giveBackConn :: IO ()
             giveBackConn = do
                 PG.rollback conn
                 putResource localPool conn
-        giveBackConn `catchAll` \_ ->
+                t1 <- getCurrentTime
+                pgt ^. field' @"logger" $
+                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+        giveBackConn `catchAll` \_ -> do
+            t1 <- getCurrentTime
+            pgt ^. field' @"logger" $
+                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
 withIOTrans
     :: forall a model event
-     . PostgresEvent model event
+     . HasCallStack
+    => PostgresEvent model event
     -> (PostgresEventTrans model event -> IO a)
     -> IO a
 withIOTrans pg f = do
     transactionCompleted <- newIORef False
-    (conn, localPool) <- takeResource (connectionPool pg)
-    bracket (prepareTransaction conn localPool) (cleanup transactionCompleted) $ \pgt -> do
+    (connR, localPool) <- do
+        t0 <- getCurrentTime
+        r <- takeResource (connectionPool pg)
+        t1 <- getCurrentTime
+        pg ^. field @"logger" $
+            WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+        pure r
+    bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
         writeIORef transactionCompleted True
         pure a
   where
     cleanup :: IORef Bool -> PostgresEventTrans model event -> IO ()
     cleanup transactionCompleted pgt = do
-        let OngoingTransaction conn localPool = pgt ^. field' @"transaction"
+        let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
+            conn = Pool.resource connR
 
             giveBackConn :: IO ()
             giveBackConn = do
                 readIORef transactionCompleted >>= \case
                     True -> PG.commit conn
                     False -> PG.rollback conn
-                putResource localPool conn
-        giveBackConn `catchAll` \_ ->
+                Pool.putResource localPool conn
+                t1 <- getCurrentTime
+                pgt ^. field' @"logger" $
+                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+        giveBackConn `catchAll` \_ -> do
+            t1 <- getCurrentTime
+            pgt ^. field' @"logger" $
+                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
             destroyResource (connectionPool pg) localPool conn
 
     prepareTransaction
-        :: Connection -> LocalPool Connection -> IO (PostgresEventTrans model event)
-    prepareTransaction conn localPool = do
-        PG.begin conn
+        :: Pool.Resource Connection
+        -> LocalPool Connection
+        -> IO (PostgresEventTrans model event)
+    prepareTransaction connR localPool = do
+        t0 <- getCurrentTime
+        PG.begin $ Pool.resource connR
         pure $
             PostgresEventTrans
-                { transaction = OngoingTransaction conn localPool
+                { transaction = OngoingTransaction connR localPool t0
                 , eventTableName = pg ^. field @"eventTableName"
                 , modelIORef = pg ^. field @"modelIORef"
                 , app = pg ^. field @"app"
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
+                , logger = pg ^. field @"logger"
                 }
 
 mkEventStream
@@ -418,13 +477,11 @@ mkEventStream chunkSize conn q = do
 
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
-        (Cursor.closeCursor)
-        ( \cursor ->
-            Stream.mapM fromEventRow $
-                Stream.unfoldMany Unfold.fromList . fmap toList $
-                    Stream.unfoldrM
-                        step
-                        cursor
+        Cursor.closeCursor
+        ( Stream.mapM fromEventRow
+            . Stream.unfoldMany Unfold.fromList
+            . fmap toList
+            . Stream.unfoldrM step
         )
 
 getModel' :: forall e m. FromJSON e => PostgresEventTrans m e -> IO m
@@ -432,7 +489,7 @@ getModel' pgt = do
     NumberedModel model lastEventNo <- readIORef (pgt ^. field @"modelIORef")
     hasNewEvents <-
         queryHasEventsAfter
-            (pgt ^. field @"transaction" . to connection)
+            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
             (pgt ^. field @"eventTableName")
             lastEventNo
     if hasNewEvents then fst <$> refreshModel pgt else pure model
@@ -442,19 +499,18 @@ refreshModel
      . FromJSON e
     => PostgresEventTrans m e
     -> IO (m, EventNumber)
-refreshModel pg = do
+refreshModel pgt = withExclusiveLock pgt $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
-    exclusiveLock (pg ^. field @"transaction") (pg ^. field @"eventTableName")
-    NumberedModel model lastEventNo <- readIORef (pg ^. field @"modelIORef")
+    NumberedModel model lastEventNo <- readIORef (pgt ^. field @"modelIORef")
     let eventStream =
             mkEventStream
-                (pg ^. field @"chunkSize")
-                (pg ^. field @"transaction" . field @"connection")
-                (mkEventsAfterQuery (pg ^. field @"eventTableName") lastEventNo)
+                (pgt ^. field @"chunkSize")
+                (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
+                (mkEventsAfterQuery (pgt ^. field @"eventTableName") lastEventNo)
 
         applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
         applyModel (NumberedModel m _) (ev, evNumber) =
-            NumberedModel ((pg ^. field @"app") m ev) evNumber
+            NumberedModel ((pgt ^. field @"app") m ev) evNumber
 
     NumberedModel newModel lastNewEventNo <-
         Stream.fold
@@ -464,20 +520,29 @@ refreshModel pg = do
             )
             eventStream
 
-    _ <- writeIORef (pg ^. field @"modelIORef") $ NumberedModel newModel lastNewEventNo
+    _ <- writeIORef (pgt ^. field @"modelIORef") $ NumberedModel newModel lastNewEventNo
     pure (newModel, lastNewEventNo)
 
 exclusiveLock :: OngoingTransaction -> EventTableName -> IO ()
-exclusiveLock (OngoingTransaction conn _) etName =
-    void $ execute_ conn ("lock \"" <> fromString etName <> "\" in exclusive mode")
+exclusiveLock (OngoingTransaction connR _ _) etName =
+    void $
+        execute_ (Pool.resource connR) ("lock \"" <> fromString etName <> "\" in exclusive mode")
+
+withExclusiveLock :: HasCallStack => PostgresEventTrans m e -> IO a -> IO a
+withExclusiveLock pgt a = do
+    t0 <- getCurrentTime
+    exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName")
+    r <- a
+    t1 <- getCurrentTime
+    pgt ^. field' @"logger" $
+        EventTableLockDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+    pure r
 
 instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
     postUpdateHook pg m e = liftIO $ (pg ^. field @"updateHook") pg m e
 
     transactionalUpdate pg cmd = withRunInIO $ \runInIO ->
-        withIOTrans pg $ \pgt -> do
-            let eventTable = pg ^. field @"eventTableName"
-            exclusiveLock (pgt ^. field @"transaction") eventTable
+        withIOTrans pg $ \pgt -> withExclusiveLock pgt $ do
             m <- getModel' pgt
             (returnFun, evs) <- runInIO $ cmd m
             NumberedModel m' _ <- readIORef (pg ^. field @"modelIORef")
@@ -490,9 +555,9 @@ instance (ToJSON e, FromJSON e) => WriteModel (PostgresEvent m e) where
                             (Stream.fromList storedEvs)
                         )
                         ( writeEvents
-                            (pgt ^. field @"transaction" . to connection)
-                            eventTable
+                            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
+                            (pg ^. field @"eventTableName")
                             storedEvs
                         )
             _ <- writeIORef (pg ^. field @"modelIORef") newNumberedModel
-            pure $ (model newNumberedModel, storedEvs, returnFun)
+            pure (model newNumberedModel, storedEvs, returnFun)

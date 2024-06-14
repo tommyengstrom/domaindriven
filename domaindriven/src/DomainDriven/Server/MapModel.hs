@@ -94,7 +94,7 @@ class MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo 
 
 instance
     {-# OVERLAPPABLE #-}
-    (serverFrom ~ serverTo)
+    serverFrom ~ serverTo
     => MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo
     where
     mapModelAndEvent' _ _ = id
@@ -176,7 +176,13 @@ instance
 
 instance
     (aFrom ~ aTo, MapModelAndEvent' modelFrom modelTo eventFrom eventTo serverFrom serverTo)
-    => MapModelAndEvent' modelFrom modelTo eventFrom eventTo (aFrom -> serverFrom) (aTo -> serverTo)
+    => MapModelAndEvent'
+        modelFrom
+        modelTo
+        eventFrom
+        eventTo
+        (aFrom -> serverFrom)
+        (aTo -> serverTo)
     where
     mapModelAndEvent' proj inj server a = mapModelAndEvent' proj inj (server a)
 

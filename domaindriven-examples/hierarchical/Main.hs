@@ -2,23 +2,7 @@ module Main where
 
 import Data.Aeson
 import Data.Generics.Labels ()
-import DomainDriven
-    ( ApiTagFromLabel (..)
-    , Cmd
-    , CmdServer (..)
-    , DomainDrivenApi
-    , DomainDrivenServer (..)
-    , Event
-    , Model
-    , Query
-    , QueryServer (..)
-    , ReadPersistence (..)
-    , Stored (..)
-    , WriteModel
-    , WritePersistence (..)
-    , mapEvent
-    , mapModel
-    )
+import DomainDriven hiding (applyEvent)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 
 import GHC.Generics (Generic)

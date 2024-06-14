@@ -1,3 +1,4 @@
+{-# LANGUAGE ImplicitParams #-}
 -- needed for context entry. todo: non-type-driven context lookup!
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -11,6 +12,7 @@ import Control.Monad.Except
 import Data.Kind
 import DomainDriven.Persistance.Class
 import DomainDriven.Server.Api
+import GHC.Stack
 import GHC.TypeLits
 import Servant hiding (inject)
 import Servant.Auth.Server
@@ -18,16 +20,18 @@ import Servant.Server.Internal.Delayed
 import UnliftIO hiding (Handler)
 import Prelude
 
-newtype CmdServer (model :: Type) (event :: Type) m a
-    = Cmd (model -> m (model -> a, [event]))
+data CmdServer (model :: Type) (event :: Type) m a where
+    Cmd :: HasCallStack => (model -> m (model -> a, [event])) -> CmdServer model event m a
 
-newtype QueryServer (model :: Type) m a = Query (model -> m a)
+data QueryServer (model :: Type) m a where
+  Query :: HasCallStack => (model -> m a) -> QueryServer model m a
 
-newtype CbQueryServer (model :: Type) m a
-    = CbQuery ((forall n. MonadIO n => n model) -> m a)
+data CbQueryServer (model :: Type) m a where
+  CbQuery :: ((forall n. (HasCallStack, MonadIO n) => n model) -> m a) -> CbQueryServer model m a
 
-newtype CbCmdServer (model :: Type) (event :: Type) m a
-    = CbCmd ((forall n b. MonadUnliftIO n => RunCmd model event n b) -> m a)
+data CbCmdServer (model :: Type) (event :: Type) m a where
+  CbCmd :: ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a) -> CbCmdServer model event m a
+
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
     throwAll = Cmd . throwAll
@@ -104,7 +108,8 @@ instance
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(Query server) -> server =<< liftIO (getModel p))
+                        ( \(Query server) -> server =<< liftIO (getModel p)
+                        )
                         delayedServer
 
 instance
@@ -124,7 +129,8 @@ instance
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbQuery server) -> server $ liftIO $ getModel p)
+                        ( \(CbQuery server) -> server (liftIO $ getModel p)
+                        )
                         delayedServer
 
 instance
@@ -150,5 +156,6 @@ instance
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        (\(CbCmd server) -> server $ runCmd p)
+                        ( \(CbCmd server) -> server $ runCmd p
+                        )
                         delayedServer
