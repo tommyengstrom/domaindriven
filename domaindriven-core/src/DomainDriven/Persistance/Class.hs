@@ -65,7 +65,7 @@ runCmd
     -> RunCmd (Model p) (Event p) m a
 runCmd p cmd = withFrozenCallStack $ do
     (model, events, returnFun) <- transactionalUpdate p cmd
-    _ <- async $ postUpdateHook p model events
+    _ <- postUpdateHook p model events
     pure $ returnFun model
 
 -- | Wrapper for stored data

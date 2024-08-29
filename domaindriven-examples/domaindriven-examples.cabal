@@ -89,6 +89,7 @@ executable hierarchical-example
     , unordered-containers
     , uuid
     , vector
+    , wai-extra
     , warp
   default-language: Haskell2010
 
@@ -160,5 +161,6 @@ executable simple-example
     , unordered-containers
     , uuid
     , vector
+    , wai-extra
     , warp
   default-language: Haskell2010

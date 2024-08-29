@@ -1,10 +1,12 @@
 module Main where
 
+import Control.Monad.IO.Class
 import Data.Aeson
 import DomainDriven hiding (applyEvent)
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (run)
+import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 import Servant.Server.Generic
 import Prelude
@@ -31,19 +33,30 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
 --------------------------------------------------------------------------------
 -- 3. Define the API, i.e. the commands and queries
 --------------------------------------------------------------------------------
+
 data CounterApi model event mode = CounterApi
     { current :: mode :- Query model Int
     , increase :: mode :- Cmd model event Int
+    , test
+        :: mode
+            :- ReqBody '[JSON] String
+                :> ReqBody '[JSON] String
+                :> Cmd model event Int
     , decrease :: mode :- Cmd model event Int
     }
     deriving (Generic)
 
 -- 3. Implement the endpoints
-counterServers :: forall m. Monad m => CounterApi CounterModel CounterEvent (AsServerT m)
+counterServers
+    :: forall m. MonadIO m => CounterApi CounterModel CounterEvent (AsServerT m)
 counterServers =
     CounterApi
         { current = Query (pure . getCounter)
         , increase = Cmd $ \_ -> pure (getCounter, [Increase])
+        , test = \a b -> Cmd $ \_ -> liftIO $ do
+            print a
+            print b
+            pure (getCounter, [])
         , decrease = Cmd $ \_ -> pure (getCounter, [Decrease])
         }
 
@@ -54,7 +67,7 @@ type ServantCounterApi = DomainDrivenApi CounterApi CounterModel CounterEvent
 
 -- 5. Define the server.
 -- The `HasServer` instance for `DomainDrivenApi` with covert it into a `DomainDrivenServer`
-counterServer :: forall m. Monad m => ServerT ServantCounterApi m
+counterServer :: forall m. MonadIO m => ServerT ServantCounterApi m
 counterServer = DomainDrivenServer counterServers
 
 -- FIXME: This should be the default implementation imo
@@ -78,4 +91,5 @@ main = do
     let port = 7878
     putStrLn $ "Running on port " <> show port
     p <- createForgetful applyEvent (CounterModel 0)
-    run port (app p)
+
+    run port $ logStdoutDev (app p)
