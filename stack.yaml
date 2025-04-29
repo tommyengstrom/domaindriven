@@ -1,4 +1,4 @@
-resolver: nightly-2025-04-23
+resolver: nightly-2025-04-24
 packages:
 - domaindriven-core
 - domaindriven
