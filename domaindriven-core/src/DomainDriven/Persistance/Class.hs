@@ -18,14 +18,24 @@ import Streamly.Data.Stream.Prelude (Stream)
 import System.Random
 import UnliftIO
 import Prelude
+import Data.Text (Text)
+import Data.Hashable (Hashable)
+
+data NoIndex = NoIndex
+    deriving (Show, Eq, Ord, Generic, Hashable)
+
+newtype Indexed = Indexed Text
+    deriving stock (Show, Generic)
+    deriving newtype (Eq, Ord, Hashable)
 
 class ReadModel p where
     type Model p :: Type
     type Event p :: Type
+    type Index p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: HasCallStack => p -> IO (Model p)
-    getEventList :: p -> IO [Stored (Event p)]
-    getEventStream :: HasCallStack => p -> Stream IO (Stored (Event p))
+    getModel :: HasCallStack => p -> Index p -> IO (Model p)
+    getEventList :: p -> Index p -> IO [Stored (Event p)]
+    getEventStream :: HasCallStack => p -> Index p -> Stream IO (Stored (Event p))
 
 type RunCmd model event m a = (model -> m (model -> a, [event])) -> m a
 
@@ -36,6 +46,7 @@ class ReadModel p => WriteModel p where
     postUpdateHook
         :: MonadIO m
         => p
+        -> Index p
         -> Model p
         -> [Stored (Event p)]
         -> m ()
@@ -47,6 +58,7 @@ class ReadModel p => WriteModel p where
         => forall m a
          . MonadUnliftIO m
         => p
+        -> Index p
         -> (Model p -> m (Model p -> a, [Event p]))
         -> m
             ( Model p
@@ -62,10 +74,11 @@ runCmd
     => forall p m a
      . (WriteModel p, MonadUnliftIO m)
     => p
+    -> Index p
     -> RunCmd (Model p) (Event p) m a
-runCmd p cmd = withFrozenCallStack $ do
-    (model, events, returnFun) <- transactionalUpdate p cmd
-    _ <- async $ postUpdateHook p model events
+runCmd p index cmd = withFrozenCallStack $ do
+    (model, events, returnFun) <- transactionalUpdate p index cmd
+    _ <- async $ postUpdateHook p index model events
     pure $ returnFun model
 
 -- | Wrapper for stored data

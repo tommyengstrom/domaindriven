@@ -64,14 +64,26 @@ mapServer f Delayed{..} =
         , ..
         }
 
-data WritePersistence model event
-    = forall p. (Model p ~ model, Event p ~ event, WriteModel p) => WritePersistence p
-data ReadPersistence model = forall p. (Model p ~ model, ReadModel p) => ReadPersistence p
+data WritePersistence model index event
+    = forall p.
+        ( Model p ~ model
+        , Event p ~ event
+        , Index p ~ index
+        , WriteModel p
+        ) =>
+      WritePersistence p
+data ReadPersistence model index
+    = forall p.
+        ( Model p ~ model
+        , ReadModel p
+        , Index p ~ index
+        ) =>
+      ReadPersistence p
 
 instance
     ( HasServer (Verb method status ctypes a) context
     , CanMutate method ~ 'True
-    , HasContextEntry context (WritePersistence model event)
+    , HasContextEntry context (WritePersistence model () event)
     )
     => HasServer (Cmd' model event (Verb method status ctypes a)) context
     where
@@ -81,13 +93,13 @@ instance
     hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: WritePersistence model event of
+        case getContextEntry context :: WritePersistence model () event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
                         ( \(Cmd server) -> do
                             handlerRes <-
-                                liftIO . Control.Monad.Catch.try . runCmd p $
+                                liftIO . Control.Monad.Catch.try . runCmd p () $
                                     either throwIO pure <=< runHandler . server
                             either throwError pure handlerRes
                         )
@@ -95,7 +107,7 @@ instance
 
 instance
     ( HasServer (Verb method status ctypes a) context
-    , HasContextEntry context (ReadPersistence model)
+    , HasContextEntry context (ReadPersistence model ())
     )
     => HasServer (Query' model (Verb method status ctypes a)) context
     where
@@ -104,17 +116,17 @@ instance
     hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: ReadPersistence model of
+        case getContextEntry context :: ReadPersistence model () of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(Query server) -> server =<< liftIO (getModel p)
+                        ( \(Query server) -> server =<< liftIO (getModel p ())
                         )
                         delayedServer
 
 instance
     ( HasServer (Verb method status ctypes a) context
-    , HasContextEntry context (ReadPersistence model)
+    , HasContextEntry context (ReadPersistence model ())
     )
     => HasServer (CbQuery' model (Verb method status ctypes a)) context
     where
@@ -125,18 +137,18 @@ instance
     hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: ReadPersistence model of
+        case getContextEntry context :: ReadPersistence model () of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbQuery server) -> server (liftIO $ getModel p)
+                        ( \(CbQuery server) -> server (liftIO $ getModel p ())
                         )
                         delayedServer
 
 instance
     ( HasServer (Verb method status ctypes a) context
     , CanMutate method ~ 'True
-    , HasContextEntry context (WritePersistence model event)
+    , HasContextEntry context (WritePersistence model () event)
     )
     => HasServer (CbCmd' model event (Verb method status ctypes a)) context
     where
@@ -152,10 +164,10 @@ instance
         CbCmd $ \transact -> f (action transact)
 
     route _ context delayedServer =
-        case getContextEntry context :: WritePersistence model event of
+        case getContextEntry context :: WritePersistence model () event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbCmd server) -> server $ runCmd p
+                        ( \(CbCmd server) -> server $ runCmd p ()
                         )
                         delayedServer

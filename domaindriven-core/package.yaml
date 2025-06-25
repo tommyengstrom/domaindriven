@@ -81,19 +81,21 @@ library:
     - containers
     - deepseq
     - exceptions
+    - hashable
     - http-types 
     - mtl
     - postgresql-simple
     - random
+    - resource-pool
     - streamly
     - streamly-core 
     - template-haskell
+    - text
     - time 
     - transformers 
     - unliftio 
-    - resource-pool
-    - uuid 
     - unordered-containers 
+    - uuid 
     - vector
 tests:
   domaindriven-core-test:

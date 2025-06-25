@@ -80,6 +80,7 @@ library
     , deepseq
     , exceptions
     , generic-lens
+    , hashable
     , http-types
     , microlens
     , mtl
@@ -89,6 +90,7 @@ library
     , streamly
     , streamly-core
     , template-haskell
+    , text
     , time
     , transformers
     , unliftio
