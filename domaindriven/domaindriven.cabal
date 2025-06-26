@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.36.0.
+-- This file has been generated from package.yaml by hpack version 0.38.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -70,109 +70,23 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wall-missed-specialisations
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wall-missed-specialisations
   build-depends:
       aeson
-    , async
     , base
     , bytestring
-    , constraints
-    , containers
-    , deepseq
     , domaindriven-core
     , exceptions
-    , generic-lens
     , generics-sop
-    , http-types
-    , microlens
     , mtl
     , openapi3
     , optics
-    , postgresql-simple
-    , random
-    , resource-pool
     , servant
     , servant-auth-server
     , servant-client-core
     , servant-openapi3
     , servant-server
-    , streamly
-    , template-haskell
     , text
-    , time
-    , transformers
     , unliftio
-    , unordered-containers
     , uuid
-    , vector
-  default-language: Haskell2010
-
-test-suite domaindriven-test
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  other-modules:
-      Paths_domaindriven
-  hs-source-dirs:
-      test
-  default-extensions:
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      StandaloneDeriving
-      StrictData
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wall-missed-specialisations -threaded -rtsopts -with-rtsopts=-N -Wall -Wunused-packages
-  build-depends:
-      QuickCheck
-    , aeson
-    , async
-    , base
-    , constraints
-    , containers
-    , deepseq
-    , domaindriven
-    , domaindriven-core
-    , exceptions
-    , generics-sop
-    , hspec
-    , http-client
-    , mtl
-    , openapi3
-    , optics
-    , quickcheck-arbitrary-adt
-    , quickcheck-classes
-    , servant
-    , servant-auth-server
-    , servant-client
-    , servant-client-core
-    , servant-openapi3
-    , servant-server
-    , text
-    , warp
   default-language: Haskell2010

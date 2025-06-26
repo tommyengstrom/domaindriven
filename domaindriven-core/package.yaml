@@ -22,8 +22,6 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 dependencies:
 - aeson 
 - base 
-- generic-lens 
-- microlens 
 
 
 default-extensions:
@@ -62,6 +60,7 @@ default-extensions:
 
 ghc-options:
 - -Wall
+- -Werror
 - -Wcompat
 - -Widentities
 - -Wincomplete-record-updates
@@ -76,27 +75,23 @@ ghc-options:
 library:
   source-dirs: src
   dependencies:
-    - async
-    - bytestring
     - containers
     - deepseq
     - exceptions
     - hashable
-    - http-types 
     - mtl
     - postgresql-simple
     - random
     - resource-pool
+    - generic-lens 
+    - microlens 
     - streamly
-    - streamly-core 
-    - template-haskell
+    - streamly-core
     - text
     - time 
-    - transformers 
     - unliftio 
     - unordered-containers 
-    - uuid 
-    - vector
+    - uuid
 tests:
   domaindriven-core-test:
     main:                Spec.hs
@@ -107,7 +102,6 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     - -Wall
-    - -Wunused-packages
     dependencies:
     - containers
     - domaindriven-core
@@ -115,7 +109,6 @@ tests:
     - text
     - postgresql-simple
     - streamly
-    - streamly-core
     - time
     - unliftio
     - unliftio-pool

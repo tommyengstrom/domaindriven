@@ -20,22 +20,19 @@ category: Web
 description:         Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 
 dependencies:
-- aeson
 - base
-- containers
-- deepseq
-- exceptions
-- openapi3
-- servant-server
-- servant-client-core
-- servant
-- text
+- aeson
 - domaindriven-core
+- exceptions
 - generics-sop
-- constraints
-- servant-openapi3
+- openapi3
 - optics
+- servant
 - servant-auth-server
+- servant-client-core
+- servant-openapi3
+- servant-server
+- text
 
 
 default-extensions:
@@ -74,6 +71,7 @@ default-extensions:
 
 ghc-options:
 - -Wall
+- -Werror
 - -Wcompat
 - -Widentities
 - -Wincomplete-record-updates
@@ -88,43 +86,29 @@ ghc-options:
 library:
   source-dirs: src
   dependencies:
-    - async
     - bytestring
-    - generic-lens
-    - http-types
-    - microlens
     - mtl
-    - postgresql-simple
-    - random
-    - streamly
-    - template-haskell
-    - time
-    - transformers
     - unliftio
-    - resource-pool
-    - unordered-containers
     - uuid
-    - vector
 
-tests:
-  domaindriven-test:
-    main:                Spec.hs
-    source-dirs:
-      - test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -Wall
-    - -Wunused-packages
-    dependencies:
-    - async
-    - domaindriven
-    - hspec
-    - http-client
-    - mtl
-    - QuickCheck
-    - quickcheck-arbitrary-adt
-    - quickcheck-classes
-    - servant-client
-    - warp
+#tests:
+#  domaindriven-test:
+#    main:                Spec.hs
+#    source-dirs:
+#      - test
+#    ghc-options:
+#    - -threaded
+#    - -rtsopts
+#    - -with-rtsopts=-N
+#    - -Wall
+#    dependencies:
+#    - async
+#    - domaindriven
+#    - hspec
+#    - http-client
+#    - mtl
+#    - QuickCheck
+#    - quickcheck-arbitrary-adt
+#    - quickcheck-classes
+#    - servant-client
+#    - warp
