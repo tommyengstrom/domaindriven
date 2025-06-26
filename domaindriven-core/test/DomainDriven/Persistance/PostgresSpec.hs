@@ -57,7 +57,7 @@ spec = do
         migrationSpec -- make sure migrationSpec is run last!
     processedEvents <- runIO $ newTVarIO (Set.empty :: Set UUID)
     let postHook
-            :: PostgresEvent TestModel NoIndex TestEvent
+            :: PostgresEvent NoIndex TestModel TestEvent
             -> NoIndex
             -> TestModel
             -> [Stored TestEvent]
@@ -86,13 +86,13 @@ applyTestEvent m ev = case storedEvent ev of
     SubtractOne -> m - 1
     Reset -> 0
 
-noHook :: PostgresEvent TestModel NoIndex TestEvent
+noHook :: PostgresEvent NoIndex TestModel TestEvent
     -> NoIndex -> TestModel -> [Stored TestEvent] -> IO ()
 noHook _ _ _ _ = pure ()
 
 setupPersistance
-    :: (PostgresEvent TestModel NoIndex TestEvent -> NoIndex -> TestModel -> [Stored TestEvent] -> IO ())
-    -> ((PostgresEvent TestModel NoIndex TestEvent, Pool Connection) -> IO ())
+    :: (PostgresEvent NoIndex TestModel TestEvent -> NoIndex -> TestModel -> [Stored TestEvent] -> IO ())
+    -> ((PostgresEvent NoIndex TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistance postHook test = do
     dropEventTables =<< mkTestConn
@@ -108,7 +108,7 @@ setupPersistance postHook test = do
         )
 
 setupPersistanceIndexed
-    :: ((PostgresEvent TestModel Indexed TestEvent, Pool Connection) -> IO ())
+    :: ((PostgresEvent Indexed TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistanceIndexed test = do
     dropEventTables =<< mkTestConn
@@ -150,7 +150,7 @@ tableNames et = case et of
 
 
 
-writeEventsSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+writeEventsSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
     let ev1 :: Stored TestEvent
         ev1 =
@@ -183,7 +183,7 @@ writeEventsSpec = describe "queryEvents" $ do
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
-indexedSpec :: SpecWith (PostgresEvent TestModel Indexed TestEvent, Pool Connection)
+indexedSpec :: SpecWith (PostgresEvent Indexed TestModel TestEvent, Pool Connection)
 indexedSpec = describe "Indexed models" $ do
     it "Models with different indices are updated separately" $ \(p, pool) -> do
         let evs1 = [AddOne, SubtractOne, AddOne]
@@ -243,7 +243,7 @@ indexedSpec = describe "Indexed models" $ do
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
 
 
-streamingSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+streamingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
     it "getEventList and getEventStream yields the same result" $ \(p, pool) -> do
         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
@@ -257,7 +257,7 @@ streamingSpec = describe "steaming" $ do
         fmap storedEvent evStream `shouldBe` fmap storedEvent evList
         evStream `shouldBe` evList
 
-queryEventsSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+queryEventsSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 queryEventsSpec = describe "queryEvents" $ do
     it "Can query events" $ \(_p, pool) -> withResource pool $ \conn -> do
         evs <- queryEvents @TestEvent conn (getEventTableName eventTable) NoIndex
@@ -289,7 +289,7 @@ queryEventsSpec = describe "queryEvents" $ do
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
 postHookSpec
-    :: TVar (Set UUID) -> SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+    :: TVar (Set UUID) -> SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 postHookSpec processedEvents = describe "updateHook" $ do
     it "Ensure we start with empty TVar" $ \_ -> do
         events <- readTVarIO processedEvents
@@ -312,7 +312,7 @@ postHookSpec processedEvents = describe "updateHook" $ do
         m' <- getModel p NoIndex
         m' `shouldBe` 0
 
-migrationSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+migrationSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 migrationSpec = describe "migrate1to1" $ do
     it "Keeps all events when using `id` to update" $ \(_p, pool) -> do
         evs <- withResource pool $ \conn ->
@@ -371,14 +371,14 @@ migrationSpec = describe "migrate1to1" $ do
                 brokenExists `shouldBe` False
             _ -> fail "Unexpectedly lacking table versions!"
 
-migrationConcurrencySpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+migrationConcurrencySpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 migrationConcurrencySpec = describe "Event table is locked during migration" $ do
     it "migrate1to1" $ \(m0, pool) -> migrationTest m0 pool mig1to1
     it "migrate1toMany" $ \(m0, pool) -> migrationTest m0 pool mig1toMany
     it "migrate1toManyWithState" $ \(m0, pool) -> migrationTest m0 pool mig1toManyState
   where
     migrationTest
-        :: PostgresEvent TestModel NoIndex TestEvent
+        :: PostgresEvent NoIndex TestModel TestEvent
         -> Pool Connection
         -> EventMigration
         -> IO ()
@@ -427,7 +427,7 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         threadDelay 250000
         pure a
 
-loggingSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
+loggingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 loggingSpec = describe "Callstacks" $ do
     it "Callstack for runCmd reference this file" $ \(p', _) -> do
         (logVar, p) <- withStmLogger p'
@@ -451,8 +451,8 @@ loggingSpec = describe "Callstacks" $ do
         let thisFile = "DomainDriven/Persistance/PostgresSpec.hs"
         logs `shouldSatisfy` all ((thisFile `L.isInfixOf`) . show)
     withStmLogger
-        :: PostgresEvent TestModel NoIndex TestEvent
-        -> IO (TVar [LogEntry], PostgresEvent TestModel NoIndex TestEvent)
+        :: PostgresEvent NoIndex TestModel TestEvent
+        -> IO (TVar [LogEntry], PostgresEvent NoIndex TestModel TestEvent)
     withStmLogger p = do
         logVar <- newTVarIO []
         pure (logVar, p{logger = \s -> atomically $ modifyTVar logVar (s :)})

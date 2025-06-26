@@ -73,7 +73,6 @@ ghc-options:
 - -Wincomplete-record-updates
 - -Wincomplete-patterns
 - -Wunused-packages
-- -Wall-missed-specialisations
 
 executables:
   simple-example:
