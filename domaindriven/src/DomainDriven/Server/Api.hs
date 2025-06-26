@@ -28,23 +28,38 @@ type CbQuery model a = CbQuery' model (Verb 'GET 200 '[JSON] a)
 type Query model a = Query' model (Verb 'GET 200 '[JSON] a)
 
 data Cmd' (model :: Type) (event :: Type) (verb :: Type)
-
 data Query' (model :: Type) (verb :: Type)
-
 data CbQuery' (model :: Type) (verb :: Type)
-
 data CbCmd' (model :: Type) (event :: Type) (verb :: Type)
 
+type CmdI index model event a = CmdI' index model event (Verb 'POST 200 '[JSON] a)
+type CbCmdI index model event a = CbCmdI' index model event (Verb 'POST 200 '[JSON] a)
+type CbQueryI index model a = CbQueryI' index model (Verb 'GET 200 '[JSON] a)
+type QueryI index model a = QueryI' index model (Verb 'GET 200 '[JSON] a)
+
+data CmdI' (index :: Type) (model :: Type) (event :: Type) (verb :: Type)
+data QueryI' (index :: Type) (model :: Type) (verb :: Type)
+data CbQueryI' (index :: Type) (model :: Type) (verb :: Type)
+data CbCmdI' (index :: Type) (model :: Type) (event :: Type) (verb :: Type)
+
 instance HasOpenApi verb => HasOpenApi (Cmd' model event verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+instance HasOpenApi verb => HasOpenApi (CmdI' index model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
 instance HasOpenApi verb => HasOpenApi (CbCmd' model event verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
+instance HasOpenApi verb => HasOpenApi (CbCmdI' index model event verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
 
 instance HasOpenApi verb => HasOpenApi (Query' model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
+instance HasOpenApi verb => HasOpenApi (QueryI' index model verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
 
 instance HasOpenApi verb => HasOpenApi (CbQuery' model verb) where
+    toOpenApi _ = toOpenApi $ Proxy @verb
+instance HasOpenApi verb => HasOpenApi (CbQueryI' index model verb) where
     toOpenApi _ = toOpenApi $ Proxy @verb
 
 data NamedField = NamedField Symbol Type
@@ -136,12 +151,21 @@ instance IsOptional (Maybe t) where
 instance {-# OVERLAPPABLE #-} IsOptional t where
     isOptional = False
 
+
 instance
     {-# OVERLAPPING #-}
     HasClient m (Verb method status cts ret)
     => HasClient m (Cmd' model event (Verb method status cts ret))
     where
     type Client m (Cmd' model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CmdI' index model event (Verb method status cts ret))
+    where
+    type Client m (CmdI' index model event (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
 
@@ -153,6 +177,14 @@ instance
     type Client m (CbCmd' model event (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CbCmdI' index model event (Verb method status cts ret))
+    where
+    type Client m (CbCmdI' index model event (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
 
 instance
     {-# OVERLAPPING #-}
@@ -162,6 +194,14 @@ instance
     type Client m (Query' model (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (QueryI' index model (Verb method status cts ret))
+    where
+    type Client m (QueryI' index model (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
 
 instance
     {-# OVERLAPPING #-}
@@ -169,5 +209,13 @@ instance
     => HasClient m (CbQuery' model (Verb method status cts ret))
     where
     type Client m (CbQuery' model (Verb method status cts ret)) = m ret
+    clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
+    hoistClientMonad _ _ f ma = f ma
+instance
+    {-# OVERLAPPING #-}
+    HasClient m (Verb method status cts ret)
+    => HasClient m (CbQueryI' index model (Verb method status cts ret))
+    where
+    type Client m (CbQueryI' index model (Verb method status cts ret)) = m ret
     clientWithRoute pm _ = clientWithRoute pm (Proxy @(Verb method status cts ret))
     hoistClientMonad _ _ f ma = f ma

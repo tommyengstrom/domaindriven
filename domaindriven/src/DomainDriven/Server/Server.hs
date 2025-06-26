@@ -30,7 +30,8 @@ data CbQueryServer (model :: Type) m a where
   CbQuery :: ((forall n. (HasCallStack, MonadIO n) => n model) -> m a) -> CbQueryServer model m a
 
 data CbCmdServer (model :: Type) (event :: Type) m a where
-  CbCmd :: ((forall n b. (HasCallStack, MonadUnliftIO n) => RunCmd model event n b) -> m a) -> CbCmdServer model event m a
+  CbCmd :: ((forall n b. (HasCallStack, MonadUnliftIO n) =>
+        RunCmd model event n b) -> m a) -> CbCmdServer model event m a
 
 
 instance MonadError ServerError m => ThrowAll (CmdServer model event m a) where
@@ -44,6 +45,38 @@ instance MonadError ServerError m => ThrowAll (QueryServer model m a) where
 
 instance MonadError ServerError m => ThrowAll (CbQueryServer model m a) where
     throwAll err = CbQuery $ \_ -> throwAll err
+
+
+data CmdServerI (index :: Type) (model :: Type) (event :: Type) m a
+    = CmdI index (model -> m (model -> a, [event]))
+
+data QueryServerI (index :: Type) (model :: Type) m a
+    = QueryI index (model -> m a)
+
+data CbQueryServerI (index :: Type) (model :: Type) m a
+    = CbQueryI index ((forall n. MonadIO n => n model) -> m a)
+
+data CbCmdServerI (index :: Type) (model :: Type) (event :: Type) m a
+    = CbCmdI
+        index
+        ( ( forall n b
+             . MonadUnliftIO n
+            => RunCmd model event n b
+          )
+          -> m a
+        )
+
+instance MonadError ServerError m => ThrowAll (CmdServerI model index event m a) where
+    throwAll = CmdI undefined . throwAll
+
+instance MonadError ServerError m => ThrowAll (CbCmdServerI model index event m a) where
+    throwAll err = CbCmdI undefined $ \_ -> throwAll err
+
+instance MonadError ServerError m => ThrowAll (QueryServerI model index m a) where
+    throwAll = QueryI undefined . throwAll
+
+instance MonadError ServerError m => ThrowAll (CbQueryServerI model index m a) where
+    throwAll err = CbQueryI undefined $ \_ -> throwAll err
 
 type family CanMutate (method :: StdMethod) :: Bool where
     CanMutate 'GET = 'False
@@ -104,6 +137,31 @@ instance
                             either throwError pure handlerRes
                         )
                         delayedServer
+instance
+    ( HasServer (Verb method status ctypes a) context
+    , CanMutate method ~ 'True
+    , HasContextEntry context (WritePersistence model index event)
+    )
+    => HasServer (CmdI' index model event (Verb method status ctypes a)) context
+    where
+    type
+        ServerT (CmdI' index model event (Verb method status ctypes a)) m =
+            CmdServerI index model event m a
+    hoistServerWithContext _ _ f (CmdI index action) =
+        CmdI index $ \model -> f (action model)
+
+    route _ context delayedServer =
+        case getContextEntry context :: WritePersistence model index event of
+            WritePersistence p ->
+                route (Proxy @(Verb method status ctypes a)) context $
+                    mapServer
+                        ( \(CmdI index server) -> do
+                            handlerRes <-
+                                liftIO . Control.Monad.Catch.try . runCmd p index $
+                                    either throwIO pure <=< runHandler . server
+                            either throwError pure handlerRes
+                        )
+                        delayedServer
 
 instance
     ( HasServer (Verb method status ctypes a) context
@@ -121,6 +179,26 @@ instance
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
                         ( \(Query server) -> server =<< liftIO (getModel p NoIndex)
+                        )
+                        delayedServer
+instance
+    ( HasServer (Verb method status ctypes a) context
+    , HasContextEntry context (ReadPersistence model index)
+    )
+    => HasServer (QueryI' index model (Verb method status ctypes a)) context
+    where
+    type ServerT (QueryI' index model (Verb method status ctypes a)) m =
+        QueryServerI index model m a
+
+    hoistServerWithContext _ _ f (QueryI index action) =
+        QueryI index $ \model -> f (action model)
+
+    route _ context delayedServer =
+        case getContextEntry context :: ReadPersistence model index of
+            ReadPersistence p ->
+                route (Proxy @(Verb method status ctypes a)) context $
+                    mapServer
+                        ( \(QueryI index server) -> server =<< liftIO (getModel p index)
                         )
                         delayedServer
 
@@ -142,6 +220,28 @@ instance
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
                         ( \(CbQuery server) -> server (liftIO $ getModel p NoIndex)
+                        )
+                        delayedServer
+
+instance
+    ( HasServer (Verb method status ctypes a) context
+    , HasContextEntry context (ReadPersistence model index)
+    )
+    => HasServer (CbQueryI' index model (Verb method status ctypes a)) context
+    where
+    type
+        ServerT (CbQueryI' index model (Verb method status ctypes a)) m =
+            CbQueryServerI index model m a
+
+    hoistServerWithContext _ _ f (CbQueryI index action) =
+            CbQueryI index $ \model -> f (action model)
+
+    route _ context delayedServer =
+        case getContextEntry context :: ReadPersistence model index of
+            ReadPersistence p ->
+                route (Proxy @(Verb method status ctypes a)) context $
+                    mapServer
+                        ( \(CbQueryI index server) -> server (liftIO $ getModel p index)
                         )
                         delayedServer
 
@@ -169,5 +269,33 @@ instance
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
                         ( \(CbCmd server) -> server $ runCmd p NoIndex
+                        )
+                        delayedServer
+
+instance
+    ( HasServer (Verb method status ctypes a) context
+    , CanMutate method ~ 'True
+    , HasContextEntry context (WritePersistence model index event)
+    )
+    => HasServer (CbCmdI' index model event (Verb method status ctypes a)) context
+    where
+    type
+        ServerT (CbCmdI' index model event (Verb method status ctypes a)) m =
+            CbCmdServerI
+                index
+                model
+                event
+                m
+                a
+
+    hoistServerWithContext _ _ f (CbCmdI index action) =
+        CbCmdI index $ \transact -> f (action transact)
+
+    route _ context delayedServer =
+        case getContextEntry context :: WritePersistence model index event of
+            WritePersistence p ->
+                route (Proxy @(Verb method status ctypes a)) context $
+                    mapServer
+                        ( \(CbCmdI index server) -> server $ runCmd p index
                         )
                         delayedServer

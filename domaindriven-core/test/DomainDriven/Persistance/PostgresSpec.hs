@@ -69,6 +69,7 @@ spec = do
 
     around (setupPersistance noHook) migrationConcurrencySpec
     around (setupPersistance noHook) loggingSpec
+    around setupPersistanceIndexed indexedSpec
 
 type TestModel = Int
 
@@ -105,6 +106,20 @@ setupPersistance postHook test = do
         , pool
         )
 
+setupPersistanceIndexed
+    :: ((PostgresEvent TestModel Indexed TestEvent, Pool Connection) -> IO ())
+    -> IO ()
+setupPersistanceIndexed test = do
+    dropEventTables =<< mkTestConn
+    let stripesAndResources = 5
+    poolCfg <-
+        setNumStripes (Just stripesAndResources)
+            <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
+    pool <- newPool poolCfg
+    p <- postgresWriteModel pool eventTable applyTestEvent 0
+    test (p{chunkSize = 2}, pool)
+
+
 mkTestConn :: IO Connection
 mkTestConn =
     connect $
@@ -131,6 +146,8 @@ tableNames :: EventTable -> [EventTableName]
 tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
+
+
 
 writeEventsSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
@@ -164,6 +181,29 @@ writeEventsSpec = describe "queryEvents" $ do
             writeEvents conn (getEventTableName eventTable) NoIndex storedEvs
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
+
+indexedSpec :: SpecWith (PostgresEvent TestModel Indexed TestEvent, Pool Connection)
+indexedSpec = describe "indexed" $ do
+    it "Indexed models are updated separately" $ \(p, pool) -> do
+        let evs1 = [AddOne, SubtractOne, AddOne]
+            evs2 = [AddOne, AddOne, AddOne]
+
+        storedEvs1 <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                evs1
+        storedEvs2 <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                evs2
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) (Indexed "1") storedEvs1
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) (Indexed "2") storedEvs2
+        m1 <- getModel p (Indexed "1")
+        m2 <- getModel p (Indexed "2")
+        m1 `shouldBe` 1
+        m2 `shouldBe` 3
 
 streamingSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do

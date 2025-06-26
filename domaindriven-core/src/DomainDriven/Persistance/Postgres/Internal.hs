@@ -314,12 +314,19 @@ queryEventsAfter conn eventTable (EventNumber lastEvent) =
 newtype EventQuery = EventQuery {getPgQuery :: PG.Query}
     deriving (Show, Generic)
 
-mkEventsAfterQuery :: EventTableName -> EventNumber -> EventQuery
-mkEventsAfterQuery eventTable (EventNumber lastEvent) =
+mkEventsAfterQuery
+    :: IsPgIndex index
+    => EventTableName
+    -> index
+    -> EventNumber
+    -> EventQuery
+mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
     EventQuery $
         "select id, event_number,timestamp,event from \""
             <> fromString eventTable
-            <> "\" where event_number > "
+            <> "\" where index = "
+            <> toQuery index
+            <> " and event_number > "
             <> fromString (show lastEvent)
             <> " order by event_number"
 
@@ -581,7 +588,7 @@ refreshModel pgt index = withExclusiveLock pgt $ do --FIXME: we should only lock
             mkEventStream
                 (pgt ^. field @"chunkSize")
                 (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
-                (mkEventsAfterQuery (pgt ^. field @"eventTableName") lastEventNo)
+                (mkEventsAfterQuery (pgt ^. field @"eventTableName") index lastEventNo)
 
         applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
         applyModel (NumberedModel m _) (ev, evNumber) =

@@ -21,3 +21,5 @@ allow-newer-deps:
   - servant-auth-server
   - servant-openapi3
   - insert-ordered-containers
+
+system-ghc: true
