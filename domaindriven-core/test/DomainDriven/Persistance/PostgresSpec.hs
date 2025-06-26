@@ -17,6 +17,7 @@ import Data.Traversable
 import Data.UUID (UUID, nil)
 import Data.UUID.V4 qualified as V4
 import Database.PostgreSQL.Simple
+import Data.Text qualified as T
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
@@ -30,7 +31,7 @@ import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
-import UnliftIO (TVar, atomically, concurrently, modifyTVar, newTVarIO, readTVarIO, try)
+import UnliftIO (TVar, atomically, concurrently, modifyTVar, newTVarIO, readTVarIO, try, forConcurrently)
 import UnliftIO.Pool
 import Prelude
 
@@ -182,9 +183,12 @@ writeEventsSpec = describe "queryEvents" $ do
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
+doit :: IO ()
+doit = hspec $ around setupPersistanceIndexed indexedSpec
+
 indexedSpec :: SpecWith (PostgresEvent TestModel Indexed TestEvent, Pool Connection)
-indexedSpec = describe "indexed" $ do
-    it "Indexed models are updated separately" $ \(p, pool) -> do
+indexedSpec = describe "Indexed models" $ do
+    it "Models with different indices are updated separately" $ \(p, pool) -> do
         let evs1 = [AddOne, SubtractOne, AddOne]
             evs2 = [AddOne, AddOne, AddOne]
 
@@ -204,6 +208,42 @@ indexedSpec = describe "indexed" $ do
         m2 <- getModel p (Indexed "2")
         m1 `shouldBe` 1
         m2 `shouldBe` 3
+    it "Updates to different indices can be done in parallel" $ \(p, pool) -> do
+        let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            testCmd i m = do
+                threadDelay 10000 -- 0.1s delay
+                pure (const m, replicate i AddOne)
+        t0 <- getCurrentTime
+        models <- forConcurrently ([1 .. 20] :: [Int]) $ \i -> do
+            let index = Indexed (T.pack $ show i)
+            _ <- runCmd p index $ testCmd i
+            getModel p index
+
+        t1 <- getCurrentTime
+
+        models `shouldSatisfy` (== 20) . length
+        models `shouldSatisfy`  (== [1,2..20])
+        print $ diffUTCTime t1 t0
+        diffUTCTime t1 t0 `shouldSatisfy` (> 0.1)
+        diffUTCTime t1 t0 `shouldSatisfy` (< 0.9)
+
+    it "Updates to same index are done sequentially" $ \(p, pool) -> do
+        let testCmd :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            testCmd m = do
+                threadDelay 10000 -- 0.1s delay
+                pure (id, [AddOne, AddOne])
+        t0 <- getCurrentTime
+        models <- forConcurrently ([1 .. 20] :: [Int]) $ \_ -> do
+            let index = Indexed "the same"
+            runCmd p index testCmd
+
+        t1 <- getCurrentTime
+
+        models `shouldSatisfy` (== 20)  . length
+        models `shouldSatisfy` (== [2,4..40])
+        print $ diffUTCTime t1 t0
+        diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
+
 
 streamingSpec :: SpecWith (PostgresEvent TestModel NoIndex TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do

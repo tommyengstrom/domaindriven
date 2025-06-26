@@ -112,6 +112,7 @@ tests:
     - containers
     - domaindriven-core
     - hspec
+    - text
     - postgresql-simple
     - streamly
     - streamly-core

@@ -152,6 +152,7 @@ test-suite domaindriven-core-test
     , postgresql-simple
     , streamly
     , streamly-core
+    , text
     , time
     , unliftio
     , unliftio-pool
