@@ -349,30 +349,59 @@ queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
             <> "\" where event_number > "
             <> fromString (show lastEvent)
 
+-- writeEvents
+--     :: forall a
+--      . ToJSON a
+--     => Connection
+--     -> EventTableName
+--     -> [Stored a]
+--     -> IO EventNumber
+-- writeEvents conn eventTable storedEvents = do
+--     _ <-
+--         executeMany
+--             conn
+--             ( "insert into \""
+--                 <> fromString eventTable
+--                 <> "\" (id, timestamp, event) \
+--                    \values (?, ?, ?)"
+--             )
+--             ( fmap
+--                 (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
+--                 storedEvents
+--             )
+--     foldl' max 0 . fmap fromOnly
+--         <$> query_
+--             conn
+--             ("select coalesce(max(event_number),1) from \"" <> fromString eventTable <> "\"")
 writeEvents
-    :: forall a
-     . ToJSON a
+    :: forall a index
+     . ( ToJSON a
+       , IsPgIndex index
+       )
     => Connection
     -> EventTableName
+    -> index
     -> [Stored a]
     -> IO EventNumber
-writeEvents conn eventTable storedEvents = do
+writeEvents conn eventTable index storedEvents = do
     _ <-
         executeMany
             conn
             ( "insert into \""
                 <> fromString eventTable
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
+                <> "\" (id, index, timestamp, event) \
+                   \values (?, ?, ?, ?)"
             )
             ( fmap
-                (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
+                (\x -> (storedUUID x
+                        , toPgIndex index, storedTimestamp x, encode $ storedEvent x))
                 storedEvents
             )
     foldl' max 0 . fmap fromOnly
         <$> query_
             conn
-            ("select coalesce(max(event_number),1) from \"" <> fromString eventTable <> "\"")
+            ("select coalesce(max(event_number),1) from \""
+                <> fromString eventTable <> "\"")
 
 getEventStream'
     :: ( FromJSON event
@@ -605,6 +634,7 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent m i e)
                         ( writeEvents
                             (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
                             (pg ^. field @"eventTableName")
+                            index
                             storedEvs
                         )
             atomicModifyIORef

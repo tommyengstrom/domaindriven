@@ -143,11 +143,11 @@ writeEventsSpec = describe "queryEvents" $ do
                 }
 
     it "Can write event to database" $ \(_p, pool) -> withResource pool $ \conn -> do
-        i <- writeEvents conn (getEventTableName eventTable) [ev1]
+        i <- writeEvents conn (getEventTableName eventTable) NoIndex [ev1]
         i `shouldBe` 1
 
     it "Writing the same event again fails" $ \(_p, pool) -> withResource pool $ \conn -> do
-        writeEvents conn (getEventTableName eventTable) [ev1]
+        writeEvents conn (getEventTableName eventTable) NoIndex [ev1]
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
 
@@ -161,7 +161,7 @@ writeEventsSpec = describe "queryEvents" $ do
                 (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
                 evs
         _ <- withResource pool $ \conn ->
-            writeEvents conn (getEventTableName eventTable) storedEvs
+            writeEvents conn (getEventTableName eventTable) NoIndex storedEvs
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
@@ -171,7 +171,7 @@ streamingSpec = describe "steaming" $ do
         storedEvs <- for ([1 .. 10] :: [Int]) $ \i -> do
             Stored AddOne (UTCTime (fromGregorian 2020 10 15) (fromIntegral i)) <$> mkId
         _ <- withResource pool $ \conn ->
-            writeEvents conn (getEventTableName eventTable) storedEvs
+            writeEvents conn (getEventTableName eventTable) NoIndex storedEvs
         evList <- getEventList p NoIndex
         evStream <- Stream.toList $ getEventStream p NoIndex
         -- pPrint evList
@@ -194,6 +194,7 @@ queryEventsSpec = describe "queryEvents" $ do
                 writeEvents
                     conn
                     (getEventTableName eventTable)
+                    NoIndex
                     [Stored ev1 (UTCTime (fromGregorian 2020 10 20) 1) id1]
 
             id2 <- mkId
@@ -201,6 +202,7 @@ queryEventsSpec = describe "queryEvents" $ do
             writeEvents
                 conn
                 (getEventTableName eventTable)
+                NoIndex
                 [Stored ev2 (UTCTime (fromGregorian 2020 10 18) 1) id2]
 
         evs <- queryEvents @TestEvent conn (getEventTableName eventTable) NoIndex
@@ -252,7 +254,8 @@ migrationSpec = describe "migrate1to1" $ do
                     AddOne
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
-        withResource pool (\conn -> writeEvents conn (getEventTableName eventTable) [ev])
+        withResource pool
+            (\conn -> writeEvents conn (getEventTableName eventTable) NoIndex [ev])
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
     it "But can write to the new table" $ \(_p, pool) -> do
@@ -263,7 +266,8 @@ migrationSpec = describe "migrate1to1" $ do
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
 
-        void . withResource pool $ \conn -> writeEvents conn (getEventTableName eventTable2) [ev]
+        void . withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable2) NoIndex [ev]
 
     it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
         let eventTableBroken :: EventTable
