@@ -14,7 +14,7 @@ import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
 import Data.HashMap.Strict (HashMap)
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable, hash)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Maybe (fromMaybe)
@@ -232,7 +232,7 @@ runMigrations logger trans et = do
             -- Ensure migrations are done up until the previous table
             runMigrations logger trans prevEt
             -- Then lock lock the previous table before we start
-            exclusiveLock trans (getEventTableName prevEt)
+            exclusiveLock trans (getEventTableName prevEt) NoIndex
             t0 <- getCurrentTime
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
@@ -581,7 +581,7 @@ refreshModel
     => PostgresEventTrans m i e
     -> i
     -> IO (m, EventNumber)
-refreshModel pgt index = withExclusiveLock pgt $ do --FIXME: we should only lock the index column of the table.
+refreshModel pgt index = withExclusiveLock pgt index $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     NumberedModel model lastEventNo <- getCurrentState pgt index
     let eventStream =
@@ -607,14 +607,15 @@ refreshModel pgt index = withExclusiveLock pgt $ do --FIXME: we should only lock
                 (\a -> (HM.insert index newNumberedModel a, ()))
     pure (newModel, lastNewEventNo)
 
-exclusiveLock :: OngoingTransaction -> EventTableName -> IO ()
-exclusiveLock (OngoingTransaction connR _ _) etName =
-    void $
-        execute_ (Pool.resource connR) ("lock \"" <> fromString etName <> "\" in exclusive mode")
+exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
+exclusiveLock (OngoingTransaction connR _ _) _etName index = do
+    -- We use advisory locks in favor of row level locks as we would not have the ability
+    -- to lock an index before the first event is written with row level locks.
+    void $ (query (Pool.resource connR) "SELECT pg_advisory_xact_lock(?)" (Only (fromIntegral (hash index) :: Int64)) :: IO [Only ()])
 
-withExclusiveLock :: HasCallStack => PostgresEventTrans m i e -> IO a -> IO a
-withExclusiveLock pgt a = do
-    exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName")
+withExclusiveLock :: (HasCallStack, IsPgIndex i) => PostgresEventTrans m i e -> i -> IO a -> IO a
+withExclusiveLock pgt index a = do
+    exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index
     t0 <- getCurrentTime
     r <- a
     t1 <- getCurrentTime
@@ -626,7 +627,7 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent m i e)
     postUpdateHook pg i m e = liftIO $ (pg ^. field @"updateHook") pg i m e
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
-        withIOTrans pg $ \pgt -> withExclusiveLock pgt $ do
+        withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
             m <- getModel' pgt index
             (returnFun, evs) <- runInIO $ cmd m
             NumberedModel m' _ <- getCurrentState pg index

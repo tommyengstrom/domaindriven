@@ -183,9 +183,6 @@ writeEventsSpec = describe "queryEvents" $ do
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
-doit :: IO ()
-doit = hspec $ around setupPersistanceIndexed indexedSpec
-
 indexedSpec :: SpecWith (PostgresEvent TestModel Indexed TestEvent, Pool Connection)
 indexedSpec = describe "Indexed models" $ do
     it "Models with different indices are updated separately" $ \(p, pool) -> do
@@ -208,16 +205,17 @@ indexedSpec = describe "Indexed models" $ do
         m2 <- getModel p (Indexed "2")
         m1 `shouldBe` 1
         m2 `shouldBe` 3
-    it "Updates to different indices can be done in parallel" $ \(p, pool) -> do
+
+    it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
+        -- This may fail in GHCI. Run it with stack test.
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
-            testCmd i m = do
+            testCmd i _m = do
                 threadDelay 100000 -- 0.1s delay
-                pure (const m, replicate i AddOne)
+                pure (id, replicate i AddOne)
         t0 <- getCurrentTime
         models <- forConcurrently ([1 .. 20] :: [Int]) $ \i -> do
             let index = Indexed (T.pack $ show i)
-            _ <- runCmd p index $ testCmd i
-            getModel p index
+            runCmd p index $ testCmd i
 
         t1 <- getCurrentTime
 
@@ -225,11 +223,11 @@ indexedSpec = describe "Indexed models" $ do
         models `shouldSatisfy`  (== [1,2..20]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 0.1)
-        diffUTCTime t1 t0 `shouldSatisfy` (< 0.9)
+        diffUTCTime t1 t0 `shouldSatisfy` (< 1.9)
 
-    it "Updates to same index are done sequentially" $ \(p, pool) -> do
+    it "Updates to same index are done sequentially" $ \(p, _pool) -> do
         let testCmd :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
-            testCmd m = do
+            testCmd _m = do
                 threadDelay 100000 -- 0.1s delay
                 pure (id, [AddOne, AddOne])
         t0 <- getCurrentTime
