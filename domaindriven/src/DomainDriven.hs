@@ -6,6 +6,8 @@ import DomainDriven.Persistance.Class as X
     ( ReadModel (..)
     , Stored (..)
     , WriteModel (..)
+    , Indexed (..)
+    , NoIndex (..)
     , mkId
     , runCmd
     )

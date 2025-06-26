@@ -117,6 +117,7 @@ fullServer' = DomainDrivenServer fullServer
 app
     :: ( Model p ~ FullModel
        , Event p ~ FullEvent
+       , Index p ~ NoIndex
        , WriteModel p
        )
     => p

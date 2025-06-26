@@ -1,13 +1,16 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 module DomainDriven.Persistance.Postgres.Migration where
 
 import Control.Monad
 import Data.Aeson
+import Data.Foldable
 import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal
-    ( mkEventQuery
+    ( IsPgIndex (..)
+    , mkEventQuery
     , mkEventStream
     )
 import DomainDriven.Persistance.Postgres.Types
@@ -21,36 +24,40 @@ defaultChunkSize :: ChunkSize
 defaultChunkSize = 100
 
 migrateValue1to1
-    :: Connection
+    :: forall index
+   . IsPgIndex index
+    => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Value -> Value)
     -> IO ()
-migrateValue1to1 = migrateValue1to1' defaultChunkSize
+migrateValue1to1 = migrateValue1to1' @index defaultChunkSize
 
 migrateValue1to1'
-    :: ChunkSize
+    :: forall index
+    . IsPgIndex index
+    => ChunkSize
     -> Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Value -> Value)
     -> IO ()
 migrateValue1to1' chunkSize conn prevTName tName f =
-    migrate1to1' chunkSize conn prevTName tName (fmap f)
+    migrate1to1' @index chunkSize conn prevTName tName (fmap f)
 
 migrate1to1
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall index a b
+     . (FromJSON a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> Stored b)
     -> IO ()
-migrate1to1 = migrate1to1' defaultChunkSize
+migrate1to1 = migrate1to1' @index defaultChunkSize
 
 migrate1to1'
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall index a b
+     . (FromJSON a, ToJSON b, IsPgIndex index)
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -58,21 +65,21 @@ migrate1to1'
     -> (Stored a -> Stored b)
     -> IO ()
 migrate1to1' chunkSize conn prevTName tName f = do
-    migrate1toMany' chunkSize conn prevTName tName (pure . f)
+    migrate1toMany' @index chunkSize conn prevTName tName (pure . f)
 
 migrate1toMany
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall index a b
+     . (FromJSON a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (Stored a -> [Stored b])
     -> IO ()
-migrate1toMany = migrate1toMany' defaultChunkSize
+migrate1toMany = migrate1toMany' @index defaultChunkSize
 
 migrate1toMany'
-    :: forall a b
-     . (FromJSON a, ToJSON b)
+    :: forall index a b
+     . (FromJSON a, ToJSON b, IsPgIndex index)
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -80,22 +87,25 @@ migrate1toMany'
     -> (Stored a -> [Stored b])
     -> IO ()
 migrate1toMany' chunkSize conn prevTName tName f = do
-    migrate1toManyWithState' chunkSize conn prevTName tName (\_ a -> ((), f a)) ()
+    migrate1toManyWithState' @index chunkSize conn prevTName tName (\_ a -> ((), f a)) ()
 
 migrate1toManyWithState
-    :: forall a b state
-     . (FromJSON a, ToJSON b)
+    :: forall index a b state
+     . (FromJSON a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
     -> (state -> Stored a -> (state, [Stored b]))
     -> state
     -> IO ()
-migrate1toManyWithState = migrate1toManyWithState' defaultChunkSize
+migrate1toManyWithState = migrate1toManyWithState' @index defaultChunkSize
 
 migrate1toManyWithState'
-    :: forall a b state
-     . (FromJSON a, ToJSON b)
+    :: forall index a b state
+     . ( FromJSON a
+       , ToJSON b
+       , IsPgIndex index
+       )
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -103,29 +113,38 @@ migrate1toManyWithState'
     -> (state -> Stored a -> (state, [Stored b]))
     -> state
     -> IO ()
-migrate1toManyWithState' chunkSize conn prevTName tName f initialState =
-    Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt)))
-        . Stream.unfoldMany Unfold.fromList
-        . fmap snd
-        $ Stream.scan (Fold.foldl' (\b -> f (fst b)) (initialState, []))
-        $ fmap fst
-        $ mkEventStream chunkSize conn (mkEventQuery prevTName)
+migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
+    indices <- fetchAllIndices conn prevTName :: IO [index]
+    for_ indices $ \i ->
+        Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt i)))
+            . Stream.unfoldMany Unfold.fromList
+            . fmap snd
+            $ Stream.scan (Fold.foldl' (f . fst) (initialState, []))
+            $ fst <$> mkEventStream chunkSize conn (mkEventQuery prevTName i)
   where
-    writeIt :: [Stored b] -> IO Int64
-    writeIt events =
+    writeIt :: index -> [Stored b] -> IO Int64
+    writeIt index events =
         PG.executeMany
             conn
             ( "insert into \""
                 <> fromString tName
-                <> "\" (id, timestamp, event) \
-                   \values (?, ?, ?)"
+                <> "\" (id, index, timestamp, event) \
+                   \values (?, ?, ?, ?)"
             )
             ( fmap
-                ( \x ->
-                    ( storedUUID x
-                    , storedTimestamp x
-                    , encode $ storedEvent x
-                    )
-                )
+                (\x -> (storedUUID x, toPgIndex index, storedTimestamp x, encode $ storedEvent x))
                 events
             )
+
+
+
+fetchAllIndices
+    :: forall index
+     . IsPgIndex index
+    => Connection
+    -> EventTableName
+    -> IO [index]
+fetchAllIndices conn etName = fmap (fromPgIndex . fromOnly) <$> PG.query_ conn q
+  where
+    q :: PG.Query
+    q = "select distinct index from \"" <> fromString etName <> "\" order by index;"

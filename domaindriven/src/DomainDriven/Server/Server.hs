@@ -83,7 +83,7 @@ data ReadPersistence model index
 instance
     ( HasServer (Verb method status ctypes a) context
     , CanMutate method ~ 'True
-    , HasContextEntry context (WritePersistence model () event)
+    , HasContextEntry context (WritePersistence model NoIndex event)
     )
     => HasServer (Cmd' model event (Verb method status ctypes a)) context
     where
@@ -93,13 +93,13 @@ instance
     hoistServerWithContext _ _ f (Cmd action) = Cmd $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: WritePersistence model () event of
+        case getContextEntry context :: WritePersistence model NoIndex event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
                         ( \(Cmd server) -> do
                             handlerRes <-
-                                liftIO . Control.Monad.Catch.try . runCmd p () $
+                                liftIO . Control.Monad.Catch.try . runCmd p NoIndex $
                                     either throwIO pure <=< runHandler . server
                             either throwError pure handlerRes
                         )
@@ -107,7 +107,7 @@ instance
 
 instance
     ( HasServer (Verb method status ctypes a) context
-    , HasContextEntry context (ReadPersistence model ())
+    , HasContextEntry context (ReadPersistence model NoIndex)
     )
     => HasServer (Query' model (Verb method status ctypes a)) context
     where
@@ -116,17 +116,17 @@ instance
     hoistServerWithContext _ _ f (Query action) = Query $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: ReadPersistence model () of
+        case getContextEntry context :: ReadPersistence model NoIndex of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(Query server) -> server =<< liftIO (getModel p ())
+                        ( \(Query server) -> server =<< liftIO (getModel p NoIndex)
                         )
                         delayedServer
 
 instance
     ( HasServer (Verb method status ctypes a) context
-    , HasContextEntry context (ReadPersistence model ())
+    , HasContextEntry context (ReadPersistence model NoIndex)
     )
     => HasServer (CbQuery' model (Verb method status ctypes a)) context
     where
@@ -137,18 +137,18 @@ instance
     hoistServerWithContext _ _ f (CbQuery action) = CbQuery $ \model -> f (action model)
 
     route _ context delayedServer =
-        case getContextEntry context :: ReadPersistence model () of
+        case getContextEntry context :: ReadPersistence model NoIndex of
             ReadPersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbQuery server) -> server (liftIO $ getModel p ())
+                        ( \(CbQuery server) -> server (liftIO $ getModel p NoIndex)
                         )
                         delayedServer
 
 instance
     ( HasServer (Verb method status ctypes a) context
     , CanMutate method ~ 'True
-    , HasContextEntry context (WritePersistence model () event)
+    , HasContextEntry context (WritePersistence model NoIndex event)
     )
     => HasServer (CbCmd' model event (Verb method status ctypes a)) context
     where
@@ -164,10 +164,10 @@ instance
         CbCmd $ \transact -> f (action transact)
 
     route _ context delayedServer =
-        case getContextEntry context :: WritePersistence model () event of
+        case getContextEntry context :: WritePersistence model NoIndex event of
             WritePersistence p ->
                 route (Proxy @(Verb method status ctypes a)) context $
                     mapServer
-                        ( \(CbCmd server) -> server $ runCmd p ()
+                        ( \(CbCmd server) -> server $ runCmd p NoIndex
                         )
                         delayedServer

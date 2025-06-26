@@ -61,13 +61,14 @@ counterServer = DomainDrivenServer counterServers
 instance ApiTagFromLabel CounterApi where
     apiTagFromLabel = id
 
-app
+mkWaiApp
     :: Model p ~ CounterModel
     => Event p ~ CounterEvent
+    => Index p ~ NoIndex
     => WriteModel p
     => p
     -> Application
-app p =
+mkWaiApp p =
     serveWithContext
         (Proxy @ServantCounterApi)
         (ReadPersistence p :. WritePersistence p :. EmptyContext)
@@ -77,5 +78,5 @@ main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running on port " <> show port
-    p <- createForgetful applyEvent (CounterModel 0)
-    run port (app p)
+    p <- createForgetful @NoIndex applyEvent (CounterModel 0)
+    run port (mkWaiApp p)
