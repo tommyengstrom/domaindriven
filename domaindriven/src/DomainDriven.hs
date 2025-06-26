@@ -15,10 +15,14 @@ import DomainDriven.Server.Api as X
     ( CbCmd
     , CbQuery
     , Cmd
+    , Query
+    , CbCmdI
+    , CbQueryI
+    , CmdI
+    , QueryI
     , Field (..)
     , JsonObject (..)
     , NamedField (..)
-    , Query
     )
 import DomainDriven.Server.DomainDrivenApi as X
     ( ApiTagFromLabel (..)
@@ -35,6 +39,10 @@ import DomainDriven.Server.Server as X
     , CbQueryServer (..)
     , CmdServer (..)
     , QueryServer (..)
+    , CbCmdServerI (..)
+    , CbQueryServerI (..)
+    , CmdServerI (..)
+    , QueryServerI (..)
     , ReadPersistence (..)
     , WritePersistence (..)
     )
