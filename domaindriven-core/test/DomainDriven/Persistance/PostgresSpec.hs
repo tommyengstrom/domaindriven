@@ -211,7 +211,7 @@ indexedSpec = describe "Indexed models" $ do
     it "Updates to different indices can be done in parallel" $ \(p, pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
             testCmd i m = do
-                threadDelay 10000 -- 0.1s delay
+                threadDelay 100000 -- 0.1s delay
                 pure (const m, replicate i AddOne)
         t0 <- getCurrentTime
         models <- forConcurrently ([1 .. 20] :: [Int]) $ \i -> do
@@ -222,7 +222,7 @@ indexedSpec = describe "Indexed models" $ do
         t1 <- getCurrentTime
 
         models `shouldSatisfy` (== 20) . length
-        models `shouldSatisfy`  (== [1,2..20])
+        models `shouldSatisfy`  (== [1,2..20]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 0.1)
         diffUTCTime t1 t0 `shouldSatisfy` (< 0.9)
@@ -230,7 +230,7 @@ indexedSpec = describe "Indexed models" $ do
     it "Updates to same index are done sequentially" $ \(p, pool) -> do
         let testCmd :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
             testCmd m = do
-                threadDelay 10000 -- 0.1s delay
+                threadDelay 100000 -- 0.1s delay
                 pure (id, [AddOne, AddOne])
         t0 <- getCurrentTime
         models <- forConcurrently ([1 .. 20] :: [Int]) $ \_ -> do
@@ -240,7 +240,7 @@ indexedSpec = describe "Indexed models" $ do
         t1 <- getCurrentTime
 
         models `shouldSatisfy` (== 20)  . length
-        models `shouldSatisfy` (== [2,4..40])
+        models `shouldSatisfy` (== [2,4..40]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
 

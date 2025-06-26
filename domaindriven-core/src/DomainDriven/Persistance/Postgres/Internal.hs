@@ -614,8 +614,8 @@ exclusiveLock (OngoingTransaction connR _ _) etName =
 
 withExclusiveLock :: HasCallStack => PostgresEventTrans m i e -> IO a -> IO a
 withExclusiveLock pgt a = do
-    t0 <- getCurrentTime
     exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName")
+    t0 <- getCurrentTime
     r <- a
     t1 <- getCurrentTime
     pgt ^. field' @"logger" $
