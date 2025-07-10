@@ -60,7 +60,7 @@ data CbCmdServerI (index :: Type) (model :: Type) (event :: Type) m a
     = CbCmdI
         index
         ( ( forall n b
-             . MonadUnliftIO n
+             . (HasCallStack, MonadUnliftIO n)
             => RunCmd model event n b
           )
           -> m a

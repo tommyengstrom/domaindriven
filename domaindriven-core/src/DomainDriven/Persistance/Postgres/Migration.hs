@@ -8,11 +8,7 @@ import Data.Int
 import Data.String
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
-import DomainDriven.Persistance.Postgres.Internal
-    ( IsPgIndex (..)
-    , mkEventQuery
-    , mkEventStream
-    )
+import DomainDriven.Persistance.Postgres.Internal (mkEventQuery, mkEventStream)
 import DomainDriven.Persistance.Postgres.Types
 import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude qualified as Stream

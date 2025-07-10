@@ -10,7 +10,7 @@ import Data.Generics.Labels ()
 import Data.Generics.Product
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (Hashable, hash)
+import Data.Hashable (hash)
 import Data.IORef
 import Data.Int
 import Data.Maybe (fromMaybe)
@@ -18,8 +18,6 @@ import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
-import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Time
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
@@ -47,19 +45,6 @@ data LogEntry
     | WaitForConnectionDuration NominalDiffTime OneLineCallStack
     deriving (Show, Generic)
 
-class Hashable a => IsPgIndex a where
-    toPgIndex :: a -> Text -- FIXME: Should not be Text
-    fromPgIndex :: Text -> a
-    toQuery :: a -> Query
-    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
-
-instance IsPgIndex NoIndex where
-    toPgIndex = const "0"
-    fromPgIndex _ = NoIndex
-
-instance IsPgIndex Indexed where
-    toPgIndex (Indexed t) = t
-    fromPgIndex = Indexed
 
 newtype OneLineCallStack = OneLineCallStack CallStack
 

@@ -3,6 +3,8 @@ module DomainDriven.Persistance.Postgres.Types where
 import Control.Monad.Catch
 import Data.Aeson
 import Data.Int
+import Data.Text qualified as T
+import Data.String
 import Data.Pool.Introspection as Pool
 import Data.Time
 import Data.Typeable
@@ -12,6 +14,8 @@ import Database.PostgreSQL.Simple qualified as PG
 import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
+import Data.Hashable (Hashable)
+import Data.Text (Text)
 import Prelude
 
 data PersistanceError
@@ -24,6 +28,20 @@ type EventVersion = Int
 type EventTableName = String
 type PreviousEventTableName = String
 type ChunkSize = Int
+
+class Hashable a => IsPgIndex a where
+    toPgIndex :: a -> Text -- FIXME: Should not be Text
+    fromPgIndex :: Text -> a
+    toQuery :: a -> PG.Query
+    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
+
+instance IsPgIndex NoIndex where
+    toPgIndex = const "0"
+    fromPgIndex _ = NoIndex
+
+instance IsPgIndex Indexed where
+    toPgIndex (Indexed t) = t
+    fromPgIndex = Indexed
 
 type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
 
