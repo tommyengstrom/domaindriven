@@ -1,14 +1,10 @@
-resolver: nightly-2025-06-18
+resolver: lts-24.7
 packages:
 - domaindriven-core
 - domaindriven
 - domaindriven-examples
 
 extra-deps:
-  - openapi3-3.2.4
-  - servant-auth-server-0.4.9.0
-  - insert-ordered-containers-0.2.6
-  - servant-openapi3-2.0.1.6
   
 ghc-options:
   "$locals": -fwrite-ide-info
