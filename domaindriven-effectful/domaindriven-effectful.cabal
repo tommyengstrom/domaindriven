@@ -1,0 +1,91 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           domaindriven-effectful
+version:        0.5.0
+synopsis:       Batteries included event sourcing and CQRS
+description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
+category:       Web
+homepage:       https://github.com/tommyengstrom/domaindriven#readme
+bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
+author:         Tommy Engström
+maintainer:     tommy@tommyengstrom.com
+copyright:      2023 Tommy Engström
+license:        BSD3
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/tommyengstrom/domaindriven
+
+library
+  exposed-modules:
+      DomainDriven.Effectful
+      DomainDriven.Effectful.Aggregate
+      DomainDriven.Effectful.Interpreter.InMemory
+      DomainDriven.Effectful.Projection
+  other-modules:
+      Paths_domaindriven_effectful
+  hs-source-dirs:
+      src
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      StrictData
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Weverything -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wno-unused-packages
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , domaindriven-core
+    , effectful
+    , effectful-th
+    , exceptions
+    , generics-sop
+    , mtl
+    , openapi3
+    , optics
+    , servant
+    , servant-auth-server
+    , servant-client-core
+    , servant-openapi3
+    , servant-server
+    , text
+    , unliftio
+    , uuid
+  default-language: Haskell2010

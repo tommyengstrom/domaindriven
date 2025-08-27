@@ -1,6 +1,7 @@
 resolver: nightly-2025-06-18
 packages:
 - domaindriven-core
+- domaindriven-effectful
 - domaindriven
 - domaindriven-examples
 

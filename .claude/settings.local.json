@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(stack build)",
+      "Bash(stack test)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": []
+  }
+}
