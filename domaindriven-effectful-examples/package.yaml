@@ -113,3 +113,20 @@ executables:
       - servant
       - servant-server
       - warp
+  
+  hierarchical-simplified:
+    main: Main.hs
+    source-dirs: hierarchical-simplified
+    ghc-options:
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
+    dependencies:
+      - aeson
+      - domaindriven-core
+      - domaindriven-effectful
+      - effectful
+      - microlens
+      - servant
+      - servant-server
+      - warp

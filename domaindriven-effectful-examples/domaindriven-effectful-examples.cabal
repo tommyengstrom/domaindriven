@@ -75,6 +75,58 @@ executable hierarchical
     , warp
   default-language: Haskell2010
 
+executable hierarchical-simplified
+  main-is: Main.hs
+  other-modules:
+      Paths_domaindriven_effectful_examples
+  hs-source-dirs:
+      hierarchical-simplified
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      StrictData
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful
+    , microlens
+    , servant
+    , servant-server
+    , warp
+  default-language: Haskell2010
+
 executable simple
   main-is: Main.hs
   other-modules:

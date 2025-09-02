@@ -28,6 +28,7 @@ library
   exposed-modules:
       DomainDriven.Effectful
       DomainDriven.Effectful.Aggregate
+      DomainDriven.Effectful.Domain
       DomainDriven.Effectful.Helpers
       DomainDriven.Effectful.Interpreter.InMemory
       DomainDriven.Effectful.Projection

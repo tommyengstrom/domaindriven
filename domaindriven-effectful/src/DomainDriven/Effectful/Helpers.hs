@@ -8,6 +8,7 @@ module DomainDriven.Effectful.Helpers where
 
 import DomainDriven.Effectful.Aggregate
 import DomainDriven.Effectful.Projection
+import DomainDriven.Effectful.Domain
 import DomainDriven.Persistance.Class (Stored, NoIndex(..))
 import Effectful
 import Prelude
@@ -58,6 +59,61 @@ conditionalCommand
     -> Eff es (Maybe a)
 conditionalCommand checkModel getResult =
     withAggregate @model @event $ \model ->
+        case checkModel model of
+            Nothing -> pure (const Nothing, [])
+            Just events -> pure (Just . getResult, events)
+
+-- ============================================================================
+-- Domain-based helper functions (using single type parameter)
+-- ============================================================================
+
+-- | Helper for running transactions on domains
+withAggregateD
+    :: forall domain es a
+     . ( Aggregate' domain :> es
+       , DomainIndex domain ~ NoIndex
+       )
+    => (DomainModel domain -> Eff es (DomainModel domain -> a, [DomainEvent domain]))
+    -> Eff es a
+withAggregateD = runTransactionD @domain NoIndex
+
+-- | Helper for querying domain projections
+queryModelD
+    :: forall domain es
+     . Projection' domain :> es
+    => Eff es (DomainModel domain)
+queryModelD = getModelD @domain
+
+-- | Helper for getting events from domain projections
+queryEventsD
+    :: forall domain es
+     . Projection' domain :> es
+    => Eff es [Stored (DomainEvent domain)]
+queryEventsD = getEventListD @domain
+
+-- | Convenience function for simple commands that just emit events (domain version)
+simpleCommandD
+    :: forall domain es a
+     . ( Aggregate' domain :> es
+       , DomainIndex domain ~ NoIndex
+       )
+    => (DomainModel domain -> a)        -- ^ How to extract result from updated model
+    -> [DomainEvent domain]             -- ^ Events to emit
+    -> Eff es a
+simpleCommandD getResult events = 
+    withAggregateD @domain $ \_ -> pure (getResult, events)
+
+-- | Convenience function for commands that check the model before emitting events (domain version)
+conditionalCommandD
+    :: forall domain es a
+     . ( Aggregate' domain :> es
+       , DomainIndex domain ~ NoIndex
+       )
+    => (DomainModel domain -> Maybe [DomainEvent domain])  -- ^ Check model and optionally produce events
+    -> (DomainModel domain -> a)                           -- ^ Extract result from model
+    -> Eff es (Maybe a)
+conditionalCommandD checkModel getResult =
+    withAggregateD @domain $ \model ->
         case checkModel model of
             Nothing -> pure (const Nothing, [])
             Just events -> pure (Just . getResult, events)
