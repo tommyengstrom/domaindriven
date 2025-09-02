@@ -5,4 +5,5 @@ where
 
 import DomainDriven.Effectful.Aggregate as X
 import DomainDriven.Effectful.Projection as X
+import DomainDriven.Effectful.Helpers as X
 

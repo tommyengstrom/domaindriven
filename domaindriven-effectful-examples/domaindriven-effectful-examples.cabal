@@ -4,10 +4,10 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 
-name:           domaindriven-effectful
+name:           domaindriven-effectful-examples
 version:        0.5.0
-synopsis:       Batteries included event sourcing and CQRS
-description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
+synopsis:       Examples for domaindriven-effectful
+description:    Examples demonstrating the Effectful-based domaindriven library
 category:       Web
 homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
@@ -18,23 +18,17 @@ license:        BSD3
 build-type:     Simple
 extra-source-files:
     README.md
-    ChangeLog.md
 
 source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-library
-  exposed-modules:
-      DomainDriven.Effectful
-      DomainDriven.Effectful.Aggregate
-      DomainDriven.Effectful.Helpers
-      DomainDriven.Effectful.Interpreter.InMemory
-      DomainDriven.Effectful.Projection
+executable hierarchical
+  main-is: Main.hs
   other-modules:
-      Paths_domaindriven_effectful
+      Paths_domaindriven_effectful_examples
   hs-source-dirs:
-      src
+      hierarchical
   default-extensions:
       ConstraintKinds
       DataKinds
@@ -68,60 +62,117 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wunused-packages
-  build-depends:
-      base
-    , domaindriven-core
-    , effectful
-    , hashable
-  default-language: Haskell2010
-
-test-suite domaindriven-effectful-test
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  other-modules:
-      Paths_domaindriven_effectful
-  hs-source-dirs:
-      test
-  default-extensions:
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      StandaloneDeriving
-      StrictData
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wunused-packages -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
     , base
     , domaindriven-core
     , domaindriven-effectful
     , effectful
-    , hspec
+    , microlens
+    , servant
+    , servant-server
+    , warp
+  default-language: Haskell2010
+
+executable simple
+  main-is: Main.hs
+  other-modules:
+      Paths_domaindriven_effectful_examples
+  hs-source-dirs:
+      simple
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      StrictData
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful
+    , servant
+    , servant-server
+    , warp
+  default-language: Haskell2010
+
+executable simple-with-helpers
+  main-is: Main.hs
+  other-modules:
+      Paths_domaindriven_effectful_examples
+  hs-source-dirs:
+      simple-with-helpers
+  default-extensions:
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      StrictData
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful
+    , servant
+    , servant-server
+    , warp
   default-language: Haskell2010
