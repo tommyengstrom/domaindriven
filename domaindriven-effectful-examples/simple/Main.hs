@@ -9,6 +9,7 @@ import Control.Monad (when)
 import Data.Aeson
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.InMemory
+import DomainDriven.FieldNameAsPath
 import DomainDriven.Persistance.Class (NoIndex (..), Stored (..))
 import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
@@ -52,7 +53,7 @@ data CounterAPI mode = CounterAPI
     , increase :: mode :- "increase" :> Post '[JSON] Int
     , decrease :: mode :- "decrease" :> Post '[JSON] Int
     }
-    deriving (Generic)
+    deriving (Generic, ApiTagFromLabel)
 
 --------------------------------------------------------------------------------
 -- 4. Implement the server handlers using Effectful effects
@@ -65,6 +66,7 @@ counterServer
        , Error ServerError Effectful.:> es
        )
     => CounterAPI (AsServerT (Eff es))
+
 counterServer =
     CounterAPI
         { get = getCounter <$> getModel @CounterDomain
@@ -77,6 +79,44 @@ counterServer =
                 $ err422{errBody = "Counter cannot go below zero"}
             pure (getCounter, [Decrease])
         }
+
+counterServer'
+    :: ( Projection CounterDomain Effectful.:> es
+       , Aggregate CounterDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       )
+    => ServerT (FieldNameAsPathApi CounterAPI) (Eff es)
+counterServer' = FieldNameAsPathServer counterServer
+
+--
+
+-- | Create the counter server with effect interpreters
+mkCounterServer' :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
+mkCounterServer' backend =
+    serveWithContextT
+        (Proxy @(FieldNameAsPathApi CounterAPI))
+        EmptyContext
+        runEffects
+        counterServer'
+  where
+    -- Helper to run effects and convert to Handler
+    runEffects
+        :: Eff
+            '[ Projection CounterDomain
+             , Aggregate CounterDomain
+             , Error ServerError
+             , IOE
+             ]
+            a
+        -> Handler a
+    runEffects m = do
+        a <-
+            liftIO
+                . runEff
+                . runErrorNoCallStack @ServerError
+                . runAggregateInMemory backend
+                $ runProjectionInMemory backend NoIndex m
+        either Servant.throwError pure a
 
 --------------------------------------------------------------------------------
 -- 5. Wire up the server with effect interpreters
@@ -98,11 +138,12 @@ mkCounterServer backend =
             a
         -> Handler a
     runEffects m = do
-        a <- liftIO
-            . runEff
-            . runErrorNoCallStack @ServerError
-            . runAggregateInMemory backend
-            $ runProjectionInMemory backend NoIndex m
+        a <-
+            liftIO
+                . runEff
+                . runErrorNoCallStack @ServerError
+                . runAggregateInMemory backend
+                $ runProjectionInMemory backend NoIndex m
         either Servant.throwError pure a
 
 main :: IO ()
@@ -114,6 +155,6 @@ main = do
     backend <- createForgetful @NoIndex applyEvent (CounterModel 0)
 
     -- Create and run the application
-    let app = mkCounterServer backend
+    let app = mkCounterServer' backend
 
     run port app

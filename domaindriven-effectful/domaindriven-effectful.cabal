@@ -30,7 +30,10 @@ library
       DomainDriven.Effectful.Aggregate
       DomainDriven.Effectful.Domain
       DomainDriven.Effectful.Interpreter.InMemory
+      DomainDriven.Effectful.Interpreter.Postgres
       DomainDriven.Effectful.Projection
+      DomainDriven.FieldNameAsPath
+      Servant.Auth.Internal.ThrowAll.SOP
   other-modules:
       Paths_domaindriven_effectful
   hs-source-dirs:
@@ -70,8 +73,17 @@ library
       ViewPatterns
   ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wunused-packages
   build-depends:
-      base
+      aeson
+    , base
+    , bytestring
     , domaindriven-core
     , effectful
+    , generics-sop
     , hashable
+    , openapi3
+    , servant-auth-server
+    , servant-client-core
+    , servant-openapi3
+    , servant-server
+    , text
   default-language: Haskell2010

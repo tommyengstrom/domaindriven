@@ -23,6 +23,15 @@ dependencies:
 - base
 - effectful
 - domaindriven-core
+- aeson
+- servant-server
+- servant-client-core
+- servant-openapi3
+- openapi3
+- servant-auth-server
+- generics-sop
+- text
+- bytestring
 
 
 
