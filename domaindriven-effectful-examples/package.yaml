@@ -19,6 +19,7 @@ dependencies:
 - base
 
 default-extensions:
+- BlockArguments
 - ConstraintKinds
 - DataKinds
 - DeriveAnyClass
@@ -65,7 +66,7 @@ ghc-options:
 - -Wno-unused-packages
 
 executables:
-  simple:
+  effectful-example:
     main: Main.hs
     source-dirs: simple
     ghc-options:

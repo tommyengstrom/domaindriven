@@ -1,26 +1,32 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Main where
 
+import Control.Monad (when)
 import Data.Aeson
-import DomainDriven.Persistance.Class (Stored(..), NoIndex(..))
-import DomainDriven.Persistance.ForgetfulInMemory (createForgetful, ForgetfulInMemory)
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.InMemory
-import Effectful
+import DomainDriven.Persistance.Class (NoIndex (..), Stored (..))
+import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
+import Effectful hiding ((:>))
+import Effectful qualified
+import Effectful.Error.Static
 import Network.Wai.Handler.Warp (run)
-import Servant
+import Servant hiding (throwError)
+import Servant qualified
 import Servant.API.Generic
-import Servant.Server.Generic (genericServeT, AsServerT)
+import Servant.Server.Generic (AsServerT, genericServeT)
 import Prelude
 
 --------------------------------------------------------------------------------
 -- 1. Define the model
 --------------------------------------------------------------------------------
-newtype CounterModel = CounterModel {getCounter :: Int}
+newtype CounterModel = CounterModel
+    { getCounter :: Int
+    }
     deriving (Show, Eq, Generic)
 
 --------------------------------------------------------------------------------
@@ -36,34 +42,41 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
-
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
+
 --------------------------------------------------------------------------------
--- 3. Define the API using record-based approach with standard Servant combinators
+-- 3. Define the Servant API
 --------------------------------------------------------------------------------
 data CounterAPI mode = CounterAPI
-    { current  :: mode Servant.:- Get '[JSON] Int
-    , increase :: mode Servant.:- Post '[JSON] Int
-    , decrease :: mode Servant.:- Post '[JSON] Int
-    } deriving (Generic)
+    { get :: mode :- Get '[JSON] Int
+    , increase :: mode :- "increase" :> Post '[JSON] Int
+    , decrease :: mode :- "decrease" :> Post '[JSON] Int
+    }
+    deriving (Generic)
 
 --------------------------------------------------------------------------------
 -- 4. Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
 
 -- | Counter handlers using Effectful effects
-counterHandlers
+counterServer
     :: ( Projection CounterDomain Effectful.:> es
        , Aggregate CounterDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
        )
     => CounterAPI (AsServerT (Eff es))
-counterHandlers = CounterAPI
-    { current = getCounter <$> getModel @CounterDomain
-    , increase = runTransaction @CounterDomain NoIndex $ \_ -> do
-        pure (getCounter, [Increase])
-    , decrease = runTransaction @CounterDomain NoIndex $ \_ -> do
-        pure (getCounter, [Decrease])
-    }
+counterServer =
+    CounterAPI
+        { get = getCounter <$> getModel @CounterDomain
+        , increase = runTransaction @CounterDomain NoIndex do
+            pure (getCounter, [Increase])
+        , decrease = runTransaction @CounterDomain NoIndex do
+            m <- getModel @CounterDomain
+            when (getCounter m <= 0)
+                . throwError
+                $ err422{errBody = "Counter cannot go below zero"}
+            pure (getCounter, [Decrease])
+        }
 
 --------------------------------------------------------------------------------
 -- 5. Wire up the server with effect interpreters
@@ -72,13 +85,25 @@ counterHandlers = CounterAPI
 -- | Create the counter server with effect interpreters
 mkCounterServer :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
 mkCounterServer backend =
-    genericServeT runEffects counterHandlers
+    genericServeT runEffects counterServer
   where
     -- Helper to run effects and convert to Handler
-    runEffects :: Eff '[Projection CounterDomain,
-                       Aggregate CounterDomain,
-                       IOE] a -> Handler a
-    runEffects = liftIO . runEff . runAggregateInMemory backend . runProjectionInMemory backend NoIndex
+    runEffects
+        :: Eff
+            '[ Projection CounterDomain
+             , Aggregate CounterDomain
+             , Error ServerError
+             , IOE
+             ]
+            a
+        -> Handler a
+    runEffects m = do
+        a <- liftIO
+            . runEff
+            . runErrorNoCallStack @ServerError
+            . runAggregateInMemory backend
+            $ runProjectionInMemory backend NoIndex m
+        either Servant.throwError pure a
 
 main :: IO ()
 main = do

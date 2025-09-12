@@ -43,6 +43,6 @@ runAggregateInMemory
 runAggregateInMemory backend = interpret $ \env -> \case
     RunTransaction  idx cmd -> do
         localSeqUnliftIO env $ \unlift -> do
-            (model', _, returnFun) <- liftIO $ P.transactionalUpdate backend idx $ \m ->
-                unlift (cmd m)
+            (model', _, returnFun) <- liftIO $ P.transactionalUpdate backend idx $ \_ ->
+                unlift cmd
             pure $ returnFun model'

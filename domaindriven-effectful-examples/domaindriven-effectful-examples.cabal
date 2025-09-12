@@ -23,13 +23,14 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-executable simple
+executable effectful-example
   main-is: Main.hs
   other-modules:
       Paths_domaindriven_effectful_examples
   hs-source-dirs:
       simple
   default-extensions:
+      BlockArguments
       ConstraintKinds
       DataKinds
       DeriveAnyClass

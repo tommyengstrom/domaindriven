@@ -11,8 +11,7 @@ import Effectful.Dispatch.Dynamic
 data Aggregate (domain :: Type) :: Effect where
     RunTransaction
         :: DomainIndex domain
-        -> ( DomainModel domain
-             -> Eff
+        -> (Eff
                     es
                     ( DomainModel domain -> a
                     , [DomainEvent domain]
@@ -28,8 +27,7 @@ runTransaction
     :: forall domain es a
      . Aggregate domain :> es
     => DomainIndex domain
-    -> ( DomainModel domain
-         -> Eff
+    -> ( Eff
                 es
                 ( DomainModel domain -> a
                 , [DomainEvent domain]
