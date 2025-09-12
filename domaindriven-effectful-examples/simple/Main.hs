@@ -36,6 +36,8 @@ applyEvent (CounterModel i) (Stored ev _ _) = CounterModel $ case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
+
+type CounterDomain = Domain CounterModel CounterEvent NoIndex
 --------------------------------------------------------------------------------
 -- 3. Define the API using record-based approach with standard Servant combinators
 --------------------------------------------------------------------------------
@@ -50,16 +52,16 @@ data CounterAPI mode = CounterAPI
 --------------------------------------------------------------------------------
 
 -- | Counter handlers using Effectful effects
-counterHandlers 
-    :: ( Projection CounterModel CounterEvent NoIndex Effectful.:> es
-       , Aggregate CounterModel CounterEvent NoIndex Effectful.:> es
+counterHandlers
+    :: ( Projection CounterDomain Effectful.:> es
+       , Aggregate CounterDomain Effectful.:> es
        )
     => CounterAPI (AsServerT (Eff es))
 counterHandlers = CounterAPI
-    { current = getCounter <$> getModel @CounterModel @CounterEvent @NoIndex
-    , increase = runTransaction @CounterModel @CounterEvent @NoIndex NoIndex $ \_ ->
+    { current = getCounter <$> getModel @CounterDomain
+    , increase = runTransaction @CounterDomain NoIndex $ \_ -> do
         pure (getCounter, [Increase])
-    , decrease = runTransaction @CounterModel @CounterEvent @NoIndex NoIndex $ \_ ->
+    , decrease = runTransaction @CounterDomain NoIndex $ \_ -> do
         pure (getCounter, [Decrease])
     }
 
@@ -69,12 +71,12 @@ counterHandlers = CounterAPI
 
 -- | Create the counter server with effect interpreters
 mkCounterServer :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
-mkCounterServer backend = 
+mkCounterServer backend =
     genericServeT runEffects counterHandlers
   where
     -- Helper to run effects and convert to Handler
-    runEffects :: Eff '[Projection CounterModel CounterEvent NoIndex, 
-                       Aggregate CounterModel CounterEvent NoIndex, 
+    runEffects :: Eff '[Projection CounterDomain,
+                       Aggregate CounterDomain,
                        IOE] a -> Handler a
     runEffects = liftIO . runEff . runAggregateInMemory backend . runProjectionInMemory backend NoIndex
 
@@ -82,11 +84,11 @@ main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running Effectful counter on port " <> show port
-    
+
     -- Initialize the in-memory backend
     backend <- createForgetful @NoIndex applyEvent (CounterModel 0)
-    
+
     -- Create and run the application
     let app = mkCounterServer backend
-    
+
     run port app

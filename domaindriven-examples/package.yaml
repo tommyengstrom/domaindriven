@@ -27,7 +27,6 @@ dependencies:
 
 
 default-extensions:
-- Arrows
 - ConstraintKinds
 - DataKinds
 - DeriveAnyClass

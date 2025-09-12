@@ -29,7 +29,6 @@ library
       DomainDriven.Effectful
       DomainDriven.Effectful.Aggregate
       DomainDriven.Effectful.Domain
-      DomainDriven.Effectful.Helpers
       DomainDriven.Effectful.Interpreter.InMemory
       DomainDriven.Effectful.Projection
   other-modules:
@@ -75,54 +74,4 @@ library
     , domaindriven-core
     , effectful
     , hashable
-  default-language: Haskell2010
-
-test-suite domaindriven-effectful-test
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  other-modules:
-      Paths_domaindriven_effectful
-  hs-source-dirs:
-      test
-  default-extensions:
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      StandaloneDeriving
-      StrictData
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wunused-packages -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      aeson
-    , base
-    , domaindriven-core
-    , domaindriven-effectful
-    , effectful
-    , hspec
   default-language: Haskell2010

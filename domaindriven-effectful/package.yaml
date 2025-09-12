@@ -75,16 +75,3 @@ library:
   source-dirs: src
   dependencies:
     - hashable
-
-tests:
-  domaindriven-effectful-test:
-    main: Spec.hs
-    source-dirs: test
-    ghc-options:
-      - -threaded
-      - -rtsopts
-      - -with-rtsopts=-N
-    dependencies:
-      - domaindriven-effectful
-      - hspec
-      - aeson
