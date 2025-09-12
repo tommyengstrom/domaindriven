@@ -41,9 +41,9 @@ instance Hashable index => ReadModel (ForgetfulInMemory model index event) where
     type Event (ForgetfulInMemory model index event) = event
     type Index (ForgetfulInMemory model index event) = index
     applyEvent = apply
-    getModel :: ForgetfulInMemory model index event
+    getModel :: MonadIO m => ForgetfulInMemory model index event
              -> index
-             -> IO model
+             -> m model
     getModel ff index = HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
     getEventList ff index = HM.lookupDefault [] index <$> readIORef (events ff)
     getEventStream ff index =
@@ -56,8 +56,8 @@ instance Hashable index => WriteModel (ForgetfulInMemory model index event) wher
     postUpdateHook p index model events = liftIO $ updateHook p index model events
     transactionalUpdate ff index evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
+            (returnFun, evs) <- evalCmd
             model <- HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
-            (returnFun, evs) <- evalCmd model
             storedEvs <- traverse toStored evs
             let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff)

@@ -41,8 +41,8 @@ runAggregateInMemory
     -> Eff (Aggregate domain : es) a
     -> Eff es a
 runAggregateInMemory backend = interpret $ \env -> \case
-    RunTransaction  idx cmd -> do
-        localSeqUnliftIO env $ \unlift -> do
-            (model', _, returnFun) <- liftIO $ P.transactionalUpdate backend idx $ \_ ->
-                unlift cmd
+    RunTransaction idx cmd -> do
+        localSeqUnlift env $ \unlift -> do
+            (model', _, returnFun) <- P.transactionalUpdate backend idx
+                $ unlift cmd
             pure $ returnFun model'

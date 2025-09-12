@@ -33,7 +33,7 @@ class ReadModel p where
     type Event p :: Type
     type Index p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
-    getModel :: HasCallStack => p -> Index p -> IO (Model p)
+    getModel :: MonadIO m => HasCallStack => p -> Index p -> m (Model p)
     getEventList :: p -> Index p -> IO [Stored (Event p)]
     getEventStream :: HasCallStack => p -> Index p -> Stream IO (Stored (Event p))
 
@@ -59,7 +59,7 @@ class ReadModel p => WriteModel p where
          . MonadUnliftIO m
         => p
         -> Index p
-        -> (Model p -> m (Model p -> a, [Event p]))
+        -> m (Model p -> a, [Event p])
         -> m
             ( Model p
             , -- \^ Updated model
@@ -77,7 +77,8 @@ runCmd
     -> Index p
     -> RunCmd (Model p) (Event p) m a
 runCmd p index cmd = withFrozenCallStack $ do
-    (model, events, returnFun) <- transactionalUpdate p index cmd
+    (model, events, returnFun) <- transactionalUpdate p index
+         $ getModel p index >>= cmd
     _ <- async $ postUpdateHook p index model events
     pure $ returnFun model
 

@@ -102,7 +102,7 @@ instance (IsPgIndex i, FromJSON e) => ReadModel (PostgresEvent i m e) where
     type Index (PostgresEvent i m e) = i
     type Event (PostgresEvent i m e) = e
     applyEvent pg = pg ^. field @"app"
-    getModel pg index = withIOTrans pg (`getModel'` index)
+    getModel pg index = liftIO $ withIOTrans pg (`getModel'` index)
 
     getEventList pg index = withResource (connectionPool pg) $ \conn ->
         fmap fst <$> queryEvents (Pool.resource conn) (pg ^. field @"eventTableName") index
@@ -548,10 +548,10 @@ mkEventStream chunkSize conn q = do
         )
 
 getModel'
-    :: forall e i m
-     . (IsPgIndex i, FromJSON e)
-    => PostgresEventTrans i m e
-    -> i
+    :: forall e index m
+     . (IsPgIndex index, FromJSON e)
+    => PostgresEventTrans index m e
+    -> index
     -> IO m
 getModel' pgt index = do
     NumberedModel model lastEventNo <- getCurrentState pgt index
@@ -635,8 +635,8 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent i m e)
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
-            m <- getModel' pgt index
-            (returnFun, evs) <- runInIO $ cmd m
+            --m <- getModel' pgt index
+            (returnFun, evs) <- runInIO cmd
             NumberedModel m' _ <- getCurrentState pg index
             storedEvs <- traverse toStored evs
             newNumberedModel <-
