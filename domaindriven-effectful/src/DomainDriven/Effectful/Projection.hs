@@ -15,8 +15,10 @@ import Effectful.TH
 -- | The new Projection effect with a single domain parameter
 -- We use a proxy to carry the domain type explicitly
 data Projection domain  :: Effect where
-    GetModelI :: DomainIndex domain -> Projection domain m (DomainModel domain)
-    GetEventListI :: DomainIndex domain -> Projection domain m [Stored (DomainEvent domain)]
+    GetModelI :: DomainIndex domain
+        -> Projection domain m (DomainModel domain)
+    GetEventListI :: DomainIndex domain
+        -> Projection domain m [Stored (DomainEvent domain)]
 --     GetEventStream :: Projection domain m (Stream m (Stored (DomainEvent domain)))
 
 type instance DispatchOf (Projection domain) = 'Dynamic

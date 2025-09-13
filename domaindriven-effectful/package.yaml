@@ -21,7 +21,8 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 
 dependencies:
 - base
-- effectful
+- effectful-core
+- effectful-plugin
 - effectful-th
 - domaindriven-core
 - aeson
@@ -57,6 +58,7 @@ default-extensions:
 - NamedFieldPuns
 - NoImplicitPrelude
 - OverloadedLabels
+- AllowAmbiguousTypes
 - OverloadedStrings
 - PolyKinds
 - RankNTypes
@@ -83,6 +85,7 @@ ghc-options:
 - -Wincomplete-patterns
 - -Wunused-packages
 - -Wno-missing-import-lists 
+- -fplugin=Effectful.Plugin
 
 library:
   source-dirs: src

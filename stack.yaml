@@ -3,8 +3,6 @@ packages:
 - domaindriven-core
 - domaindriven-effectful
 - domaindriven-effectful-examples
-- domaindriven
-- domaindriven-examples
 
 extra-deps:
   - openapi3-3.2.4

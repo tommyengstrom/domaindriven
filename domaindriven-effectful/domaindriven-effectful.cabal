@@ -59,6 +59,7 @@ library
       NamedFieldPuns
       NoImplicitPrelude
       OverloadedLabels
+      AllowAmbiguousTypes
       OverloadedStrings
       PolyKinds
       RankNTypes
@@ -71,13 +72,14 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists -fplugin=Effectful.Plugin
   build-depends:
       aeson
     , base
     , bytestring
     , domaindriven-core
-    , effectful
+    , effectful-core
+    , effectful-plugin
     , effectful-th
     , generics-sop
     , hashable

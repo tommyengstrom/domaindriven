@@ -31,12 +31,11 @@ runProjectionPostgres
             ~ index
        )
     => PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain)
-    -> DomainIndex domain
     -> Eff (Projection domain : es) a
     -> Eff es a
-runProjectionPostgres backend idx = interpret $ \_ -> \case
-    GetModel -> liftIO $ P.getModel backend idx
-    GetEventList -> liftIO $ P.getEventList backend idx
+runProjectionPostgres backend = interpret $ \_ -> \case
+    GetModelI idx -> liftIO $ P.getModel backend idx
+    GetEventListI idx -> liftIO $ P.getEventList backend idx
 
 -- | Run the Aggregate effect using an in-memory backend (new domain API)
 runAggregateInMemory
@@ -51,6 +50,6 @@ runAggregateInMemory
     -> Eff (Aggregate domain : es) a
     -> Eff es a
 runAggregateInMemory backend = interpret $ \env -> \case
-    RunTransaction idx cmd -> do
+    RunTransactionI idx cmd -> do
         localSeqUnlift env $ \unlift ->
             P.runCmd backend idx $ unlift cmd
