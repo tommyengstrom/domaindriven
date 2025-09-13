@@ -1,0 +1,9 @@
+
+
+# DomainDriven
+
+## Design decisions
+
+- Avoid the complexity of ascynchronous event sourcing
+- Convenient for the end user
+- Easy to migrate events

@@ -34,8 +34,6 @@ applyEvent i (Stored ev _timestamp _uuid) = case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
--- Define the domain, used to cary the type constraints
-type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
 -- Use Servant to define the Commands
@@ -50,6 +48,8 @@ data CounterAPI mode = CounterAPI
 --------------------------------------------------------------------------------
 -- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
+
+type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 -- | Counter handlers using Effectful effects
 counterServer
