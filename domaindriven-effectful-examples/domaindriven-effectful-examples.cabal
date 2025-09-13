@@ -28,7 +28,7 @@ executable postgres-example
   other-modules:
       Paths_domaindriven_effectful_examples
   hs-source-dirs:
-      simple
+      postgres
   default-extensions:
       BlockArguments
       ConstraintKinds

@@ -1,8 +1,8 @@
 module Main where
 
 import Control.Monad (when)
+import Data.Aeson
 import DomainDriven.Effectful
-import DomainDriven.Persistance.Class (WriteModel)
 import DomainDriven.Effectful.Interpreter.Postgres
 import Effectful hiding ((:>))
 import Effectful qualified
@@ -25,7 +25,7 @@ type CounterModel = Int
 data CounterEvent
     = Increase
     | Decrease
-    deriving (Show)
+    deriving (Show, Generic, ToJSON, FromJSON)
 
 --------------------------------------------------------------------------------
 -- Define event handler
@@ -112,7 +112,7 @@ main = do
     -- Initialize the in-memory backend
     connectionPool <- simplePool undefined
     backend <- postgresWriteModel
-        simplePool
+        connectionPool
         eventTable
         applyEvent
         (0 :: CounterModel)

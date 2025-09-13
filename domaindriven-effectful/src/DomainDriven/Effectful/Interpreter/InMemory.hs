@@ -8,6 +8,7 @@
 
 module DomainDriven.Effectful.Interpreter.InMemory
     ( module DomainDriven.Effectful.Interpreter.InMemory
+    , createForgetful, ForgetfulInMemory
     ) where
 
 import DomainDriven.Effectful.Aggregate

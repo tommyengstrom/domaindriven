@@ -87,7 +87,7 @@ executables:
     
   postgres-example:
     main: Main.hs
-    source-dirs: simple
+    source-dirs: postgres
     ghc-options:
       - -threaded
       - -rtsopts

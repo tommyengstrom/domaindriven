@@ -29,10 +29,10 @@ runProjectionPostgres
        , FromJSON (DomainEvent domain)
        , IsPgIndex index
        , index ~ (DomainIndex domain)
-       , P.Index (PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain))
+       , P.Index (PostgresEvent (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
             ~ index
        )
-    => PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain)
+    => PostgresEvent (DomainIndex domain) (DomainModel domain)  (DomainEvent domain)
     -> Eff (Projection domain : es) a
     -> Eff es a
 runProjectionPostgres backend = interpret $ \_ -> \case
@@ -44,11 +44,11 @@ runAggregatePostgres
     :: forall domain es a index
      . ( IOE :> es
        , index ~ (DomainIndex domain)
-       , P.Index (PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain))
+       , P.Index (PostgresEvent (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
             ~ index
-       , WriteModel (PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain))
+       , WriteModel (PostgresEvent  (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
        )
-    => PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain)
+    => PostgresEvent (DomainIndex domain) (DomainModel domain)  (DomainEvent domain)
     -> Eff (Aggregate domain : es) a
     -> Eff es a
 runAggregatePostgres backend = interpret $ \env -> \case

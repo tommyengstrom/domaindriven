@@ -38,17 +38,3 @@ runTransaction
         )
      -> Eff es a
 runTransaction = runTransactionI NoIndex
--- | Run a synchronous transaction while holding a lock on the aggregate
--- The returnd value is a projection of the model after the events have been applied.
--- runTransactionI
---     :: forall domain es a
---      . Aggregate domain :> es
---     => DomainIndex domain
---     -> ( Eff
---                 es
---                 ( DomainModel domain -> a
---                 , [DomainEvent domain]
---                 )
---        )
---     -> Eff es a
--- runTransactionI idx cmd = send (RunTransactionI @domain idx cmd)
