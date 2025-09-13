@@ -2,19 +2,20 @@
 
 module DomainDriven.Persistance.ForgetfulInMemory where
 
+import Data.Generics.Labels ()
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HM
+import Data.Hashable (Hashable)
+import Data.Maybe (fromMaybe)
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import UnliftIO
-import Data.Maybe (fromMaybe)
-import Data.HashMap.Strict (HashMap)
-import Data.Hashable (Hashable)
-import Data.Generics.Labels ()
-import Data.HashMap.Strict qualified as HM
 import Prelude
 
 createForgetful
-    :: forall index model event m. MonadIO m
+    :: forall index model event m
+     . MonadIO m
     => (model -> Stored event -> model)
     -> model
     -- ^ initial model
@@ -41,9 +42,11 @@ instance Hashable index => ReadModel (ForgetfulInMemory model index event) where
     type Event (ForgetfulInMemory model index event) = event
     type Index (ForgetfulInMemory model index event) = index
     applyEvent = apply
-    getModel :: MonadIO m => ForgetfulInMemory model index event
-             -> index
-             -> m model
+    getModel
+        :: MonadIO m
+        => ForgetfulInMemory model index event
+        -> index
+        -> m model
     getModel ff index = HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
     getEventList ff index = HM.lookupDefault [] index <$> readIORef (events ff)
     getEventStream ff index =
@@ -60,7 +63,7 @@ instance Hashable index => WriteModel (ForgetfulInMemory model index event) wher
             model <- HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
             storedEvs <- traverse toStored evs
             let newModel = foldl' (apply ff) model storedEvs
-            modifyIORef (events ff)
-                $ HM.alter (Just . (<> storedEvs) . fromMaybe []) index
+            modifyIORef (events ff) $
+                HM.alter (Just . (<> storedEvs) . fromMaybe []) index
             modifyIORef (stateRef ff) $ HM.insert index newModel
             pure (newModel, storedEvs, returnFun)

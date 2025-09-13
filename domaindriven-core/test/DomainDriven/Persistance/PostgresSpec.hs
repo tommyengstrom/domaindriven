@@ -12,12 +12,12 @@ import Data.List qualified as L
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (fromString)
+import Data.Text qualified as T
 import Data.Time
 import Data.Traversable
 import Data.UUID (UUID, nil)
 import Data.UUID.V4 qualified as V4
 import Database.PostgreSQL.Simple
-import Data.Text qualified as T
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
@@ -31,7 +31,16 @@ import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
-import UnliftIO (TVar, atomically, concurrently, modifyTVar, newTVarIO, readTVarIO, try, forConcurrently)
+import UnliftIO
+    ( TVar
+    , atomically
+    , concurrently
+    , forConcurrently
+    , modifyTVar
+    , newTVarIO
+    , readTVarIO
+    , try
+    )
 import UnliftIO.Pool
 import Prelude
 
@@ -86,12 +95,21 @@ applyTestEvent m ev = case storedEvent ev of
     SubtractOne -> m - 1
     Reset -> 0
 
-noHook :: PostgresEvent NoIndex TestModel TestEvent
-    -> NoIndex -> TestModel -> [Stored TestEvent] -> IO ()
+noHook
+    :: PostgresEvent NoIndex TestModel TestEvent
+    -> NoIndex
+    -> TestModel
+    -> [Stored TestEvent]
+    -> IO ()
 noHook _ _ _ _ = pure ()
 
 setupPersistance
-    :: (PostgresEvent NoIndex TestModel TestEvent -> NoIndex -> TestModel -> [Stored TestEvent] -> IO ())
+    :: ( PostgresEvent NoIndex TestModel TestEvent
+         -> NoIndex
+         -> TestModel
+         -> [Stored TestEvent]
+         -> IO ()
+       )
     -> ((PostgresEvent NoIndex TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistance postHook test = do
@@ -120,7 +138,6 @@ setupPersistanceIndexed test = do
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2}, pool)
 
-
 mkTestConn :: IO Connection
 mkTestConn =
     connect $
@@ -147,8 +164,6 @@ tableNames :: EventTable -> [EventTableName]
 tableNames et = case et of
     MigrateUsing _ next -> getEventTableName et : tableNames next
     InitialVersion{} -> [getEventTableName et]
-
-
 
 writeEventsSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
@@ -208,8 +223,8 @@ indexedSpec = describe "Indexed models" $ do
 
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         -- This may fail in GHCI. Run it with stack test.
-        let testCmd :: Int  -> IO (TestModel -> TestModel, [TestEvent])
-            testCmd i  = do
+        let testCmd :: Int -> IO (TestModel -> TestModel, [TestEvent])
+            testCmd i = do
                 threadDelay 100000 -- 0.1s delay
                 pure (id, replicate i AddOne)
         t0 <- getCurrentTime
@@ -220,14 +235,14 @@ indexedSpec = describe "Indexed models" $ do
         t1 <- getCurrentTime
 
         models `shouldSatisfy` (== 20) . length
-        models `shouldSatisfy`  (== [1,2..20]) . L.sort
+        models `shouldSatisfy` (== [1, 2 .. 20]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 0.1)
         diffUTCTime t1 t0 `shouldSatisfy` (< 1.9)
 
     it "Updates to same index are done sequentially" $ \(p, _pool) -> do
         let testCmd :: IO (TestModel -> TestModel, [TestEvent])
-            testCmd  = do
+            testCmd = do
                 threadDelay 100000 -- 0.1s delay
                 pure (id, [AddOne, AddOne])
         t0 <- getCurrentTime
@@ -237,11 +252,10 @@ indexedSpec = describe "Indexed models" $ do
 
         t1 <- getCurrentTime
 
-        models `shouldSatisfy` (== 20)  . length
-        models `shouldSatisfy` (== [2,4..40]) . L.sort
+        models `shouldSatisfy` (== 20) . length
+        models `shouldSatisfy` (== [2, 4 .. 40]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
-
 
 streamingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
@@ -332,7 +346,8 @@ migrationSpec = describe "migrate1to1" $ do
                     AddOne
                     (UTCTime (fromGregorian 2020 10 15) 0)
                     uuid
-        withResource pool
+        withResource
+            pool
             (\conn -> writeEvents conn (getEventTableName eventTable) NoIndex [ev])
             `shouldThrow` (== FatalError)
                 . sqlExecStatus
@@ -371,7 +386,8 @@ migrationSpec = describe "migrate1to1" $ do
                 brokenExists `shouldBe` False
             _ -> fail "Unexpectedly lacking table versions!"
 
-migrationConcurrencySpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
+migrationConcurrencySpec
+    :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 migrationConcurrencySpec = describe "Event table is locked during migration" $ do
     it "migrate1to1" $ \(m0, pool) -> migrationTest m0 pool mig1to1
     it "migrate1toMany" $ \(m0, pool) -> migrationTest m0 pool mig1toMany
@@ -383,8 +399,8 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -> EventMigration
         -> IO ()
     migrationTest m0 pool mig = do
-        let cmd ::  IO (Int -> Int, [TestEvent])
-            cmd  = pure (id, [AddOne])
+        let cmd :: IO (Int -> Int, [TestEvent])
+            cmd = pure (id, [AddOne])
 
         i <- replicateM 5 (runCmd m0 NoIndex cmd)
         length i `shouldBe` 5

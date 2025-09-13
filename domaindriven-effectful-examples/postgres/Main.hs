@@ -2,10 +2,10 @@ module Main where
 
 import Control.Monad (when)
 import Data.Aeson
+import Database.PostgreSQL.Simple (connectPostgreSQL)
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.Postgres
 import Effectful hiding ((:>))
-import Database.PostgreSQL.Simple (connectPostgreSQL)
 import Effectful qualified
 import Effectful.Error.Static
 import Network.Wai.Handler.Warp (run)
@@ -77,7 +77,8 @@ counterServer =
 -- Create the servant application.
 -- Here we have to run all the effects and transform it to Servant's Handler monad.
 --------------------------------------------------------------------------------
-mkCounterServer :: PostgresEvent NoIndex CounterModel CounterEvent
+mkCounterServer
+    :: PostgresEvent NoIndex CounterModel CounterEvent
     -> Application
 mkCounterServer backend =
     genericServeT runEffects counterServer
@@ -102,6 +103,7 @@ mkCounterServer backend =
 
 eventTable :: EventTable
 eventTable = InitialVersion "counter_events"
+
 --------------------------------------------------------------------------------
 -- Run the server
 --------------------------------------------------------------------------------
@@ -111,12 +113,15 @@ main = do
     putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
-    connectionPool <- simplePool
-        $ connectPostgreSQL "host=localhost port=5432 user=postgres dbname=domaindriven password=postgres"
-    backend <- postgresWriteModel
-        connectionPool
-        eventTable
-        applyEvent
-        (0 :: CounterModel)
+    connectionPool <-
+        simplePool $
+            connectPostgreSQL
+                "host=localhost port=5432 user=postgres dbname=domaindriven password=postgres"
+    backend <-
+        postgresWriteModel
+            connectionPool
+            eventTable
+            applyEvent
+            (0 :: CounterModel)
     -- Create and run the application
     run port $ mkCounterServer backend

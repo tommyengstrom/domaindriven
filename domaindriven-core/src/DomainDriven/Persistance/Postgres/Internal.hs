@@ -45,7 +45,6 @@ data LogEntry
     | WaitForConnectionDuration NominalDiffTime OneLineCallStack
     deriving (Show, Generic)
 
-
 newtype OneLineCallStack = OneLineCallStack CallStack
 
 instance Show OneLineCallStack where
@@ -635,7 +634,7 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent i m e)
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
-            --m <- getModel' pgt index
+            -- m <- getModel' pgt index
             (returnFun, evs) <- runInIO cmd
             NumberedModel m' _ <- getCurrentState pg index
             storedEvs <- traverse toStored evs

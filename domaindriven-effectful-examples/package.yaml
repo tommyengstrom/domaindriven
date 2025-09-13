@@ -66,6 +66,7 @@ ghc-options:
 - -Wredundant-constraints
 - -Wincomplete-patterns
 - -Wno-unused-packages
+- -Wno-partial-fields
 - -fplugin=Effectful.Plugin
 
 executables:

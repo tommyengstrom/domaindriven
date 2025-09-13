@@ -13,9 +13,9 @@ import DomainDriven.Persistance.Postgres.Internal as X
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
     , EventMigration
-    , IsPgIndex (..)
     , EventTable (..)
     , EventTableBaseName
     , EventTableName
+    , IsPgIndex (..)
     , PreviousEventTableName
     )

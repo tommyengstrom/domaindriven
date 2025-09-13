@@ -75,7 +75,9 @@ counterServer =
 -- Create the servant application.
 -- Here we have to run all the effects and transform it to Servant's Handler monad.
 --------------------------------------------------------------------------------
-mkCounterServer :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
+mkCounterServer
+    :: ForgetfulInMemory CounterModel NoIndex CounterEvent
+    -> Application
 mkCounterServer backend =
     genericServeT runEffects counterServer
   where

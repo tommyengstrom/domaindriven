@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+
 module DomainDriven.Persistance.Postgres.Migration where
 
 import Control.Monad
@@ -21,7 +22,7 @@ defaultChunkSize = 100
 
 migrateValue1to1
     :: forall index
-   . IsPgIndex index
+     . IsPgIndex index
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -31,7 +32,7 @@ migrateValue1to1 = migrateValue1to1' @index defaultChunkSize
 
 migrateValue1to1'
     :: forall index
-    . IsPgIndex index
+     . IsPgIndex index
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -131,8 +132,6 @@ migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
                 (\x -> (storedUUID x, toPgIndex index, storedTimestamp x, encode $ storedEvent x))
                 events
             )
-
-
 
 fetchAllIndices
     :: forall index

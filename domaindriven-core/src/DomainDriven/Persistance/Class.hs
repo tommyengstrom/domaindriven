@@ -9,7 +9,9 @@ module DomainDriven.Persistance.Class where
 import Control.DeepSeq (NFData)
 import Control.Monad.Reader
 import Data.Aeson
+import Data.Hashable (Hashable)
 import Data.Kind
+import Data.Text (Text)
 import Data.Time
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
@@ -18,8 +20,6 @@ import Streamly.Data.Stream.Prelude (Stream)
 import System.Random
 import UnliftIO
 import Prelude
-import Data.Text (Text)
-import Data.Hashable (Hashable)
 
 data NoIndex = NoIndex
     deriving (Show, Eq, Ord, Generic, Hashable)
@@ -36,7 +36,6 @@ class ReadModel p where
     getModel :: MonadIO m => HasCallStack => p -> Index p -> m (Model p)
     getEventList :: p -> Index p -> IO [Stored (Event p)]
     getEventStream :: HasCallStack => p -> Index p -> Stream IO (Stored (Event p))
-
 
 class ReadModel p => WriteModel p where
     -- | Hook to call after model has been updated.

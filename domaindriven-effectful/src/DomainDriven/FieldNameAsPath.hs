@@ -31,7 +31,6 @@ import Servant.Server.Internal.Delayed
 import Servant.Server.Internal.Router
 import Prelude
 
-
 -- | Wrapper around the data structure containing the API and endpoint definitions.
 -- The endpoints name in the record will be added to the path. For example:
 -- ```
@@ -40,7 +39,7 @@ import Prelude
 --     }
 -- ```
 -- Will result in a Post endpoint with path "something/increaseWith".
-data FieldNameAsPathApi (mkApiRecord ::  Type -> Type)
+data FieldNameAsPathApi (mkApiRecord :: Type -> Type)
 
 class ApiTagFromLabel (mkApiRecord :: Type -> Type) where
     apiTagFromLabel :: String -> String
@@ -54,12 +53,12 @@ newtype
         (mkServerRecord :: Type -> Type)
         (m :: Type -> Type) = FieldNameAsPathServer
     { unDomainDrivenServer
-        :: mkServerRecord  (AsServerT m)
+        :: mkServerRecord (AsServerT m)
     }
 
 deriving newtype instance
-    GHC.Generic (mkServerRecord  (AsServerT m))
-    => GHC.Generic (FieldNameAsPathServer mkServerRecord  m)
+    GHC.Generic (mkServerRecord (AsServerT m))
+    => GHC.Generic (FieldNameAsPathServer mkServerRecord m)
 
 class DomainDrivenServerFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
     recordOfServersFromFields
@@ -100,14 +99,14 @@ class
         -> NP I (ServerTs apis m)
         -> NP I (ServerTs apis n)
 
-instance FieldNamesInPathHasServers mkApiRecord  '[] '[] context where
+instance FieldNamesInPathHasServers mkApiRecord '[] '[] context where
     type ServerTs '[] m = '[]
     taggedSumOfRoutes _ _ = StaticRouter mempty mempty
     hoistTaggedServersWithContext _ Nil = Nil
 
 instance
     ( HasServer api context
-    , FieldNamesInPathHasServers mkApiRecord  apis infos context
+    , FieldNamesInPathHasServers mkApiRecord apis infos context
     , KnownSymbol label
     , ApiTagFromLabel mkApiRecord
     )
@@ -126,32 +125,32 @@ instance
                 $ route (Proxy @api) context
                 $ (\(I server :* _) -> server) <$> delayedServers
             )
-            ( taggedSumOfRoutes @mkApiRecord  @apis @infos context $
+            ( taggedSumOfRoutes @mkApiRecord @apis @infos context $
                 (\(_ :* servers) -> servers) <$> delayedServers
             )
 
     hoistTaggedServersWithContext nt (I server :* servers) =
         I (hoistServerWithContext (Proxy @api) (Proxy @context) nt server)
-            :* hoistTaggedServersWithContext @mkApiRecord  @apis @infos @context nt servers
+            :* hoistTaggedServersWithContext @mkApiRecord @apis @infos @context nt servers
 
 instance
     ( FieldNamesInPathHasServers
         mkApiRecord
-        (GenericRecordFields (mkApiRecord  AsApi))
-        (GenericRecordFieldInfos (mkApiRecord  AsApi))
+        (GenericRecordFields (mkApiRecord AsApi))
+        (GenericRecordFieldInfos (mkApiRecord AsApi))
         context
-    , forall m. DomainDrivenServerFields (mkApiRecord ) m
+    , forall m. DomainDrivenServerFields (mkApiRecord) m
     )
-    => HasServer (FieldNameAsPathApi mkApiRecord ) context
+    => HasServer (FieldNameAsPathApi mkApiRecord) context
     where
     type
-        ServerT (FieldNameAsPathApi mkApiRecord ) m =
-            FieldNameAsPathServer mkApiRecord  m
+        ServerT (FieldNameAsPathApi mkApiRecord) m =
+            FieldNameAsPathServer mkApiRecord m
 
     route _ context delayedServer =
         taggedSumOfRoutes @mkApiRecord
-            @(GenericRecordFields (mkApiRecord  AsApi))
-            @(GenericRecordFieldInfos (mkApiRecord  AsApi))
+            @(GenericRecordFields (mkApiRecord AsApi))
+            @(GenericRecordFieldInfos (mkApiRecord AsApi))
             context
             (recordOfServersToFields . unDomainDrivenServer <$> delayedServer)
 
@@ -159,8 +158,8 @@ instance
         FieldNameAsPathServer
             . recordOfServersFromFields
             . hoistTaggedServersWithContext @mkApiRecord
-                @(GenericRecordFields (mkApiRecord  AsApi))
-                @(GenericRecordFieldInfos (mkApiRecord  AsApi))
+                @(GenericRecordFields (mkApiRecord AsApi))
+                @(GenericRecordFieldInfos (mkApiRecord AsApi))
                 @context
                 nt
             . recordOfServersToFields
@@ -194,23 +193,23 @@ instance
 instance
     FieldNamesInPathHasOpenApi
         mkApiRecord
-        (GenericRecordFields (mkApiRecord  AsApi))
-        (GenericRecordFieldInfos (mkApiRecord  AsApi))
-    => HasOpenApi (FieldNameAsPathApi mkApiRecord )
+        (GenericRecordFields (mkApiRecord AsApi))
+        (GenericRecordFieldInfos (mkApiRecord AsApi))
+    => HasOpenApi (FieldNameAsPathApi mkApiRecord)
     where
     toOpenApi _ =
         domainDrivenApiToOpenApi @mkApiRecord
-            @(GenericRecordFields (mkApiRecord  AsApi))
-            @(GenericRecordFieldInfos (mkApiRecord  AsApi))
+            @(GenericRecordFields (mkApiRecord AsApi))
+            @(GenericRecordFieldInfos (mkApiRecord AsApi))
 
 instance
-    ( GHC.Generic (FieldNameAsPathServer mkServerRecord  m)
-    , GTo (FieldNameAsPathServer mkServerRecord  m)
-    , ThrowAll (SOP I (GCode (FieldNameAsPathServer mkServerRecord  m)))
+    ( GHC.Generic (FieldNameAsPathServer mkServerRecord m)
+    , GTo (FieldNameAsPathServer mkServerRecord m)
+    , ThrowAll (SOP I (GCode (FieldNameAsPathServer mkServerRecord m)))
     )
-    => ThrowAll (FieldNameAsPathServer mkServerRecord  m)
+    => ThrowAll (FieldNameAsPathServer mkServerRecord m)
     where
-    throwAll = gto . throwAll @(SOP I (GCode (FieldNameAsPathServer mkServerRecord  m)))
+    throwAll = gto . throwAll @(SOP I (GCode (FieldNameAsPathServer mkServerRecord m)))
 
 class
     FieldNamesInPathHasClients
@@ -283,31 +282,28 @@ instance
     , FieldNamesInPathHasClients
         m
         mkApiRecord
-        (GenericRecordFields (mkApiRecord  AsApi))
-        (GenericRecordFieldInfos (mkApiRecord  AsApi))
-    , forall n. DomainDrivenClientFields (mkApiRecord ) n
+        (GenericRecordFields (mkApiRecord AsApi))
+        (GenericRecordFieldInfos (mkApiRecord AsApi))
+    , forall n. DomainDrivenClientFields (mkApiRecord) n
     )
-    => HasClient m (FieldNameAsPathApi mkApiRecord )
+    => HasClient m (FieldNameAsPathApi mkApiRecord)
     where
     type
-        Client m (FieldNameAsPathApi mkApiRecord ) =
-            mkApiRecord  (AsClientT m)
+        Client m (FieldNameAsPathApi mkApiRecord) =
+            mkApiRecord (AsClientT m)
     clientWithRoute _ _ =
         recordOfClientsFromFields
             . ( clientsWithRoute @m @mkApiRecord
-                    @(GenericRecordFields (mkApiRecord  AsApi))
-                    @(GenericRecordFieldInfos (mkApiRecord  AsApi))
+                    @(GenericRecordFields (mkApiRecord AsApi))
+                    @(GenericRecordFieldInfos (mkApiRecord AsApi))
               )
     hoistClientMonad _ _ nt =
         recordOfClientsFromFields
             . hoistClientsMonad @m @mkApiRecord
-                @(GenericRecordFields (mkApiRecord  AsApi))
-                @(GenericRecordFieldInfos (mkApiRecord  AsApi))
+                @(GenericRecordFields (mkApiRecord AsApi))
+                @(GenericRecordFieldInfos (mkApiRecord AsApi))
                 nt
             . recordOfClientsToFields
-
-
-
 
 type family GenericRecordFields (record :: Type) :: [Type] where
     GenericRecordFields record = GenericRecordFields' (GCode record)
