@@ -6,6 +6,7 @@ module DomainDriven.Effectful
     )
 where
 
+import DomainDriven.Persistance.Class as X (Indexed(..),NoIndex (..), Stored (..))
 import DomainDriven.Effectful.Domain
 import DomainDriven.Effectful.Aggregate as X
 import DomainDriven.Effectful.Projection as X

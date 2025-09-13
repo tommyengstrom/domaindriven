@@ -6,7 +6,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module DomainDriven.Effectful.Interpreter.InMemory where
+module DomainDriven.Effectful.Interpreter.InMemory
+    ( module DomainDriven.Effectful.Interpreter.InMemory
+    ) where
 
 import DomainDriven.Effectful.Aggregate
 import DomainDriven.Effectful.Projection

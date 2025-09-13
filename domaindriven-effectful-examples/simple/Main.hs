@@ -1,16 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
-
 module Main where
 
 import Control.Monad (when)
-import Data.Aeson
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.InMemory
-import DomainDriven.Persistance.Class (NoIndex (..), Stored (..))
-import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
@@ -22,24 +14,23 @@ import Servant.Server.Generic (AsServerT, genericServeT)
 import Prelude
 
 --------------------------------------------------------------------------------
--- 1. Define the model
+-- Define the model
 --------------------------------------------------------------------------------
 type CounterModel = Int
 
 --------------------------------------------------------------------------------
--- 2. Define events
+-- Define events
 --------------------------------------------------------------------------------
 data CounterEvent
     = Increase
     | Decrease
-    deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
+    deriving (Show)
 
 --------------------------------------------------------------------------------
--- 2. Define event handler
+-- Define event handler
 --------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
-applyEvent i (Stored ev _ _) = case ev of
+applyEvent i (Stored ev _timestamp _uuid) = case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
@@ -47,7 +38,7 @@ applyEvent i (Stored ev _ _) = case ev of
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
--- 3. Define the Servant API
+-- Use Servant to define the Commands
 --------------------------------------------------------------------------------
 data CounterAPI mode = CounterAPI
     { get :: mode :- Get '[JSON] Int
@@ -57,7 +48,7 @@ data CounterAPI mode = CounterAPI
     deriving (Generic)
 
 --------------------------------------------------------------------------------
--- 4. Implement the server handlers using Effectful effects
+-- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
 
 -- | Counter handlers using Effectful effects
@@ -67,7 +58,6 @@ counterServer
        , Error ServerError Effectful.:> es
        )
     => CounterAPI (AsServerT (Eff es))
-
 counterServer =
     CounterAPI
         { get = getModel
@@ -75,25 +65,20 @@ counterServer =
             pure (id, [Increase])
         , decrease = runTransaction do
             m <- getModel
-            when (id m <= 0)
-                . throwError
-                $ err422{errBody = "Counter cannot go below zero"}
+            when
+                (m <= 0)
+                (throwError err422{errBody = "Counter cannot go below zero"})
             pure (id, [Decrease])
         }
 
-
--- | Create the counter server with effect interpreters
-
 --------------------------------------------------------------------------------
--- 5. Wire up the server with effect interpreters
+-- Create the servant application.
+-- Here we have to run all the effects and transform it to Servant's Handler monad.
 --------------------------------------------------------------------------------
-
--- | Create the counter server with effect interpreters
 mkCounterServer :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
 mkCounterServer backend =
     genericServeT runEffects counterServer
   where
-    -- Helper to run effects and convert to Handler
     runEffects
         :: Eff
             '[ Projection CounterDomain
@@ -109,16 +94,19 @@ mkCounterServer backend =
                 . runEff
                 . runErrorNoCallStack @ServerError
                 . runAggregateInMemory backend
-                $ runProjectionInMemory backend  m
+                $ runProjectionInMemory backend m
         either Servant.throwError pure a
 
+--------------------------------------------------------------------------------
+-- Run the server
+--------------------------------------------------------------------------------
 main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
-    backend <- createForgetful @NoIndex applyEvent 0
+    backend <- createForgetful applyEvent 0
 
     -- Create and run the application
     run port $ mkCounterServer backend

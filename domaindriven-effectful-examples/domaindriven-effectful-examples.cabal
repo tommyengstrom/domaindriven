@@ -23,7 +23,61 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-executable effectful-example
+executable postgres-example
+  main-is: Main.hs
+  other-modules:
+      Paths_domaindriven_effectful_examples
+  hs-source-dirs:
+      simple
+  default-extensions:
+      BlockArguments
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFunctor
+      DeriveGeneric
+      DeriveTraversable
+      DerivingStrategies
+      DuplicateRecordFields
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NoImplicitPrelude
+      OverloadedLabels
+      OverloadedStrings
+      PolyKinds
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      StrictData
+      TupleSections
+      TypeApplications
+      TypeFamilyDependencies
+      TypeOperators
+      TypeSynonymInstances
+      ViewPatterns
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -fplugin=Effectful.Plugin -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , servant
+    , servant-server
+    , warp
+  default-language: Haskell2010
+
+executable simple-example
   main-is: Main.hs
   other-modules:
       Paths_domaindriven_effectful_examples

@@ -6,7 +6,10 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module DomainDriven.Effectful.Interpreter.Postgres where
+module DomainDriven.Effectful.Interpreter.Postgres
+    ( module DomainDriven.Effectful.Interpreter.Postgres
+    , module DomainDriven.Persistance.Postgres
+    ) where
 
 import Data.Aeson
 import DomainDriven.Effectful.Aggregate
@@ -14,8 +17,7 @@ import DomainDriven.Effectful.Domain
 import DomainDriven.Effectful.Projection
 import DomainDriven.Persistance.Class (WriteModel)
 import DomainDriven.Persistance.Class qualified as P
-import DomainDriven.Persistance.Postgres.Internal
-import DomainDriven.Persistance.Postgres.Types
+import DomainDriven.Persistance.Postgres
 import Effectful
 import Effectful.Dispatch.Dynamic
 import Prelude
@@ -38,7 +40,7 @@ runProjectionPostgres backend = interpret $ \_ -> \case
     GetEventListI idx -> liftIO $ P.getEventList backend idx
 
 -- | Run the Aggregate effect using an in-memory backend (new domain API)
-runAggregateInMemory
+runAggregatePostgres
     :: forall domain es a index
      . ( IOE :> es
        , index ~ (DomainIndex domain)
@@ -49,7 +51,7 @@ runAggregateInMemory
     => PostgresEvent (DomainModel domain) (DomainIndex domain) (DomainEvent domain)
     -> Eff (Aggregate domain : es) a
     -> Eff es a
-runAggregateInMemory backend = interpret $ \env -> \case
+runAggregatePostgres backend = interpret $ \env -> \case
     RunTransactionI idx cmd -> do
         localSeqUnlift env $ \unlift ->
             P.runCmd backend idx $ unlift cmd

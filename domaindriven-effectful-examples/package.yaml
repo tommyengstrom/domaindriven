@@ -69,7 +69,23 @@ ghc-options:
 - -fplugin=Effectful.Plugin
 
 executables:
-  effectful-example:
+  simple-example:
+    main: Main.hs
+    source-dirs: simple
+    ghc-options:
+      - -threaded
+      - -rtsopts
+      - -with-rtsopts=-N
+    dependencies:
+      - aeson
+      - domaindriven-core
+      - domaindriven-effectful
+      - effectful
+      - servant
+      - servant-server
+      - warp
+    
+  postgres-example:
     main: Main.hs
     source-dirs: simple
     ghc-options:

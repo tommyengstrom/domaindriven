@@ -1,17 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
-
 module Main where
 
 import Control.Monad (when)
-import Data.Aeson
 import DomainDriven.Effectful
-import DomainDriven.Effectful.Interpreter.InMemory
-import DomainDriven.FieldNameAsPath
-import DomainDriven.Persistance.Class (NoIndex (..), Stored (..))
-import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
+import DomainDriven.Persistance.Class (WriteModel)
+import DomainDriven.Effectful.Interpreter.Postgres
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
@@ -19,41 +11,45 @@ import Network.Wai.Handler.Warp (run)
 import Servant hiding (throwError)
 import Servant qualified
 import Servant.API.Generic
-import Servant.Server.Generic (AsServerT)
+import Servant.Server.Generic (AsServerT, genericServeT)
 import Prelude
 
 --------------------------------------------------------------------------------
--- 1. Define the model
+-- Define the model
 --------------------------------------------------------------------------------
 type CounterModel = Int
 
 --------------------------------------------------------------------------------
--- 2. Define events and how to apply them
+-- Define events
 --------------------------------------------------------------------------------
 data CounterEvent
     = Increase
     | Decrease
-    deriving (Show, Eq, Generic, ToJSON, FromJSON)
+    deriving (Show)
 
+--------------------------------------------------------------------------------
+-- Define event handler
+--------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
-applyEvent i (Stored ev _ _) = case ev of
+applyEvent i (Stored ev _timestamp _uuid) = case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
+-- Define the domain, used to cary the type constraints
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
--- 3. Define the Servant API
+-- Use Servant to define the Commands
 --------------------------------------------------------------------------------
 data CounterAPI mode = CounterAPI
     { get :: mode :- Get '[JSON] Int
     , increase :: mode :- "increase" :> Post '[JSON] Int
     , decrease :: mode :- "decrease" :> Post '[JSON] Int
     }
-    deriving (Generic, ApiTagFromLabel)
+    deriving (Generic)
 
 --------------------------------------------------------------------------------
--- 4. Implement the server handlers using Effectful effects
+-- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
 
 -- | Counter handlers using Effectful effects
@@ -63,7 +59,6 @@ counterServer
        , Error ServerError Effectful.:> es
        )
     => CounterAPI (AsServerT (Eff es))
-
 counterServer =
     CounterAPI
         { get = getModel
@@ -71,33 +66,21 @@ counterServer =
             pure (id, [Increase])
         , decrease = runTransaction do
             m <- getModel
-            when (id m <= 0)
-                . throwError
-                $ err422{errBody = "Counter cannot go below zero"}
+            when
+                (m <= 0)
+                (throwError err422{errBody = "Counter cannot go below zero"})
             pure (id, [Decrease])
         }
 
-counterServer'
-    :: ( Projection CounterDomain Effectful.:> es
-       , Aggregate CounterDomain Effectful.:> es
-       , Error ServerError Effectful.:> es
-       )
-    => ServerT (FieldNameAsPathApi CounterAPI) (Eff es)
-counterServer' = FieldNameAsPathServer counterServer
-
 --------------------------------------------------------------------------------
--- 5. Wire up the server with effect interpreters
+-- Create the servant application.
+-- Here we have to run all the effects and transform it to Servant's Handler monad.
 --------------------------------------------------------------------------------
-
-mkCounterServer' :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
-mkCounterServer' backend =
-    serveWithContextT
-        (Proxy @(FieldNameAsPathApi CounterAPI))
-        EmptyContext
-        runEffects
-        counterServer'
+mkCounterServer :: PostgresEvent NoIndex CounterModel CounterEvent
+    -> Application
+mkCounterServer backend =
+    genericServeT runEffects counterServer
   where
-    -- Helper to run effects and convert to Handler
     runEffects
         :: Eff
             '[ Projection CounterDomain
@@ -112,21 +95,26 @@ mkCounterServer' backend =
             liftIO
                 . runEff
                 . runErrorNoCallStack @ServerError
-                . runAggregateInMemory backend
-                $ runProjectionInMemory backend m
+                . runAggregatePostgres backend
+                $ runProjectionPostgres backend m
         either Servant.throwError pure a
 
-
+eventTable :: EventTable
+eventTable = InitialVersion "counter_events"
+--------------------------------------------------------------------------------
+-- Run the server
+--------------------------------------------------------------------------------
 main :: IO ()
 main = do
     let port = 7878
     putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
-    backend <- createForgetful @NoIndex applyEvent 0
-
+    connectionPool <- simplePool undefined
+    backend <- postgresWriteModel
+        simplePool
+        eventTable
+        applyEvent
+        (0 :: CounterModel)
     -- Create and run the application
-    let app = mkCounterServer' backend
-
-    run port app
-
+    run port $ mkCounterServer backend
