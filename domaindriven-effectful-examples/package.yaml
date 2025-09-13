@@ -17,6 +17,8 @@ description:         Examples demonstrating the Effectful-based domaindriven lib
 
 dependencies:
 - base
+- effectful-core
+- effectful-plugin
 
 default-extensions:
 - BlockArguments
@@ -64,6 +66,7 @@ ghc-options:
 - -Wredundant-constraints
 - -Wincomplete-patterns
 - -Wno-unused-packages
+- -fplugin=Effectful.Plugin
 
 executables:
   effectful-example:

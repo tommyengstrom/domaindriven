@@ -9,6 +9,7 @@ import Control.Monad (when)
 import Data.Aeson
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.InMemory
+import DomainDriven.FieldNameAsPath
 import DomainDriven.Persistance.Class (NoIndex (..), Stored (..))
 import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
@@ -18,7 +19,7 @@ import Network.Wai.Handler.Warp (run)
 import Servant hiding (throwError)
 import Servant qualified
 import Servant.API.Generic
-import Servant.Server.Generic (AsServerT, genericServeT)
+import Servant.Server.Generic (AsServerT)
 import Prelude
 
 --------------------------------------------------------------------------------
@@ -27,23 +28,18 @@ import Prelude
 type CounterModel = Int
 
 --------------------------------------------------------------------------------
--- 2. Define events
+-- 2. Define events and how to apply them
 --------------------------------------------------------------------------------
 data CounterEvent
     = Increase
     | Decrease
     deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-
---------------------------------------------------------------------------------
--- 2. Define event handler
---------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
 applyEvent i (Stored ev _ _) = case ev of
     Increase -> i + 1
     Decrease -> i - 1
 
--- Define the domain, used to cary the type constraints
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
@@ -54,7 +50,7 @@ data CounterAPI mode = CounterAPI
     , increase :: mode :- "increase" :> Post '[JSON] Int
     , decrease :: mode :- "decrease" :> Post '[JSON] Int
     }
-    deriving (Generic)
+    deriving (Generic, ApiTagFromLabel)
 
 --------------------------------------------------------------------------------
 -- 4. Implement the server handlers using Effectful effects
@@ -81,17 +77,25 @@ counterServer =
             pure (id, [Decrease])
         }
 
-
--- | Create the counter server with effect interpreters
+counterServer'
+    :: ( Projection CounterDomain Effectful.:> es
+       , Aggregate CounterDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       )
+    => ServerT (FieldNameAsPathApi CounterAPI) (Eff es)
+counterServer' = FieldNameAsPathServer counterServer
 
 --------------------------------------------------------------------------------
 -- 5. Wire up the server with effect interpreters
 --------------------------------------------------------------------------------
 
--- | Create the counter server with effect interpreters
-mkCounterServer :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
-mkCounterServer backend =
-    genericServeT runEffects counterServer
+mkCounterServer' :: ForgetfulInMemory CounterModel NoIndex CounterEvent -> Application
+mkCounterServer' backend =
+    serveWithContextT
+        (Proxy @(FieldNameAsPathApi CounterAPI))
+        EmptyContext
+        runEffects
+        counterServer'
   where
     -- Helper to run effects and convert to Handler
     runEffects
@@ -109,8 +113,9 @@ mkCounterServer backend =
                 . runEff
                 . runErrorNoCallStack @ServerError
                 . runAggregateInMemory backend
-                $ runProjectionInMemory backend  m
+                $ runProjectionInMemory backend m
         either Servant.throwError pure a
+
 
 main :: IO ()
 main = do
@@ -121,4 +126,7 @@ main = do
     backend <- createForgetful @NoIndex applyEvent 0
 
     -- Create and run the application
-    run port $ mkCounterServer backend
+    let app = mkCounterServer' backend
+
+    run port app
+

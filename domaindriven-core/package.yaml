@@ -45,6 +45,7 @@ default-extensions:
 - NamedFieldPuns
 - NoImplicitPrelude
 - OverloadedLabels
+- AllowAmbiguousTypes
 - OverloadedStrings
 - PolyKinds
 - RankNTypes
@@ -70,6 +71,7 @@ ghc-options:
 - -Wincomplete-record-updates
 - -Wincomplete-patterns
 - -Wunused-packages
+- -Wno-missing-import-lists 
 
 library:
   source-dirs: src

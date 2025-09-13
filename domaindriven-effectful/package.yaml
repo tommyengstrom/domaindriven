@@ -22,6 +22,7 @@ description:         Please see the README on GitHub at <https://github.com/tomm
 dependencies:
 - base
 - effectful
+- effectful-th
 - domaindriven-core
 - aeson
 - servant-server
@@ -78,8 +79,10 @@ ghc-options:
 - -Wincomplete-uni-patterns
 - -Wpartial-fields
 - -Wredundant-constraints
+- -Wincomplete-record-updates
 - -Wincomplete-patterns
 - -Wunused-packages
+- -Wno-missing-import-lists 
 
 library:
   source-dirs: src

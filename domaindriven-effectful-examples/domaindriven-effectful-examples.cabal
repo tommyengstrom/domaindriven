@@ -63,13 +63,15 @@ executable effectful-example
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -fplugin=Effectful.Plugin -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
     , base
     , domaindriven-core
     , domaindriven-effectful
     , effectful
+    , effectful-core
+    , effectful-plugin
     , servant
     , servant-server
     , warp

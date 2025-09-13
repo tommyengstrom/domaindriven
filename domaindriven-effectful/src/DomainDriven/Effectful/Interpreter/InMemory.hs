@@ -24,12 +24,11 @@ runProjectionInMemory
     :: forall domain es a
      . ( Hashable (DomainIndex domain), IOE :> es)
     => ForgetfulInMemory (DomainModel domain) (DomainIndex domain) (DomainEvent domain)
-    -> DomainIndex domain
     -> Eff (Projection domain : es) a
     -> Eff es a
-runProjectionInMemory backend idx = interpret $ \_ -> \case
-    GetModel  -> liftIO $ P.getModel backend idx
-    GetEventList  -> liftIO $ P.getEventList backend idx
+runProjectionInMemory backend = interpret $ \_ -> \case
+    GetModelI idx -> liftIO $ P.getModel backend idx
+    GetEventListI idx -> liftIO $ P.getEventList backend idx
 
 -- | Run the Aggregate effect using an in-memory backend (new domain API)
 runAggregateInMemory
@@ -41,7 +40,7 @@ runAggregateInMemory
     -> Eff (Aggregate domain : es) a
     -> Eff es a
 runAggregateInMemory backend = interpret $ \env -> \case
-    RunTransaction idx cmd -> do
+    RunTransactionI idx cmd -> do
         localSeqUnlift env $ \unlift -> do
             (model', _, returnFun) <- P.transactionalUpdate backend idx
                 $ unlift cmd

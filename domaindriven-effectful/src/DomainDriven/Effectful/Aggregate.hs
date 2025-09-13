@@ -1,15 +1,18 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module DomainDriven.Effectful.Aggregate where
 
 import Data.Kind (Type)
 import DomainDriven.Effectful.Domain
+import DomainDriven.Persistance.Class (NoIndex(..))
 import Effectful
-import Effectful.Dispatch.Dynamic
+import Data.Type.Equality
+import Effectful.TH
 
 -- | The new Aggregate effect with a single domain parameter
 data Aggregate (domain :: Type) :: Effect where
-    RunTransaction
+    RunTransactionI
         :: DomainIndex domain
         -> (Eff
                     es
@@ -21,17 +24,31 @@ data Aggregate (domain :: Type) :: Effect where
 
 type instance DispatchOf (Aggregate domain) = 'Dynamic
 
--- | Run a synchronous transaction while holding a lock on the aggregate
--- The returnd value is a projection of the model after the events have been applied.
+$(makeEffect ''Aggregate)
+
 runTransaction
     :: forall domain es a
      . Aggregate domain :> es
-    => DomainIndex domain
-    -> ( Eff
-                es
-                ( DomainModel domain -> a
-                , [DomainEvent domain]
-                )
-       )
-    -> Eff es a
-runTransaction idx cmd = send (RunTransaction @domain idx cmd)
+     => DomainIndex domain  ~ NoIndex
+     => ( Eff
+                 es
+                 ( DomainModel domain -> a
+                 , [DomainEvent domain]
+                 )
+        )
+     -> Eff es a
+runTransaction = runTransactionI NoIndex
+-- | Run a synchronous transaction while holding a lock on the aggregate
+-- The returnd value is a projection of the model after the events have been applied.
+-- runTransactionI
+--     :: forall domain es a
+--      . Aggregate domain :> es
+--     => DomainIndex domain
+--     -> ( Eff
+--                 es
+--                 ( DomainModel domain -> a
+--                 , [DomainEvent domain]
+--                 )
+--        )
+--     -> Eff es a
+-- runTransactionI idx cmd = send (RunTransactionI @domain idx cmd)

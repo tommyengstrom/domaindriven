@@ -71,13 +71,14 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wunused-packages
+  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists
   build-depends:
       aeson
     , base
     , bytestring
     , domaindriven-core
     , effectful
+    , effectful-th
     , generics-sop
     , hashable
     , openapi3
