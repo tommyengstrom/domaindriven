@@ -29,8 +29,6 @@ runProjectionPostgres
        , FromJSON (DomainEvent domain)
        , IsPgIndex index
        , index ~ (DomainIndex domain)
-       , P.Index (PostgresEvent (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
-            ~ index
        )
     => PostgresEvent (DomainIndex domain) (DomainModel domain)  (DomainEvent domain)
     -> Eff (Projection domain : es) a
@@ -44,8 +42,6 @@ runAggregatePostgres
     :: forall domain es a index
      . ( IOE :> es
        , index ~ (DomainIndex domain)
-       , P.Index (PostgresEvent (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
-            ~ index
        , WriteModel (PostgresEvent  (DomainIndex domain) (DomainModel domain) (DomainEvent domain))
        )
     => PostgresEvent (DomainIndex domain) (DomainModel domain)  (DomainEvent domain)

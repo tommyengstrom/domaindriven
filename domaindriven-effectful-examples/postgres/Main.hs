@@ -5,6 +5,7 @@ import Data.Aeson
 import DomainDriven.Effectful
 import DomainDriven.Effectful.Interpreter.Postgres
 import Effectful hiding ((:>))
+import Database.PostgreSQL.Simple (connectPostgreSQL)
 import Effectful qualified
 import Effectful.Error.Static
 import Network.Wai.Handler.Warp (run)
@@ -110,7 +111,8 @@ main = do
     putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
-    connectionPool <- simplePool undefined
+    connectionPool <- simplePool
+        $ connectPostgreSQL "host=localhost port=5432 user=postgres dbname=domaindriven password=postgres"
     backend <- postgresWriteModel
         connectionPool
         eventTable

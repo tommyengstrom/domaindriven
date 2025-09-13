@@ -100,4 +100,5 @@ executables:
       - servant
       - servant-server
       - warp
+      - postgresql-simple
     
