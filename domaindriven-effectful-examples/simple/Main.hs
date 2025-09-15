@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 module Main where
 
 import Control.Monad (when)
@@ -16,23 +17,27 @@ import Prelude
 --------------------------------------------------------------------------------
 -- Define the model
 --------------------------------------------------------------------------------
-type CounterModel = Int
+data CounterModel = CounterModel
+    { counter ::  Int
+    , previousCounter :: Int
+    } deriving (Show, Generic)
+
 
 --------------------------------------------------------------------------------
 -- Define events
 --------------------------------------------------------------------------------
 data CounterEvent
-    = Increase
-    | Decrease
+    = CounterIncreased
+    | CounterDecreased
     deriving (Show)
 
 --------------------------------------------------------------------------------
 -- Define event handler
 --------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
-applyEvent i (Stored ev _timestamp _uuid) = case ev of
-    Increase -> i + 1
-    Decrease -> i - 1
+applyEvent (CounterModel i _) (Stored ev _timestamp _uuid) = case ev of
+    CounterIncreased -> CounterModel (i + 1) i
+    CounterDecreased -> CounterModel (i - 1) i
 
 
 --------------------------------------------------------------------------------
@@ -60,15 +65,17 @@ counterServer
     => CounterAPI (AsServerT (Eff es))
 counterServer =
     CounterAPI
-        { get = getModel
+        { get = do
+            CounterModel {counter} <- getModel
+            pure counter
         , increase = runTransaction do
-            pure (id, [Increase])
+            pure (\a -> a.counter , [CounterIncreased])
         , decrease = runTransaction do
             m <- getModel
             when
-                (m <= 0)
+                (m.counter <= 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})
-            pure (id, [Decrease])
+            pure (\a -> a.counter, [CounterDecreased])
         }
 
 --------------------------------------------------------------------------------
@@ -108,7 +115,7 @@ main = do
     putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
-    backend <- createForgetful applyEvent 0
+    backend <- createForgetful applyEvent (CounterModel 0 0)
 
     -- Create and run the application
     run port $ mkCounterServer backend
