@@ -98,8 +98,10 @@ executables:
       - domaindriven-core
       - domaindriven-effectful
       - effectful
+      - postgresql-simple
       - servant
       - servant-server
+      - uuid
+      - text
       - warp
-      - postgresql-simple
     

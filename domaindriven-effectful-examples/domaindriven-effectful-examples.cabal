@@ -78,6 +78,8 @@ executable postgres-example
     , postgresql-simple
     , servant
     , servant-server
+    , text
+    , uuid
     , warp
   default-language: Haskell2010
 
