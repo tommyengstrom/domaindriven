@@ -1,9 +1,4 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.38.1.
---
--- see: https://github.com/sol/hpack
-
+cabal-version: 3.12
 name:           domaindriven-effectful
 version:        0.5.0
 synopsis:       Batteries included event sourcing and CQRS
@@ -14,7 +9,7 @@ bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
 copyright:      2023 Tommy Engström
-license:        BSD3
+license:        BSD-3-Clause
 build-type:     Simple
 extra-source-files:
     README.md
@@ -24,20 +19,7 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-library
-  exposed-modules:
-      DomainDriven.Effectful
-      DomainDriven.Effectful.Aggregate
-      DomainDriven.Effectful.Domain
-      DomainDriven.Effectful.Interpreter.InMemory
-      DomainDriven.Effectful.Interpreter.Postgres
-      DomainDriven.Effectful.Projection
-      DomainDriven.FieldNameAsPath
-      Servant.Auth.Internal.ThrowAll.SOP
-  other-modules:
-      Paths_domaindriven_effectful
-  hs-source-dirs:
-      src
+common shared_opts
   default-extensions:
       ConstraintKinds
       DataKinds
@@ -72,7 +54,35 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists -fplugin=Effectful.Plugin
+  ghc-options: 
+    -Wall 
+    -Werror 
+    -Wcompat 
+    -Widentities 
+    -Wincomplete-record-updates 
+    -Wincomplete-uni-patterns 
+    -Wpartial-fields 
+    -Wredundant-constraints 
+    -Wincomplete-record-updates 
+    -Wincomplete-patterns 
+    -Wunused-packages 
+    -Wno-missing-import-lists 
+    -fplugin=Effectful.Plugin
+  default-language: Haskell2010
+
+library
+  import: shared_opts
+  exposed-modules:
+      DomainDriven.Effectful
+      DomainDriven.Effectful.Aggregate
+      DomainDriven.Effectful.Domain
+      DomainDriven.Effectful.Interpreter.InMemory
+      DomainDriven.Effectful.Interpreter.Postgres
+      DomainDriven.Effectful.Projection
+      DomainDriven.FieldNameAsPath
+      Servant.Auth.Internal.ThrowAll.SOP
+  hs-source-dirs:
+      src
   build-depends:
       aeson
     , base
@@ -89,4 +99,3 @@ library
     , servant-openapi3
     , servant-server
     , text
-  default-language: Haskell2010

@@ -1,8 +1,4 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.38.1.
---
--- see: https://github.com/sol/hpack
+cabal-version: 3.12
 
 name:           domaindriven-core
 version:        0.5.0
@@ -12,9 +8,9 @@ category:       Web
 homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
-maintainer:     tommy@tommyengstrom.com
-copyright:      2022 Tommy Engström
-license:        BSD3
+maintainer:     tommy@succinct.se
+copyright:      2025 Tommy Engström
+license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
@@ -25,19 +21,8 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-library
-  exposed-modules:
-      Data.ShapeCoerce
-      DomainDriven.Persistance.Class
-      DomainDriven.Persistance.ForgetfulInMemory
-      DomainDriven.Persistance.Postgres
-      DomainDriven.Persistance.Postgres.Internal
-      DomainDriven.Persistance.Postgres.Migration
-      DomainDriven.Persistance.Postgres.Types
-  other-modules:
-      Paths_domaindriven_core
-  hs-source-dirs:
-      src
+common default_opts
+  default-language: Haskell2010
   default-extensions:
       ConstraintKinds
       DataKinds
@@ -72,7 +57,36 @@ library
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists
+  ghc-options:
+    -Wall 
+    -Werror 
+    -Wcompat 
+    -Widentities 
+    -Wincomplete-record-updates 
+    -Wincomplete-uni-patterns 
+    -Wpartial-fields 
+    -Wredundant-constraints 
+    -Wincomplete-record-updates 
+    -Wincomplete-patterns 
+    -Wunused-packages 
+    -Wno-missing-import-lists 
+    -threaded 
+    -rtsopts 
+    -with-rtsopts=-N 
+    -Wall
+
+library
+  import: default_opts
+  exposed-modules:
+      Data.ShapeCoerce
+      DomainDriven.Persistance.Class
+      DomainDriven.Persistance.ForgetfulInMemory
+      DomainDriven.Persistance.Postgres
+      DomainDriven.Persistance.Postgres.Internal
+      DomainDriven.Persistance.Postgres.Migration
+      DomainDriven.Persistance.Postgres.Types
+  hs-source-dirs:
+      src
   build-depends:
       aeson
     , base
@@ -96,48 +110,13 @@ library
   default-language: Haskell2010
 
 test-suite domaindriven-core-test
+  import: default_opts
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
       DomainDriven.Persistance.PostgresSpec
-      Paths_domaindriven_core
   hs-source-dirs:
       test
-  default-extensions:
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      AllowAmbiguousTypes
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      StandaloneDeriving
-      StrictData
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -Wunused-packages -Wno-missing-import-lists -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
     , base
@@ -151,4 +130,3 @@ test-suite domaindriven-core-test
     , unliftio
     , unliftio-pool
     , uuid
-  default-language: Haskell2010

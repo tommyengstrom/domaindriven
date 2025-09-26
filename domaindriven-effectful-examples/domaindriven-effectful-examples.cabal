@@ -1,8 +1,4 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.38.1.
---
--- see: https://github.com/sol/hpack
+cabal-version: 3.12
 
 name:           domaindriven-effectful-examples
 version:        0.5.0
@@ -13,8 +9,8 @@ homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
-copyright:      2023 Tommy Engström
-license:        BSD3
+copyright:      2025 Tommy Engström
+license:        BSD-3-Clause
 build-type:     Simple
 extra-source-files:
     README.md
@@ -23,15 +19,7 @@ source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-executable postgres-example
-  main-is: Main.hs
-  other-modules:
-      Event.V1
-      Event.V2
-      EventMigration
-      Paths_domaindriven_effectful_examples
-  hs-source-dirs:
-      postgres
+common shared_opts
   default-extensions:
       BlockArguments
       ConstraintKinds
@@ -66,7 +54,33 @@ executable postgres-example
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -Wno-partial-fields -fplugin=Effectful.Plugin -threaded -rtsopts -with-rtsopts=-N
+  default-language: Haskell2010
+  ghc-options: 
+    -Wall 
+    -Werror 
+    -Wcompat 
+    -Widentities 
+    -Wincomplete-record-updates 
+    -Wincomplete-uni-patterns 
+    -Wpartial-fields 
+    -Wredundant-constraints 
+    -Wincomplete-patterns 
+    -Wno-unused-packages 
+    -Wno-partial-fields 
+    -fplugin=Effectful.Plugin 
+    -threaded 
+    -rtsopts 
+    -with-rtsopts=-N
+
+executable postgres-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      Event.V1
+      Event.V2
+      EventMigration
+  hs-source-dirs:
+      postgres
   build-depends:
       aeson
     , base
@@ -81,49 +95,12 @@ executable postgres-example
     , text
     , uuid
     , warp
-  default-language: Haskell2010
 
 executable simple-example
+  import: shared_opts
   main-is: Main.hs
-  other-modules:
-      Paths_domaindriven_effectful_examples
   hs-source-dirs:
       simple
-  default-extensions:
-      BlockArguments
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      StandaloneDeriving
-      StrictData
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Werror -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-patterns -Wno-unused-packages -Wno-partial-fields -fplugin=Effectful.Plugin -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
     , base
@@ -135,4 +112,3 @@ executable simple-example
     , servant
     , servant-server
     , warp
-  default-language: Haskell2010
