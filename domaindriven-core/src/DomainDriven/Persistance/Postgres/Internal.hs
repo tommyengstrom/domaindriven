@@ -634,8 +634,8 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent i m e)
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
         withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
-            -- m <- getModel' pgt index
-            (returnFun, evs) <- runInIO cmd
+            m <- getModel' pgt index
+            (returnFun, evs) <- runInIO $ cmd m
             NumberedModel m' _ <- getCurrentState pg index
             storedEvs <- traverse toStored evs
             newNumberedModel <-

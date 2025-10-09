@@ -50,4 +50,4 @@ runAggregatePostgres
 runAggregatePostgres backend = interpret $ \env -> \case
     RunTransactionI idx cmd -> do
         localSeqUnlift env $ \unlift ->
-            P.runCmd backend idx $ unlift cmd
+            P.runCmd backend idx $ unlift . cmd

@@ -74,7 +74,7 @@ spec = do
         postHook p index m evs = do
             atomically $
                 modifyTVar processedEvents (<> Set.fromList (fmap storedUUID evs))
-            when (m < 0) (void $ runCmd p index $ pure (id, [Reset]))
+            when (m < 0) (void $ runCmd p index $ \_ -> pure (id, [Reset]))
      in around (setupPersistance postHook) (postHookSpec processedEvents)
 
     around (setupPersistance noHook) migrationConcurrencySpec
@@ -222,9 +222,8 @@ indexedSpec = describe "Indexed models" $ do
         m2 `shouldBe` 3
 
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
-        -- This may fail in GHCI. Run it with stack test.
-        let testCmd :: Int -> IO (TestModel -> TestModel, [TestEvent])
-            testCmd i = do
+        let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            testCmd i _ = do
                 threadDelay 100000 -- 0.1s delay
                 pure (id, replicate i AddOne)
         t0 <- getCurrentTime
@@ -241,8 +240,8 @@ indexedSpec = describe "Indexed models" $ do
         diffUTCTime t1 t0 `shouldSatisfy` (< 1.9)
 
     it "Updates to same index are done sequentially" $ \(p, _pool) -> do
-        let testCmd :: IO (TestModel -> TestModel, [TestEvent])
-            testCmd = do
+        let testCmd :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            testCmd _ = do
                 threadDelay 100000 -- 0.1s delay
                 pure (id, [AddOne, AddOne])
         t0 <- getCurrentTime
@@ -310,7 +309,7 @@ postHookSpec processedEvents = describe "updateHook" $ do
         events `shouldBe` Set.empty
 
     it "Post update hook is fired after events are written" $ \(p, _) -> do
-        i <- runCmd p NoIndex $ do
+        i <- runCmd p NoIndex $ \_ -> do
             pure (id, [AddOne, AddOne, SubtractOne])
         i `shouldBe` 1
         threadDelay 100000 -- Ensure the hook has time to run
@@ -319,7 +318,7 @@ postHookSpec processedEvents = describe "updateHook" $ do
 
     it "Hook that resets on negative works" $ \(p, _) -> do
         -- the hook will check if the model is negative and reset it if so
-        m <- runCmd p NoIndex $ do
+        m <- runCmd p NoIndex $ \_ -> do
             pure (id, [SubtractOne, SubtractOne, SubtractOne])
         m `shouldBe` (-3)
         threadDelay 100000 -- Ensure the hook has time to run
@@ -399,8 +398,8 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -> EventMigration
         -> IO ()
     migrationTest m0 pool mig = do
-        let cmd :: IO (Int -> Int, [TestEvent])
-            cmd = pure (id, [AddOne])
+        let cmd :: Int -> IO (Int -> Int, [TestEvent])
+            cmd _ = pure (id, [AddOne])
 
         i <- replicateM 5 (runCmd m0 NoIndex cmd)
         length i `shouldBe` 5
@@ -447,7 +446,7 @@ loggingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connect
 loggingSpec = describe "Callstacks" $ do
     it "Callstack for runCmd reference this file" $ \(p', _) -> do
         (logVar, p) <- withStmLogger p'
-        _ <- runCmd p NoIndex $ pure (id, [AddOne])
+        _ <- runCmd p NoIndex $ \_ -> pure (id, [AddOne])
         referencesThisFile =<< readTVarIO logVar
     it "Callstack for getModel reference this file" $ \(p', _) -> do
         (logVar, p) <- withStmLogger p'

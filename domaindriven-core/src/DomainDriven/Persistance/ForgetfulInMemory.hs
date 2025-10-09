@@ -59,8 +59,8 @@ instance Hashable index => WriteModel (ForgetfulInMemory model index event) wher
     postUpdateHook p index model events = liftIO $ updateHook p index model events
     transactionalUpdate ff index evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
-            (returnFun, evs) <- evalCmd
             model <- HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
+            (returnFun, evs) <- evalCmd model
             storedEvs <- traverse toStored evs
             let newModel = foldl' (apply ff) model storedEvs
             modifyIORef (events ff) $

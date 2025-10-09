@@ -63,10 +63,9 @@ counterServer
 counterServer =
     CounterAPI
         { get = getModel
-        , increase = runTransaction do
+        , increase = runTransaction \_ -> do
             pure (id, [Increase])
-        , decrease = runTransaction do
-            m <- getModel
+        , decrease = runTransaction \m -> do
             when
                 (m <= 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})

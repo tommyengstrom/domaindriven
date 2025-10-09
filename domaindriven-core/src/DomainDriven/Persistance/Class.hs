@@ -57,13 +57,11 @@ class ReadModel p => WriteModel p where
          . MonadUnliftIO m
         => p
         -> Index p
-        -> m (Model p -> a, [Event p])
+        -> (Model p -> m (Model p -> a, [Event p]))
         -> m
             ( Model p
-            , -- \^ Updated model
-              [Stored (Event p)]
-            , -- \^ Stored events
-              (Model p -> a)
+            , [Stored (Event p)]
+            , (Model p -> a)
             )
         -- ^ How to create the return value from updated model
 
@@ -73,7 +71,7 @@ runCmd
      . (WriteModel p, MonadUnliftIO m)
     => p
     -> Index p
-    -> m (Model p -> a, [Event p])
+    -> (Model p -> m (Model p -> a, [Event p]))
     -> m a
 runCmd p index cmd = withFrozenCallStack $ do
     (model, events, returnFun) <- transactionalUpdate p index cmd

@@ -68,10 +68,9 @@ counterServer =
         { get = do
             CounterModel {counter} <- getModel
             pure counter
-        , increase = runTransaction do
+        , increase = runTransaction \_ -> do
             pure (\a -> a.counter , [CounterIncreased])
-        , decrease = runTransaction do
-            m <- getModel
+        , decrease = runTransaction \m -> do
             when
                 (m.counter <= 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})

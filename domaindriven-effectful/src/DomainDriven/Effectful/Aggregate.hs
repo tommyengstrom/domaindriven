@@ -14,11 +14,12 @@ import Effectful.TH
 data Aggregate (domain :: Type) :: Effect where
     RunTransactionI
         :: DomainIndex domain
-        -> ( Eff
-                es
-                ( DomainModel domain -> a
-                , [DomainEvent domain]
-                )
+        -> ( DomainModel domain
+             -> Eff
+                    es
+                    ( DomainModel domain -> a
+                    , [DomainEvent domain]
+                    )
            )
         -> Aggregate domain (Eff es) a
 
@@ -30,7 +31,7 @@ runTransaction
     :: forall domain es a
      . Aggregate domain :> es
     => DomainIndex domain ~ NoIndex
-    => ( Eff
+    => ( DomainModel domain -> Eff
             es
             ( DomainModel domain -> a
             , [DomainEvent domain]
