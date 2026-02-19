@@ -23,6 +23,7 @@
             ghc
             pkgs.cabal-install
             pkgs.haskell.packages.ghc9103.haskell-language-server
+            pkgs.haskell.packages.ghc9103.hspec-discover
             pkgs.zlib.dev
             pkgs.gmp.dev
             pkgs.xz.dev

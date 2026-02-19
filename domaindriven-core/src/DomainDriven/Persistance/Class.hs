@@ -75,7 +75,9 @@ runCmd
     -> m a
 runCmd p index cmd = withFrozenCallStack $ do
     (model, events, returnFun) <- transactionalUpdate p index cmd
-    _ <- async $ postUpdateHook p index model events
+    _ <- async $
+        postUpdateHook p index model events `catchAny` \e ->
+            liftIO $ putStrLn $ "[DomainDriven] postUpdateHook failed: " <> displayException e
     pure $ returnFun model
 
 -- | Wrapper for stored data
