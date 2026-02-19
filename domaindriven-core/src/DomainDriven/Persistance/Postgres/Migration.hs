@@ -6,7 +6,6 @@ import Control.Monad
 import Data.Aeson
 import Data.Foldable
 import Data.Int
-import Data.String
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Internal (mkEventQuery, mkEventStream)
@@ -123,9 +122,9 @@ migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
     writeIt index events =
         PG.executeMany
             conn
-            ( "insert into \""
-                <> fromString tName
-                <> "\" (id, index, timestamp, event) \
+            ( "insert into "
+                <> quoteIdent tName
+                <> " (id, index, timestamp, event) \
                    \values (?, ?, ?, ?)"
             )
             ( fmap
@@ -142,4 +141,4 @@ fetchAllIndices
 fetchAllIndices conn etName = fmap (fromPgIndex . fromOnly) <$> PG.query_ conn q
   where
     q :: PG.Query
-    q = "select distinct index from \"" <> fromString etName <> "\" order by index;"
+    q = "select distinct index from " <> quoteIdent etName <> " order by index;"

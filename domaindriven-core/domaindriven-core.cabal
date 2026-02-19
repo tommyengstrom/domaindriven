@@ -58,22 +58,17 @@ common default_opts
       TypeSynonymInstances
       ViewPatterns
   ghc-options:
-    -Wall 
-    -Werror 
-    -Wcompat 
-    -Widentities 
-    -Wincomplete-record-updates 
-    -Wincomplete-uni-patterns 
-    -Wpartial-fields 
-    -Wredundant-constraints 
-    -Wincomplete-record-updates 
-    -Wincomplete-patterns 
-    -Wunused-packages 
-    -Wno-missing-import-lists 
-    -threaded 
-    -rtsopts 
-    -with-rtsopts=-N 
     -Wall
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wincomplete-patterns
+    -Wunused-packages
+    -Wno-missing-import-lists
 
 library
   import: default_opts
@@ -113,8 +108,13 @@ test-suite domaindriven-core-test
   import: default_opts
   type: exitcode-stdio-1.0
   main-is: Spec.hs
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
   other-modules:
       DomainDriven.Persistance.PostgresSpec
+      DomainDriven.Persistance.Postgres.TypesSpec
   hs-source-dirs:
       test
   build-depends:

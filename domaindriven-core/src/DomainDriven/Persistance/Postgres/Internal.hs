@@ -5,6 +5,7 @@ import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 import Data.Aeson
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Foldable
 import Data.Generics.Labels ()
 import Data.Generics.Product
@@ -109,12 +110,20 @@ instance (IsPgIndex i, FromJSON e) => ReadModel (PostgresEvent i m e) where
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
 getEventTableName :: EventTable -> EventTableName
-getEventTableName = go 0
+getEventTableName = validate . go 0
   where
     go :: Int -> EventTable -> String
     go i = \case
         MigrateUsing _ u -> go (i + 1) u
         InitialVersion n -> n <> "_v" <> show (i + 1)
+    validate name
+        | all isValidChar name && not (null name) = name
+        | otherwise =
+            error $
+                "[DomainDriven] Invalid event table name: "
+                    <> show name
+                    <> ". Names must be non-empty and contain only [a-zA-Z0-9_]."
+    isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
 
 -- | Create the table required for storing state and events, if they do not yet exist.
 createEventTable :: PostgresEventTrans index model event -> IO ()
@@ -128,9 +137,9 @@ createEventTable' :: Connection -> EventTableName -> IO Int64
 createEventTable' conn eventTable = do
     _ <-
         execute_ conn $
-            "create table if not exists \""
-                <> fromString eventTable
-                <> "\" \
+            "create table if not exists "
+                <> quoteIdent eventTable
+                <> " \
                    \( id uuid primary key\
                    \, index varchar not null\
                    \, event_number bigint not null generated always as identity\
@@ -138,18 +147,18 @@ createEventTable' conn eventTable = do
                    \, event jsonb not null\
                    \);"
     execute_ conn $
-        "create index on \""
-            <> fromString eventTable
-            <> "\" (index, event_number);"
+        "create index on "
+            <> quoteIdent eventTable
+            <> " (index, event_number);"
 
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
     createRetireFunction conn
     void $
         execute_ conn $
-            "create trigger retired before insert on \""
-                <> fromString tableName
-                <> "\" execute procedure retired_table()"
+            "create trigger retired before insert on "
+                <> quoteIdent tableName
+                <> " execute procedure retired_table()"
 
 createRetireFunction :: Connection -> IO ()
 createRetireFunction conn =
@@ -276,9 +285,9 @@ queryEvents conn eventTable index = do
   where
     q :: PG.Query
     q =
-        "select id, event_number,timestamp,event from \""
-            <> fromString eventTable
-            <> "\" where index = "
+        "select id, event_number,timestamp,event from "
+            <> quoteIdent eventTable
+            <> " where index = "
             <> toQuery index
             <> " order by event_number"
 
@@ -292,9 +301,9 @@ queryEventsAfter conn eventTable (EventNumber lastEvent) =
     traverse fromEventRow
         =<< query_
             conn
-            ( "select id, event_number,timestamp,event from \""
-                <> fromString eventTable
-                <> "\" where event_number > "
+            ( "select id, event_number,timestamp,event from "
+                <> quoteIdent eventTable
+                <> " where event_number > "
                 <> fromString (show lastEvent)
                 <> " order by event_number"
             )
@@ -310,9 +319,9 @@ mkEventsAfterQuery
     -> EventQuery
 mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
     EventQuery $
-        "select id, event_number,timestamp,event from \""
-            <> fromString eventTable
-            <> "\" where index = "
+        "select id, event_number,timestamp,event from "
+            <> quoteIdent eventTable
+            <> " where index = "
             <> toQuery index
             <> " and event_number > "
             <> fromString (show lastEvent)
@@ -321,9 +330,9 @@ mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
 mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
 mkEventQuery eventTable index =
     EventQuery $
-        "select id, event_number,timestamp,event from \""
-            <> fromString eventTable
-            <> "\" where index = "
+        "select id, event_number,timestamp,event from "
+            <> quoteIdent eventTable
+            <> " where index = "
             <> toQuery index
             <> " order by event_number"
 
@@ -338,9 +347,9 @@ queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
   where
     q :: PG.Query
     q =
-        "select count(*) > 0 from \""
-            <> fromString eventTable
-            <> "\" where event_number > "
+        "select count(*) > 0 from "
+            <> quoteIdent eventTable
+            <> " where event_number > "
             <> fromString (show lastEvent)
 
 -- writeEvents
@@ -381,9 +390,9 @@ writeEvents conn eventTable index storedEvents = do
     _ <-
         executeMany
             conn
-            ( "insert into \""
-                <> fromString eventTable
-                <> "\" (id, index, timestamp, event) \
+            ( "insert into "
+                <> quoteIdent eventTable
+                <> " (id, index, timestamp, event) \
                    \values (?, ?, ?, ?)"
             )
             ( fmap
@@ -399,9 +408,8 @@ writeEvents conn eventTable index storedEvents = do
     foldl' max 0 . fmap fromOnly
         <$> query_
             conn
-            ( "select coalesce(max(event_number),1) from \""
-                <> fromString eventTable
-                <> "\""
+            ( "select coalesce(max(event_number),1) from "
+                <> quoteIdent eventTable
             )
 
 getEventStream'

@@ -18,6 +18,14 @@ import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import Prelude
 
+-- | Quote a PostgreSQL identifier (table/column name).
+-- Escapes embedded double quotes by doubling them per SQL standard.
+quoteIdent :: String -> PG.Query
+quoteIdent name = "\"" <> fromString (concatMap escChar name) <> "\""
+  where
+    escChar '"' = "\"\""
+    escChar c = [c]
+
 data PersistanceError
     = EncodingError String
     | ValueError String

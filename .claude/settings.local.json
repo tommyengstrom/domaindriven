@@ -10,7 +10,8 @@
       "WebFetch(domain:hackage.haskell.org)",
       "WebFetch(domain:hackage-content.haskell.org)",
       "WebFetch(domain:github.com)",
-      "Bash(stack build:*)"
+      "Bash(stack build:*)",
+      "WebFetch(domain:www.stackage.org)"
     ],
     "deny": []
   }
