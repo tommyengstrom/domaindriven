@@ -1,17 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(stack build)",
-      "Bash(stack test)",
-      "Bash(rg:*)",
-      "Bash(find:*)",
-      "Bash(grep:*)",
-      "Bash(stack test:*)",
       "WebFetch(domain:hackage.haskell.org)",
       "WebFetch(domain:hackage-content.haskell.org)",
       "WebFetch(domain:github.com)",
-      "Bash(stack build:*)",
-      "WebFetch(domain:www.stackage.org)"
+      "WebFetch(domain:www.stackage.org)",
+      "Bash(cabal:*)"
     ],
     "deny": []
   }

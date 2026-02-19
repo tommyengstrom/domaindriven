@@ -644,13 +644,12 @@ instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent i m e)
         withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
             m <- getModel' pgt index
             (returnFun, evs) <- runInIO $ cmd m
-            NumberedModel m' _ <- getCurrentState pg index
             storedEvs <- traverse toStored evs
             newNumberedModel <-
                 uncurry NumberedModel
                     <$> concurrently
                         ( Stream.fold
-                            (Fold.foldl' (pg ^. field @"app") m')
+                            (Fold.foldl' (pg ^. field @"app") m)
                             (Stream.fromList storedEvs)
                         )
                         ( writeEvents
