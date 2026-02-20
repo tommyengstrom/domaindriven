@@ -98,3 +98,23 @@ library
     , servant-openapi3
     , servant-server
     , text
+
+test-suite domaindriven-effectful-test
+  import: shared_opts
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  other-modules:
+    DomainDriven.Effectful.InMemorySpec
+  hs-source-dirs:
+    test
+  build-depends:
+      base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful-core
+    , effectful-plugin
+    , hspec
