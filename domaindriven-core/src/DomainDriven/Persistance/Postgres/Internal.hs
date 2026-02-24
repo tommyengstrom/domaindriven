@@ -168,18 +168,33 @@ createRetireFunction conn =
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
 
-simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
-simplePool' connInfo = simplePool (PG.connect connInfo)
-
+-- | Create a connection pool with default settings (1 stripe, 5 connections, 60s idle).
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
-simplePool getConn = do
-    -- Using a single stripe to ensures all thread can use all connections
-    let poolCfg :: Pool.PoolConfig Connection
-        poolCfg =
-            Pool.setNumStripes (Just 1) $
-                Pool.defaultPoolConfig (liftIO getConn) (liftIO . PG.close) 60 5
+simplePool = simplePoolWith id
 
+-- | Create a connection pool, applying a modifier to the default PoolConfig.
+simplePoolWith
+    :: MonadUnliftIO m
+    => (Pool.PoolConfig Connection -> Pool.PoolConfig Connection)
+    -> IO Connection
+    -> m (Pool Connection)
+simplePoolWith modifyConfig getConn = do
+    -- Using a single stripe to ensures all thread can use all connections
+    let poolCfg =
+            modifyConfig
+                . Pool.setNumStripes (Just 1)
+                $ Pool.defaultPoolConfig (liftIO getConn) (liftIO . PG.close) 60 5
     liftIO $ Pool.newPool poolCfg
+
+simplePool' :: MonadUnliftIO m => PG.ConnectInfo -> m (Pool Connection)
+simplePool' = simplePoolWith' id
+
+simplePoolWith'
+    :: MonadUnliftIO m
+    => (Pool.PoolConfig Connection -> Pool.PoolConfig Connection)
+    -> PG.ConnectInfo
+    -> m (Pool Connection)
+simplePoolWith' modifyConfig connInfo = simplePoolWith modifyConfig (PG.connect connInfo)
 
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModelNoMigration

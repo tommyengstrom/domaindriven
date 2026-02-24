@@ -1,4 +1,9 @@
-module DomainDriven.Persistance.Postgres.Types where
+module DomainDriven.Persistance.Postgres.Types
+    ( module DomainDriven.Persistance.Postgres.Types
+    , Pool.PoolConfig
+    , Pool.setNumStripes
+    )
+where
 
 import Control.Monad.Catch
 import Data.Aeson

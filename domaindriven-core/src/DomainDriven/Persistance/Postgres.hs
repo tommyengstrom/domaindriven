@@ -9,6 +9,8 @@ import DomainDriven.Persistance.Postgres.Internal as X
     , postgresWriteModelNoMigration
     , simplePool
     , simplePool'
+    , simplePoolWith
+    , simplePoolWith'
     )
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
