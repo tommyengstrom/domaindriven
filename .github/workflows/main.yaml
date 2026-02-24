@@ -30,21 +30,19 @@ jobs:
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Cache cabal store
+      - name: Cache cabal
         uses: actions/cache@v4
         with:
-          path: ~/.cabal/store
+          path: |
+            ~/.cabal/store
+            ~/.cabal/packages
+            dist-newstyle
           key: ${{ runner.os }}-cabal-${{ hashFiles('cabal.project', '**/*.cabal') }}
           restore-keys: |
             ${{ runner.os }}-cabal-
 
-      - name: Cache dist-newstyle
-        uses: actions/cache@v4
-        with:
-          path: dist-newstyle
-          key: ${{ runner.os }}-dist-${{ hashFiles('cabal.project', '**/*.cabal', '**/*.hs') }}
-          restore-keys: |
-            ${{ runner.os }}-dist-
+      - name: Update package index
+        run: nix develop --command cabal update
 
       - name: Build
         run: nix develop --command cabal build all
