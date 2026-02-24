@@ -107,6 +107,8 @@ test-suite domaindriven-effectful-test
     -threaded
     -rtsopts
     -with-rtsopts=-N
+  build-tool-depends:
+    hspec-discover:hspec-discover
   other-modules:
     DomainDriven.Effectful.InMemorySpec
   hs-source-dirs:
