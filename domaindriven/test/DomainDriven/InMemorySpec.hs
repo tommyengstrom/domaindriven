@@ -1,9 +1,9 @@
-module DomainDriven.Effectful.InMemorySpec (spec) where
+module DomainDriven.InMemorySpec (spec) where
 
-import DomainDriven.Effectful.Aggregate
-import DomainDriven.Effectful.Domain
-import DomainDriven.Effectful.Interpreter
-import DomainDriven.Effectful.Projection
+import DomainDriven.Aggregate
+import DomainDriven.Domain
+import DomainDriven.Interpreter
+import DomainDriven.Projection
 import DomainDriven.Persistance.Class (Indexed (..), NoIndex (..), Stored (..))
 import DomainDriven.Persistance.ForgetfulInMemory
 import Effectful

@@ -36,6 +36,7 @@
             export PKG_CONFIG_PATH="${pkgs.xz.dev}/lib/pkgconfig:${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
             export LIBRARY_PATH="${pkgs.xz.out}/lib:${pkgs.zlib.out}/lib:${pkgs.gmp.out}/lib:${pkgs.libpq.out}/lib:$LIBRARY_PATH"
             export LD_LIBRARY_PATH="${pkgs.xz.out}/lib:${pkgs.zlib.out}/lib:${pkgs.gmp.out}/lib:${pkgs.libpq.out}/lib:$LD_LIBRARY_PATH"
+            exec ${pkgs.fish}/bin/fish
           '';
         };
       });

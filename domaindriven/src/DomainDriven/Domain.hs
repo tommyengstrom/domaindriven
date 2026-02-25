@@ -1,5 +1,5 @@
-module DomainDriven.Effectful.Domain
-    ( module DomainDriven.Effectful.Domain
+module DomainDriven.Domain
+    ( module DomainDriven.Domain
     ) where
 
 import Data.Kind (Type)

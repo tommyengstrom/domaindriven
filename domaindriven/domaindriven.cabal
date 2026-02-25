@@ -1,5 +1,5 @@
 cabal-version: 3.12
-name:           domaindriven-effectful
+name:           domaindriven
 version:        0.5.0
 synopsis:       Batteries included event sourcing and CQRS
 description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
@@ -73,11 +73,11 @@ common shared_opts
 library
   import: shared_opts
   exposed-modules:
-      DomainDriven.Effectful
-      DomainDriven.Effectful.Aggregate
-      DomainDriven.Effectful.Domain
-      DomainDriven.Effectful.Interpreter
-      DomainDriven.Effectful.Projection
+      DomainDriven
+      DomainDriven.Aggregate
+      DomainDriven.Domain
+      DomainDriven.Interpreter
+      DomainDriven.Projection
       DomainDriven.FieldNameAsPath
       Servant.Auth.Internal.ThrowAll.SOP
   hs-source-dirs:
@@ -97,7 +97,7 @@ library
     , servant-server
     , text
 
-test-suite domaindriven-effectful-test
+test-suite domaindriven-test
   import: shared_opts
   type: exitcode-stdio-1.0
   main-is: Spec.hs
@@ -108,13 +108,13 @@ test-suite domaindriven-effectful-test
   build-tool-depends:
     hspec-discover:hspec-discover
   other-modules:
-    DomainDriven.Effectful.InMemorySpec
+    DomainDriven.InMemorySpec
   hs-source-dirs:
     test
   build-depends:
       base
     , domaindriven-core
-    , domaindriven-effectful
+    , domaindriven
     , effectful-core
     , effectful-plugin
     , hspec

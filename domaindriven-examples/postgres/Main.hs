@@ -9,7 +9,7 @@ module Main where
 
 import Control.Monad (when)
 import Database.PostgreSQL.Simple (connectPostgreSQL)
-import DomainDriven.Effectful
+import DomainDriven
 import DomainDriven.Persistance.Postgres (PostgresEvent, postgresWriteModel, simplePool)
 import Effectful hiding ((:>))
 import Effectful qualified

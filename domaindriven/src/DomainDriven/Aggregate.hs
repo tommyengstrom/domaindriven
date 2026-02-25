@@ -1,11 +1,11 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module DomainDriven.Effectful.Aggregate where
+module DomainDriven.Aggregate where
 
 import Data.Kind (Type)
 import Data.Type.Equality
-import DomainDriven.Effectful.Domain
+import DomainDriven.Domain
 import DomainDriven.Persistance.Class (NoIndex (..))
 import Effectful
 import Effectful.TH

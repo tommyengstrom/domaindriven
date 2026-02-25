@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 - **Build all packages**: `cabal build all`
-- **Build specific package**: `cabal build domaindriven-effectful`
+- **Build specific package**: `cabal build domaindriven`
 - **Run tests**: `cabal test all`
-- **Run specific test**: `cabal test domaindriven-effectful`
+- **Run specific test**: `cabal test domaindriven`
 - **Clean build**: `cabal clean`
 
 ## Architecture Overview
@@ -22,11 +22,11 @@ DomainDriven is a synchronous event sourcing and CQRS library split into multipl
   - `Postgres`: Production persistence with transactional guarantees
   - Synchronous event sourcing with locks to avoid eventual consistency issues
 
-- **domaindriven-effectful**: Experimental Effectful-based implementation
+- **domaindriven**: Effectful-based API layer
   - Uses standard Servant combinators instead of custom ones
   - Two main effects: `Aggregate` (commands) and `Projection` (queries)
   - Dynamic dispatch interpreters for different backends
-  - Located in `domaindriven-effectful/`
+  - Located in `domaindriven/`
 
 ### Key Design Patterns
 
@@ -49,5 +49,5 @@ DomainDriven is a synchronous event sourcing and CQRS library split into multipl
 
 - All packages use extensive language extensions (see .cabal files)
 - Strict warning settings (`-Wall -Werror`) - fix all warnings before committing
-- The Effectful prototype aims to simplify the API while maintaining type safety
+- The Effectful layer aims to simplify the API while maintaining type safety
 - Tests use `hspec` framework with in-memory backends

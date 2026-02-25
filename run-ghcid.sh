@@ -25,6 +25,6 @@ ghcid \
   --command "cabal v2-repl --enable-multi-repl $components" \
   --restart "cabal.project" \
   --restart "domaindriven-core/domaindriven-core.cabal" \
-  --restart "domaindriven-effectful/domaindriven-effectful.cabal" \
-  --restart "domaindriven-effectful-examples/domaindriven-effectful-examples.cabal" \
+  --restart "domaindriven/domaindriven.cabal" \
+  --restart "domaindriven-examples/domaindriven-examples.cabal" \
   -o $LOG_FILE

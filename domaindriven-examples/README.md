@@ -1,6 +1,6 @@
-# DomainDriven Effectful Examples
+# DomainDriven Examples
 
-Example applications demonstrating the Effectful-based domaindriven library.
+Example applications demonstrating the domaindriven library.
 All three examples use a simple counter domain to keep the focus on the library features.
 
 ## Examples

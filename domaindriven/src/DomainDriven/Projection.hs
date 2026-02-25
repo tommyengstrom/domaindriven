@@ -4,10 +4,10 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module DomainDriven.Effectful.Projection where
+module DomainDriven.Projection where
 
 import Data.Type.Equality
-import DomainDriven.Effectful.Domain
+import DomainDriven.Domain
 import DomainDriven.Persistance.Class (NoIndex (..), Stored)
 import Effectful
 import Effectful.TH

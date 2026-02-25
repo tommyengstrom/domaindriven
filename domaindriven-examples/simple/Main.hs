@@ -1,19 +1,18 @@
--- | FieldNameAsPath — record field names become URL path segments automatically.
+-- | Getting Started — basic counter with in-memory persistence.
 --
 -- Demonstrates:
---   * FieldNameAsPathApi: wraps a Servant Generic record so field names become paths
---   * FieldNameAsPathServer: serves the wrapped API
---   * Same counter domain as simple/, different routing approach
---
--- Endpoints:  GET /get,  POST /increase,  POST /decrease
--- (no "increase" :> or "decrease" :> needed in the API definition)
+--   * Defining a model, events, and applyEvent
+--   * Using Servant Generic API with Effectful effects (Aggregate & Projection)
+--   * ForgetfulInMemory backend (no database required)
+--   * GET /events endpoint via getEventList
 {-# LANGUAGE OverloadedRecordDot #-}
 module Main where
 
 import Control.Monad (when)
 import Data.Aeson (FromJSON, ToJSON)
-import DomainDriven.Effectful
-import DomainDriven.FieldNameAsPath
+import Data.Time (UTCTime)
+import Data.UUID (UUID)
+import DomainDriven
 import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
 import Effectful qualified
@@ -22,7 +21,7 @@ import Network.Wai.Handler.Warp (run)
 import Servant hiding (throwError)
 import Servant qualified
 import Servant.API.Generic
-import Servant.Server.Generic (AsServerT)
+import Servant.Server.Generic (AsServerT, genericServeT)
 import Prelude
 
 --------------------------------------------------------------------------------
@@ -31,8 +30,8 @@ import Prelude
 data CounterModel = CounterModel
     { counter :: Int
     , previousCounter :: Int
-    }
-    deriving (Show, Generic)
+    } deriving (Show, Generic)
+
 
 --------------------------------------------------------------------------------
 -- Define events
@@ -50,27 +49,34 @@ applyEvent (CounterModel i _) (Stored ev _timestamp _uuid) = case ev of
     CounterIncreased -> CounterModel (i + 1) i
     CounterDecreased -> CounterModel (i - 1) i
 
+
 --------------------------------------------------------------------------------
--- Define the API — field names become paths automatically
+-- Use Servant to define the API
 --------------------------------------------------------------------------------
 
--- | No path strings needed: /get, /increase, /decrease are derived from field names.
+-- | Envelope for returning stored events over JSON.
+data StoredEvent = StoredEvent
+    { event :: CounterEvent
+    , timestamp :: UTCTime
+    , uuid :: UUID
+    }
+    deriving (Show, Generic, ToJSON)
+
 data CounterAPI mode = CounterAPI
     { get :: mode :- Get '[JSON] Int
-    , increase :: mode :- Post '[JSON] Int
-    , decrease :: mode :- Post '[JSON] Int
+    , increase :: mode :- "increase" :> Post '[JSON] Int
+    , decrease :: mode :- "decrease" :> Post '[JSON] Int
+    , events :: mode :- "events" :> Get '[JSON] [StoredEvent]
     }
     deriving (Generic)
 
--- | Use default apiTagFromLabel (= id), so field name is used as-is.
-instance ApiTagFromLabel CounterAPI
-
 --------------------------------------------------------------------------------
--- Implement the server handlers
+-- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
 
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
+-- | Counter handlers using Effectful effects
 counterServer
     :: ( Projection CounterDomain Effectful.:> es
        , Aggregate CounterDomain Effectful.:> es
@@ -89,22 +95,23 @@ counterServer =
                 (m.counter <= 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})
             pure (\a -> a.counter, [CounterDecreased])
+        , events = do
+            storedEvents <- getEventList
+            pure $ map toStoredEvent storedEvents
         }
+  where
+    toStoredEvent :: Stored CounterEvent -> StoredEvent
+    toStoredEvent (Stored ev ts uid) = StoredEvent ev ts uid
 
 --------------------------------------------------------------------------------
--- Create the servant application using FieldNameAsPath
+-- Create the servant application.
+-- Here we have to run all the effects and transform it to Servant's Handler monad.
 --------------------------------------------------------------------------------
-
--- Note: we use serve/hoistServer instead of genericServeT because
--- FieldNameAsPathApi provides its own HasServer instance that derives
--- paths from field names.
 mkCounterServer
     :: ForgetfulInMemory CounterModel NoIndex CounterEvent
     -> Application
 mkCounterServer backend =
-    serve (Proxy @(FieldNameAsPathApi CounterAPI))
-        $ hoistServer (Proxy @(FieldNameAsPathApi CounterAPI)) runEffects
-        $ FieldNameAsPathServer counterServer
+    genericServeT runEffects counterServer
   where
     runEffects
         :: Eff
@@ -129,9 +136,8 @@ mkCounterServer backend =
 --------------------------------------------------------------------------------
 main :: IO ()
 main = do
-    let port = 7880
-    putStrLn $ "Running FieldNameAsPath counter on port " <> show port
-    putStrLn "  Endpoints: GET /get, POST /increase, POST /decrease"
+    let port = 7878
+    putStrLn $ "Running Effectful counter on port " <> show port
 
     -- Initialize the in-memory backend
     backend <- createForgetful applyEvent (CounterModel 0 0)

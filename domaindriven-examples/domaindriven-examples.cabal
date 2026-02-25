@@ -1,9 +1,9 @@
 cabal-version: 3.12
 
-name:           domaindriven-effectful-examples
+name:           domaindriven-examples
 version:        0.5.0
-synopsis:       Examples for domaindriven-effectful
-description:    Examples demonstrating the Effectful-based domaindriven library
+synopsis:       Examples for domaindriven
+description:    Examples demonstrating the domaindriven library
 category:       Web
 homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
@@ -85,7 +85,7 @@ executable postgres-example
       aeson
     , base
     , domaindriven-core
-    , domaindriven-effectful
+    , domaindriven
     , effectful
     , effectful-core
     , effectful-plugin
@@ -103,7 +103,7 @@ executable simple-example
       aeson
     , base
     , domaindriven-core
-    , domaindriven-effectful
+    , domaindriven
     , effectful
     , effectful-core
     , effectful-plugin
@@ -122,7 +122,7 @@ executable fieldname-as-path-example
       aeson
     , base
     , domaindriven-core
-    , domaindriven-effectful
+    , domaindriven
     , effectful
     , effectful-core
     , effectful-plugin

@@ -1,11 +1,11 @@
-module DomainDriven.Effectful.Interpreter
+module DomainDriven.Interpreter
     ( runAggregate
     , runProjection
     ) where
 
-import DomainDriven.Effectful.Aggregate
-import DomainDriven.Effectful.Domain
-import DomainDriven.Effectful.Projection
+import DomainDriven.Aggregate
+import DomainDriven.Domain
+import DomainDriven.Projection
 import DomainDriven.Persistance.Class (ReadModel, WriteModel)
 import DomainDriven.Persistance.Class qualified as P
 import Effectful
