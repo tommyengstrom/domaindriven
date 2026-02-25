@@ -1,4 +1,5 @@
 packages:
+  shape-coerce/
   domaindriven-core/
   domaindriven/
   domaindriven-examples/

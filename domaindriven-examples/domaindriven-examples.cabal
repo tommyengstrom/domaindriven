@@ -90,6 +90,7 @@ executable postgres-example
     , effectful-core
     , effectful-plugin
     , postgresql-simple
+    , shape-coerce
     , servant
     , servant-server
     , warp
