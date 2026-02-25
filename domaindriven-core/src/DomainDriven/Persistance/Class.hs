@@ -1,9 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE UndecidableInstances #-}
-
 module DomainDriven.Persistance.Class where
 
 import Control.DeepSeq (NFData)
@@ -17,6 +11,7 @@ import Data.UUID (UUID)
 import GHC.Generics (Generic)
 import GHC.Stack
 import Streamly.Data.Stream.Prelude (Stream)
+import System.IO (hPutStrLn)
 import System.Random
 import UnliftIO
 import Prelude
@@ -40,7 +35,7 @@ class ReadModel p where
 class ReadModel p => WriteModel p where
     -- | Hook to call after model has been updated.
     -- This allows for setting up outgoing hooks in calling out to external systems.
-    -- This is run in asyncly after update is processed.
+    -- This is run asynchronously after update is processed.
     postUpdateHook
         :: MonadIO m
         => p
@@ -49,8 +44,6 @@ class ReadModel p => WriteModel p where
         -> [Stored (Event p)]
         -> m ()
 
-    -- | Update the model in a transaction. Note that this is never used directly;
-    -- runCmd calls transactionalUpdate and makes sure to call postUpdateHook afterwards.
     transactionalUpdate
         :: HasCallStack
         => forall m a
@@ -64,21 +57,6 @@ class ReadModel p => WriteModel p where
             , (Model p -> a)
             )
         -- ^ How to create the return value from updated model
-
-runCmd
-    :: HasCallStack
-    => forall p m a
-     . (WriteModel p, MonadUnliftIO m)
-    => p
-    -> Index p
-    -> (Model p -> m (Model p -> a, [Event p]))
-    -> m a
-runCmd p index cmd = withFrozenCallStack $ do
-    (model, events, returnFun) <- transactionalUpdate p index cmd
-    _ <- async $
-        postUpdateHook p index model events `catchAny` \e ->
-            liftIO $ putStrLn $ "[DomainDriven] postUpdateHook failed: " <> displayException e
-    pure $ returnFun model
 
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
@@ -100,6 +78,20 @@ data Stored a = Stored
         , Traversable
         , NFData
         )
+
+runCmd
+    :: HasCallStack
+    => forall p m a
+     . (WriteModel p, MonadUnliftIO m)
+    => p
+    -> Index p
+    -> (Model p -> m (Model p -> a, [Event p]))
+    -> m a
+runCmd p index cmd = withFrozenCallStack $ do
+    (model, events, returnFun) <- transactionalUpdate p index cmd
+    _ <- liftIO $ async $ postUpdateHook p index model events `catchAny` \e ->
+        hPutStrLn stderr $ "[DomainDriven] postUpdateHook failed: " <> displayException e
+    pure $ returnFun model
 
 mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO

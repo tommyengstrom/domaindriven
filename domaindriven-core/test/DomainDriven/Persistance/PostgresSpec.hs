@@ -4,6 +4,7 @@
 module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.Exception (SomeException)
 import Control.Monad
 import Data.Aeson (FromJSON, ToJSON, Value)
@@ -65,6 +66,7 @@ spec = do
         queryEventsSpec
         migrationSpec -- make sure migrationSpec is run last!
     processedEvents <- runIO $ newTVarIO (Set.empty :: Set UUID)
+    hookDone <- runIO newChan
     let postHook
             :: PostgresEvent NoIndex TestModel TestEvent
             -> NoIndex
@@ -75,7 +77,8 @@ spec = do
             atomically $
                 modifyTVar processedEvents (<> Set.fromList (fmap storedUUID evs))
             when (m < 0) (void $ runCmd p index $ \_ -> pure (id, [Reset]))
-     in around (setupPersistance postHook) (postHookSpec processedEvents)
+            writeChan hookDone ()
+     in around (setupPersistance postHook) (postHookSpec hookDone processedEvents)
 
     around (setupPersistance noHook) migrationConcurrencySpec
     around (setupPersistance noHook) loggingSpec
@@ -302,8 +305,8 @@ queryEventsSpec = describe "queryEvents" $ do
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
 postHookSpec
-    :: TVar (Set UUID) -> SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
-postHookSpec processedEvents = describe "updateHook" $ do
+    :: Chan () -> TVar (Set UUID) -> SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
+postHookSpec hookDone processedEvents = describe "updateHook" $ do
     it "Ensure we start with empty TVar" $ \_ -> do
         events <- readTVarIO processedEvents
         events `shouldBe` Set.empty
@@ -312,7 +315,7 @@ postHookSpec processedEvents = describe "updateHook" $ do
         i <- runCmd p NoIndex $ \_ -> do
             pure (id, [AddOne, AddOne, SubtractOne])
         i `shouldBe` 1
-        threadDelay 100000 -- Ensure the hook has time to run
+        readChan hookDone
         events <- readTVarIO processedEvents
         Set.size events `shouldBe` 3
 
@@ -321,7 +324,7 @@ postHookSpec processedEvents = describe "updateHook" $ do
         m <- runCmd p NoIndex $ \_ -> do
             pure (id, [SubtractOne, SubtractOne, SubtractOne])
         m `shouldBe` (-3)
-        threadDelay 100000 -- Ensure the hook has time to run
+        readChan hookDone
         m' <- getModel p NoIndex
         m' `shouldBe` 0
 

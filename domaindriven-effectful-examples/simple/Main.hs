@@ -3,7 +3,7 @@ module Main where
 
 import Control.Monad (when)
 import DomainDriven.Effectful
-import DomainDriven.Effectful.Interpreter.InMemory
+import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
@@ -101,8 +101,8 @@ mkCounterServer backend =
             liftIO
                 . runEff
                 . runErrorNoCallStack @ServerError
-                . runAggregateInMemory backend
-                $ runProjectionInMemory backend m
+                . runAggregate backend
+                $ runProjection backend m
         either Servant.throwError pure a
 
 --------------------------------------------------------------------------------

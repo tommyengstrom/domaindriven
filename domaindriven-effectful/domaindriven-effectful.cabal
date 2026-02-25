@@ -41,6 +41,7 @@ common shared_opts
       NoImplicitPrelude
       OverloadedLabels
       AllowAmbiguousTypes
+      BlockArguments
       OverloadedStrings
       PolyKinds
       RankNTypes
@@ -75,23 +76,20 @@ library
       DomainDriven.Effectful
       DomainDriven.Effectful.Aggregate
       DomainDriven.Effectful.Domain
-      DomainDriven.Effectful.Interpreter.InMemory
-      DomainDriven.Effectful.Interpreter.Postgres
+      DomainDriven.Effectful.Interpreter
       DomainDriven.Effectful.Projection
       DomainDriven.FieldNameAsPath
       Servant.Auth.Internal.ThrowAll.SOP
   hs-source-dirs:
       src
   build-depends:
-      aeson
-    , base
+      base
     , bytestring
     , domaindriven-core
     , effectful-core
     , effectful-plugin
     , effectful-th
     , generics-sop
-    , hashable
     , openapi3
     , servant-auth-server
     , servant-client-core

@@ -45,6 +45,7 @@ common default_opts
       NoImplicitPrelude
       OverloadedLabels
       AllowAmbiguousTypes
+      BlockArguments
       OverloadedStrings
       PolyKinds
       RankNTypes

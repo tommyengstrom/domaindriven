@@ -2,12 +2,14 @@ module DomainDriven.Effectful.InMemorySpec (spec) where
 
 import DomainDriven.Effectful.Aggregate
 import DomainDriven.Effectful.Domain
-import DomainDriven.Effectful.Interpreter.InMemory
+import DomainDriven.Effectful.Interpreter
 import DomainDriven.Effectful.Projection
 import DomainDriven.Persistance.Class (Indexed (..), NoIndex (..), Stored (..))
-import DomainDriven.Persistance.ForgetfulInMemory ()
+import DomainDriven.Persistance.ForgetfulInMemory
 import Effectful
 import Test.Hspec
+import Control.Concurrent.Chan (newChan, readChan, writeChan)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Prelude
 
 type TestModel = Int
@@ -30,8 +32,18 @@ runTest
     -> IO a
 runTest backend =
     runEff
-        . runProjectionInMemory backend
-        . runAggregateInMemory backend
+        . runProjection backend
+        . runAggregate backend
+
+runTestWith
+    :: ForgetfulInMemory TestModel NoIndex TestEvent
+    -> (NoIndex -> TestModel -> [Stored TestEvent] -> IO ())
+    -> Eff '[Aggregate TestDomain, Projection TestDomain, IOE] a
+    -> IO a
+runTestWith backend hook =
+    runEff
+        . runProjection backend
+        . runAggregate (backend { updateHook = hook })
 
 runIndexedTest
     :: ForgetfulInMemory TestModel Indexed TestEvent
@@ -39,8 +51,8 @@ runIndexedTest
     -> IO a
 runIndexedTest backend =
     runEff
-        . runProjectionInMemory backend
-        . runAggregateInMemory backend
+        . runProjection backend
+        . runAggregate backend
 
 spec :: Spec
 spec = do
@@ -88,3 +100,47 @@ spec = do
             mb <- runIndexedTest backend (getModelI @IndexedTestDomain (Indexed "b"))
             ma `shouldBe` 1
             mb `shouldBe` 2
+
+    describe "PostUpdateHook" $ do
+        it "hook receives correct model and events" $ do
+            mvar <- newEmptyMVar
+            let hook _ model events = putMVar mvar (model, map storedEvent events)
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            runTestWith backend hook $
+                runTransaction @TestDomain $ \_ -> pure (const (), [AddOne, AddOne])
+            result <- takeMVar mvar
+            result `shouldBe` (2, [AddOne, AddOne])
+
+        it "hook fires for each transaction" $ do
+            chan <- newChan
+            let hook _ _ _ = writeChan chan ()
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            runTestWith backend hook $ do
+                runTransaction @TestDomain $ \_ -> pure (const (), [AddOne])
+                runTransaction @TestDomain $ \_ -> pure (const (), [AddOne])
+            readChan chan
+            readChan chan
+
+        it "hook fires once per transaction" $ do
+            mvar <- newEmptyMVar
+            let hook _ _ _ = putMVar mvar ()
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            runTestWith backend hook $
+                runTransaction @TestDomain $ \_ -> pure (const (), [AddOne])
+            takeMVar mvar
+
+        it "failing hook does not crash the command" $ do
+            mvar <- newEmptyMVar
+            let hook _ _ _ = putMVar mvar () >> error "hook explosion"
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            result <- runTestWith backend hook $
+                runTransaction @TestDomain $ \_ -> pure (id, [AddOne])
+            takeMVar mvar  -- wait for hook to fire
+            result `shouldBe` 1
+
+        it "no-op hook does not affect behavior" $ do
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            runTestWith backend (\_ _ _ -> pure ()) $
+                runTransaction @TestDomain $ \_ -> pure (const (), [AddOne])
+            m <- runTestWith backend (\_ _ _ -> pure ()) (getModel @TestDomain)
+            m `shouldBe` 1

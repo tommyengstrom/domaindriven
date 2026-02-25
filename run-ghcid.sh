@@ -17,13 +17,14 @@ echo "----------------------------------------"
 # - output redirected to log file
 #
 #
-components=$(gen-hie |grep component|grep '".*"' -o|sed "s:\"::g" | xargs echo)
+components=$(gen-hie |grep component|grep '".*"' -o|sed "s:\"::g" | sort -u | xargs echo)
 
 echo cabal v2-repl --enable-multi-repl $components
 
 ghcid \
   --command "cabal v2-repl --enable-multi-repl $components" \
   --restart "cabal.project" \
-  --restart "streaker.cabal" \
-  --restart "chatcompletion-effectful.cabal" \
+  --restart "domaindriven-core/domaindriven-core.cabal" \
+  --restart "domaindriven-effectful/domaindriven-effectful.cabal" \
+  --restart "domaindriven-effectful-examples/domaindriven-effectful-examples.cabal" \
   -o $LOG_FILE

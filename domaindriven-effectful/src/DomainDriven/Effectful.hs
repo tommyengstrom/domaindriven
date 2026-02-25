@@ -9,5 +9,6 @@ where
 
 import DomainDriven.Effectful.Aggregate as X
 import DomainDriven.Effectful.Domain
+import DomainDriven.Effectful.Interpreter as X
 import DomainDriven.Effectful.Projection as X
 import DomainDriven.Persistance.Class as X (Indexed (..), NoIndex (..), Stored (..))

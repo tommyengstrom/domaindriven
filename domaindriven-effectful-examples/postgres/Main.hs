@@ -4,7 +4,7 @@ import Control.Monad (when)
 import Data.Aeson
 import Database.PostgreSQL.Simple (connectPostgreSQL)
 import DomainDriven.Effectful
-import DomainDriven.Effectful.Interpreter.Postgres
+import DomainDriven.Persistance.Postgres (EventTable (..), PostgresEvent, postgresWriteModel, simplePool)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
@@ -96,8 +96,8 @@ mkCounterServer backend =
             liftIO
                 . runEff
                 . runErrorNoCallStack @ServerError
-                . runAggregatePostgres backend
-                $ runProjectionPostgres backend m
+                . runAggregate backend
+                $ runProjection backend m
         either Servant.throwError pure a
 
 eventTable :: EventTable
@@ -111,7 +111,7 @@ main = do
     let port = 7878
     putStrLn $ "Running Effectful counter on port " <> show port
 
-    -- Initialize the in-memory backend
+    -- Initialize the PostgreSQL backend
     connectionPool <-
         simplePool $
             connectPostgreSQL
