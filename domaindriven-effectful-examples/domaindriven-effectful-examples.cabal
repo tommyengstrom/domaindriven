@@ -92,8 +92,6 @@ executable postgres-example
     , postgresql-simple
     , servant
     , servant-server
-    , text
-    , uuid
     , warp
 
 executable simple-example
@@ -101,6 +99,25 @@ executable simple-example
   main-is: Main.hs
   hs-source-dirs:
       simple
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven-effectful
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , servant
+    , servant-server
+    , time
+    , uuid
+    , warp
+
+executable fieldname-as-path-example
+  import: shared_opts
+  main-is: Main.hs
+  hs-source-dirs:
+      fieldname-as-path
   build-depends:
       aeson
     , base

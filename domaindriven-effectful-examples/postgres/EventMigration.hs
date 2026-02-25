@@ -1,58 +1,47 @@
-{-# options_GHC -Wno-orphans #-}
-module EventMigration where
+{-# OPTIONS_GHC -Wno-orphans #-}
+module EventMigration (eventTable) where
 
-import Prelude
 import Data.ShapeCoerce
+import Database.PostgreSQL.Simple (Connection)
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
-import Database.PostgreSQL.Simple (Connection)
 import DomainDriven.Persistance.Postgres.Migration
 import Event.V1 qualified as V1
 import Event.V2 qualified as V2
+import Prelude
 
-
-
-fixEvent :: Stored V1.Event -> Stored V2.Event
+fixEvent :: Stored V1.CounterEvent -> Stored V2.CounterEvent
 fixEvent = shapeCoerce
 
--- /home/tommy/git/domaindriven/domaindriven-effectful-examples/postgres/EventMigra
--- tion.hs:16:12: error: [GHC-64725]
+-- Automatic ShapeCoercible fails because the constructor names changed:
+--
 --     • Cannot shapeCoerce between types:
---         From: V1.UserEvent
---         To: V2.UserEvent
+--         From: V1.CounterEvent
+--         To: V2.CounterEvent
 --
---       Reason: Left side has a single constructor but right side is a sum type
---       Left constructor: "UserNameChanged"
---       Right side: Multiple constructors (sum type)
+--       Reason: Constructor name mismatch
+--         'CounterIncreased ≠ 'CounterIncreasedBy
 --
---       Solution: Write instance `ShapeCoercible V1.UserEvent V2.UserEvent`
---     • In the expression: shapeCoerce
---       In an equation for ‘fixEvent’: fixEvent = shapeCoerce
---    |
--- 16 | fixEvent = shapeCoerce
---    |            ^^^^^^^^^^^
--- -- | V2.UserEvent has a new constructor
+--       Solution: Write instance `ShapeCoercible V1.CounterEvent V2.CounterEvent`
 
-instance ShapeCoercible V1.UserEvent V2.UserEvent where
-  shapeCoerce = \case
-    V1.UserCreated name -> V2.UserCreated name
-    V1.UserNameChanged name -> V2.UserNameChanged name
+instance ShapeCoercible V1.CounterEvent V2.CounterEvent where
+    shapeCoerce = \case
+        V1.CounterIncreased -> V2.CounterIncreasedBy 1
+        V1.CounterDecreased -> V2.CounterDecreasedBy 1
 
 migrate ::
     PreviousEventTableName ->
     EventTableName ->
     Connection ->
     IO ()
-migrate prevEtname etName conn = do
+migrate prevEtName etName conn = do
     migrate1to1 @NoIndex
         conn
-        prevEtname
+        prevEtName
         etName
         fixEvent
 
 eventTable :: EventTable
-eventTable = MigrateUsing migrate
-    $ InitialVersion "my_events"
-
-
-
+eventTable =
+    MigrateUsing migrate
+        $ InitialVersion "counter_events"

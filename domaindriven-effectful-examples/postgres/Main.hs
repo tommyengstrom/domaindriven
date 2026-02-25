@@ -1,13 +1,21 @@
+-- | PostgreSQL persistence with event migration.
+--
+-- Demonstrates:
+--   * PostgresEvent backend with connection pooling (simplePool)
+--   * Event versioning: V1 (unit events) → V2 (events with Int payload)
+--   * Wiring an EventTable with MigrateUsing into postgresWriteModel
+--   * ReqBody for parameterised commands
 module Main where
 
 import Control.Monad (when)
-import Data.Aeson
 import Database.PostgreSQL.Simple (connectPostgreSQL)
 import DomainDriven.Effectful
-import DomainDriven.Persistance.Postgres (EventTable (..), PostgresEvent, postgresWriteModel, simplePool)
+import DomainDriven.Persistance.Postgres (PostgresEvent, postgresWriteModel, simplePool)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
+import Event.V2
+import EventMigration (eventTable)
 import Network.Wai.Handler.Warp (run)
 import Servant hiding (throwError)
 import Servant qualified
@@ -21,39 +29,29 @@ import Prelude
 type CounterModel = Int
 
 --------------------------------------------------------------------------------
--- Define events
---------------------------------------------------------------------------------
-data CounterEvent
-    = Increase
-    | Decrease
-    deriving (Show, Generic, ToJSON, FromJSON)
-
---------------------------------------------------------------------------------
--- Define event handler
+-- Define event handler (using V2 events)
 --------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
 applyEvent i (Stored ev _timestamp _uuid) = case ev of
-    Increase -> i + 1
-    Decrease -> i - 1
+    CounterIncreasedBy n -> i + n
+    CounterDecreasedBy n -> i - n
 
--- Define the domain, used to cary the type constraints
+-- | Domain type carrying model, event, and index constraints.
 type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
--- Use Servant to define the Commands
+-- Use Servant to define the API
 --------------------------------------------------------------------------------
 data CounterAPI mode = CounterAPI
     { get :: mode :- Get '[JSON] Int
-    , increase :: mode :- "increase" :> Post '[JSON] Int
-    , decrease :: mode :- "decrease" :> Post '[JSON] Int
+    , increase :: mode :- "increase" :> ReqBody '[JSON] Int :> Post '[JSON] Int
+    , decrease :: mode :- "decrease" :> ReqBody '[JSON] Int :> Post '[JSON] Int
     }
     deriving (Generic)
 
 --------------------------------------------------------------------------------
 -- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
-
--- | Counter handlers using Effectful effects
 counterServer
     :: ( Projection CounterDomain Effectful.:> es
        , Aggregate CounterDomain Effectful.:> es
@@ -63,18 +61,17 @@ counterServer
 counterServer =
     CounterAPI
         { get = getModel
-        , increase = runTransaction \_ -> do
-            pure (id, [Increase])
-        , decrease = runTransaction \m -> do
+        , increase = \amount -> runTransaction \_ -> do
+            pure (id, [CounterIncreasedBy amount])
+        , decrease = \amount -> runTransaction \m -> do
             when
-                (m <= 0)
+                (m - amount < 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})
-            pure (id, [Decrease])
+            pure (id, [CounterDecreasedBy amount])
         }
 
 --------------------------------------------------------------------------------
--- Create the servant application.
--- Here we have to run all the effects and transform it to Servant's Handler monad.
+-- Create the servant application
 --------------------------------------------------------------------------------
 mkCounterServer
     :: PostgresEvent NoIndex CounterModel CounterEvent
@@ -100,18 +97,15 @@ mkCounterServer backend =
                 $ runProjection backend m
         either Servant.throwError pure a
 
-eventTable :: EventTable
-eventTable = InitialVersion "counter_events"
-
 --------------------------------------------------------------------------------
 -- Run the server
 --------------------------------------------------------------------------------
 main :: IO ()
 main = do
-    let port = 7878
-    putStrLn $ "Running Effectful counter on port " <> show port
+    let port = 7879
+    putStrLn $ "Running Effectful counter (Postgres) on port " <> show port
 
-    -- Initialize the PostgreSQL backend
+    -- Initialize the PostgreSQL backend with event migration
     connectionPool <-
         simplePool $
             connectPostgreSQL
@@ -122,5 +116,6 @@ main = do
             eventTable
             applyEvent
             (0 :: CounterModel)
+
     -- Create and run the application
     run port $ mkCounterServer backend
