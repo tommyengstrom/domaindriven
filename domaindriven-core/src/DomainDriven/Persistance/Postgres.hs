@@ -9,6 +9,8 @@ import DomainDriven.Persistance.Postgres.Internal as X
     , postgresWriteModelNoMigration
     , simplePool
     , simplePool'
+    , simplePoolWith
+    , simplePoolWith'
     )
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
@@ -16,5 +18,6 @@ import DomainDriven.Persistance.Postgres.Types as X
     , EventTable (..)
     , EventTableBaseName
     , EventTableName
+    , IsPgIndex (..)
     , PreviousEventTableName
     )

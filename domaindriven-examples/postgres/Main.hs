@@ -1,22 +1,21 @@
--- | Getting Started — basic counter with in-memory persistence.
+-- | PostgreSQL persistence with event migration.
 --
 -- Demonstrates:
---   * Defining a model, events, and applyEvent
---   * Using Servant Generic API with Effectful effects (Aggregate & Projection)
---   * ForgetfulInMemory backend (no database required)
---   * GET /events endpoint via getEventList
-{-# LANGUAGE OverloadedRecordDot #-}
+--   * PostgresEvent backend with connection pooling (simplePool)
+--   * Event versioning: V1 (unit events) → V2 (events with Int payload)
+--   * Wiring an EventTable with MigrateUsing into postgresWriteModel
+--   * ReqBody for parameterised commands
 module Main where
 
 import Control.Monad (when)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Time (UTCTime)
-import Data.UUID (UUID)
+import Database.PostgreSQL.Simple (connectPostgreSQL)
 import DomainDriven
-import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
+import DomainDriven.Persistance.Postgres (PostgresEvent, postgresWriteModel, simplePool)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static
+import Event.V2
+import EventMigration (eventTable)
 import Network.Wai.Handler.Warp (run)
 import Servant hiding (throwError)
 import Servant qualified
@@ -27,56 +26,32 @@ import Prelude
 --------------------------------------------------------------------------------
 -- Define the model
 --------------------------------------------------------------------------------
-data CounterModel = CounterModel
-    { counter :: Int
-    , previousCounter :: Int
-    } deriving (Show, Generic)
-
+type CounterModel = Int
 
 --------------------------------------------------------------------------------
--- Define events
---------------------------------------------------------------------------------
-data CounterEvent
-    = CounterIncreased
-    | CounterDecreased
-    deriving (Show, Generic, ToJSON, FromJSON)
-
---------------------------------------------------------------------------------
--- Define event handler
+-- Define event handler (using V2 events)
 --------------------------------------------------------------------------------
 applyEvent :: CounterModel -> Stored CounterEvent -> CounterModel
-applyEvent (CounterModel i _) (Stored ev _timestamp _uuid) = case ev of
-    CounterIncreased -> CounterModel (i + 1) i
-    CounterDecreased -> CounterModel (i - 1) i
+applyEvent i (Stored ev _timestamp _uuid) = case ev of
+    CounterIncreasedBy n -> i + n
+    CounterDecreasedBy n -> i - n
 
+-- | Domain type carrying model, event, and index constraints.
+type CounterDomain = Domain CounterModel CounterEvent NoIndex
 
 --------------------------------------------------------------------------------
 -- Use Servant to define the API
 --------------------------------------------------------------------------------
-
--- | Envelope for returning stored events over JSON.
-data StoredEvent = StoredEvent
-    { event :: CounterEvent
-    , timestamp :: UTCTime
-    , uuid :: UUID
-    }
-    deriving (Show, Generic, ToJSON)
-
 data CounterAPI mode = CounterAPI
     { get :: mode :- Get '[JSON] Int
-    , increase :: mode :- "increase" :> Post '[JSON] Int
-    , decrease :: mode :- "decrease" :> Post '[JSON] Int
-    , events :: mode :- "events" :> Get '[JSON] [StoredEvent]
+    , increase :: mode :- "increase" :> ReqBody '[JSON] Int :> Post '[JSON] Int
+    , decrease :: mode :- "decrease" :> ReqBody '[JSON] Int :> Post '[JSON] Int
     }
     deriving (Generic)
 
 --------------------------------------------------------------------------------
 -- Implement the server handlers using Effectful effects
 --------------------------------------------------------------------------------
-
-type CounterDomain = Domain CounterModel CounterEvent NoIndex
-
--- | Counter handlers using Effectful effects
 counterServer
     :: ( Projection CounterDomain Effectful.:> es
        , Aggregate CounterDomain Effectful.:> es
@@ -85,30 +60,21 @@ counterServer
     => CounterAPI (AsServerT (Eff es))
 counterServer =
     CounterAPI
-        { get = do
-            CounterModel {counter} <- getModel
-            pure counter
-        , increase = runTransaction \_ -> do
-            pure (\a -> a.counter, [CounterIncreased])
-        , decrease = runTransaction \m -> do
+        { get = getModel
+        , increase = \amount -> runTransaction \_ -> do
+            pure (id, [CounterIncreasedBy amount])
+        , decrease = \amount -> runTransaction \m -> do
             when
-                (m.counter <= 0)
+                (m - amount < 0)
                 (throwError err422{errBody = "Counter cannot go below zero"})
-            pure (\a -> a.counter, [CounterDecreased])
-        , events = do
-            storedEvents <- getEventList
-            pure $ map toStoredEvent storedEvents
+            pure (id, [CounterDecreasedBy amount])
         }
-  where
-    toStoredEvent :: Stored CounterEvent -> StoredEvent
-    toStoredEvent (Stored ev ts uid) = StoredEvent ev ts uid
 
 --------------------------------------------------------------------------------
--- Create the servant application.
--- Here we have to run all the effects and transform it to Servant's Handler monad.
+-- Create the servant application
 --------------------------------------------------------------------------------
 mkCounterServer
-    :: ForgetfulInMemory CounterModel NoIndex CounterEvent
+    :: PostgresEvent NoIndex CounterModel CounterEvent
     -> Application
 mkCounterServer backend =
     genericServeT runEffects counterServer
@@ -136,11 +102,20 @@ mkCounterServer backend =
 --------------------------------------------------------------------------------
 main :: IO ()
 main = do
-    let port = 7878
-    putStrLn $ "Running Effectful counter on port " <> show port
+    let port = 7879
+    putStrLn $ "Running Effectful counter (Postgres) on port " <> show port
 
-    -- Initialize the in-memory backend
-    backend <- createForgetful applyEvent (CounterModel 0 0)
+    -- Initialize the PostgreSQL backend with event migration
+    connectionPool <-
+        simplePool $
+            connectPostgreSQL
+                "host=localhost port=5432 user=postgres dbname=domaindriven password=postgres"
+    backend <-
+        postgresWriteModel
+            connectionPool
+            eventTable
+            applyEvent
+            (0 :: CounterModel)
 
     -- Create and run the application
     run port $ mkCounterServer backend

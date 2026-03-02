@@ -2,20 +2,13 @@ name: Run tests
 
 on:
   push:
-    branches: [master]
-  pull_request:
-    branches: ['*']
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
-    env:
-      COMPOSE_DOCKER_CLI_BUILD: 1
-      DOCKER_BUILDKIT: 1
-
     services:
-      claims-db:
+      postgres:
         image: postgres
         env:
           POSTGRES_PASSWORD: postgres
@@ -29,31 +22,30 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v2
-      - name: ACTIONS_ALLOW_UNSECURE_COMMANDS
-        id: ACTIONS_ALLOW_UNSECURE_COMMANDS
-        run: echo 'ACTIONS_ALLOW_UNSECURE_COMMANDS=true' >> $GITHUB_ENV
+      - uses: actions/checkout@v4
 
-      - name: Update stack
-        run: stack update
-      - uses: actions/cache@v2
-        name: Cache ~/.stack
+      - uses: cachix/install-nix-action@v30
         with:
-          path: ~/.stack
-          key: ${{ runner.os }}-stack-${{ hashFiles('stack.yaml') }}
-      - name: Build dependencies
-        run: |
-            stack build  --only-dependencies --fast
+          nix_path: nixpkgs=channel:nixos-unstable
 
-      - uses: actions/cache@v2
-        name: Cache .stack-work
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache cabal
+        uses: actions/cache@v4
         with:
-          path: .stack-work
-          key: ${{ runner.os }}-stack-${{ hashFiles('services/claims/package.yaml') }}
-      - name: Build domaindriven
-        run: |
-            stack build --fast
+          path: |
+            ~/.cabal/store
+            ~/.cabal/packages
+            dist-newstyle
+          key: ${{ runner.os }}-cabal-${{ hashFiles('cabal.project', '**/*.cabal') }}
+          restore-keys: |
+            ${{ runner.os }}-cabal-
+
+      - name: Update package index
+        run: nix develop --command cabal update
+
+      - name: Build
+        run: nix develop --command cabal build all
+
       - name: Run tests
-        run: |
-            stack test --fast
-
+        run: nix develop --command cabal test all

@@ -1,34 +1,27 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.36.0.
---
--- see: https://github.com/sol/hpack
+cabal-version: 3.12
 
 name:           domaindriven-examples
 version:        0.5.0
-synopsis:       Batteries included event sourcing and CQRS
-description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
+synopsis:       Examples for domaindriven
+description:    Examples demonstrating the domaindriven library
 category:       Web
 homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
 maintainer:     tommy@tommyengstrom.com
-copyright:      2022 Tommy Engström
-license:        BSD3
+copyright:      2025 Tommy Engström
+license:        BSD-3-Clause
 build-type:     Simple
+extra-source-files:
+    README.md
 
 source-repository head
   type: git
   location: https://github.com/tommyengstrom/domaindriven
 
-executable hierarchical-example
-  main-is: Main.hs
-  other-modules:
-      Paths_domaindriven_examples
-  hs-source-dirs:
-      hierarchical
+common shared_opts
   default-extensions:
-      Arrows
+      BlockArguments
       ConstraintKinds
       DataKinds
       DeriveAnyClass
@@ -53,112 +46,87 @@ executable hierarchical-example
       PolyKinds
       RankNTypes
       ScopedTypeVariables
-      ImportQualifiedPost
       StandaloneDeriving
+      StrictData
       TupleSections
       TypeApplications
       TypeFamilyDependencies
       TypeOperators
       TypeSynonymInstances
       ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N
+  default-language: Haskell2010
+  ghc-options: 
+    -Wall 
+    -Werror 
+    -Wcompat 
+    -Widentities 
+    -Wincomplete-record-updates 
+    -Wincomplete-uni-patterns 
+    -Wpartial-fields 
+    -Wredundant-constraints 
+    -Wincomplete-patterns 
+    -Wno-unused-packages 
+    -Wno-partial-fields 
+    -fplugin=Effectful.Plugin 
+    -threaded 
+    -rtsopts 
+    -with-rtsopts=-N
+
+executable postgres-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      Event.V1
+      Event.V2
+      EventMigration
+  hs-source-dirs:
+      postgres
   build-depends:
       aeson
-    , async
     , base
-    , bytestring
-    , containers
-    , deepseq
-    , domaindriven
     , domaindriven-core
-    , exceptions
-    , generic-lens
-    , generics-sop
-    , http-types
-    , microlens
-    , mtl
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
     , postgresql-simple
-    , random
+    , shape-coerce
+    , servant
     , servant-server
-    , streamly
-    , template-haskell
-    , time
-    , transformers
-    , unliftio
-    , unliftio-pool
-    , unordered-containers
-    , uuid
-    , vector
     , warp
-  default-language: Haskell2010
 
 executable simple-example
+  import: shared_opts
   main-is: Main.hs
-  other-modules:
-      Paths_domaindriven_examples
   hs-source-dirs:
       simple
-  default-extensions:
-      Arrows
-      ConstraintKinds
-      DataKinds
-      DeriveAnyClass
-      DeriveFunctor
-      DeriveGeneric
-      DeriveTraversable
-      DerivingStrategies
-      DuplicateRecordFields
-      FlexibleContexts
-      FlexibleInstances
-      FunctionalDependencies
-      GADTs
-      GeneralizedNewtypeDeriving
-      ImportQualifiedPost
-      LambdaCase
-      MultiParamTypeClasses
-      MultiWayIf
-      NamedFieldPuns
-      NoImplicitPrelude
-      OverloadedLabels
-      OverloadedStrings
-      PolyKinds
-      RankNTypes
-      ScopedTypeVariables
-      ImportQualifiedPost
-      StandaloneDeriving
-      TupleSections
-      TypeApplications
-      TypeFamilyDependencies
-      TypeOperators
-      TypeSynonymInstances
-      ViewPatterns
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints -Wincomplete-record-updates -Wincomplete-patterns -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       aeson
-    , async
     , base
-    , bytestring
-    , containers
-    , deepseq
-    , domaindriven
     , domaindriven-core
-    , exceptions
-    , generic-lens
-    , generics-sop
-    , http-types
-    , microlens
-    , mtl
-    , postgresql-simple
-    , random
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , servant
     , servant-server
-    , streamly
-    , template-haskell
     , time
-    , transformers
-    , unliftio
-    , unliftio-pool
-    , unordered-containers
     , uuid
-    , vector
     , warp
-  default-language: Haskell2010
+
+executable fieldname-as-path-example
+  import: shared_opts
+  main-is: Main.hs
+  hs-source-dirs:
+      fieldname-as-path
+  build-depends:
+      aeson
+    , base
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , servant
+    , servant-server
+    , warp

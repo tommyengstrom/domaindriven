@@ -1,0 +1,10 @@
+packages:
+  shape-coerce/
+  domaindriven-core/
+  domaindriven/
+  domaindriven-examples/
+
+-- Use Stackage LTS 24.2 as the main package source
+import: https://www.stackage.org/lts-24.31/cabal.config
+
+with-compiler: ghc-9.10.3

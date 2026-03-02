@@ -1,9 +1,18 @@
-module DomainDriven.Persistance.Postgres.Types where
+module DomainDriven.Persistance.Postgres.Types
+    ( module DomainDriven.Persistance.Postgres.Types
+    , Pool.PoolConfig
+    , Pool.setNumStripes
+    )
+where
 
 import Control.Monad.Catch
 import Data.Aeson
+import Data.Hashable (Hashable)
 import Data.Int
 import Data.Pool.Introspection as Pool
+import Data.String
+import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Time
 import Data.Typeable
 import Data.UUID (UUID)
@@ -13,6 +22,14 @@ import Database.PostgreSQL.Simple.FromField qualified as FF
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import Prelude
+
+-- | Quote a PostgreSQL identifier (table/column name).
+-- Escapes embedded double quotes by doubling them per SQL standard.
+quoteIdent :: String -> PG.Query
+quoteIdent name = "\"" <> fromString (concatMap escChar name) <> "\""
+  where
+    escChar '"' = "\"\""
+    escChar c = [c]
 
 data PersistanceError
     = EncodingError String
@@ -24,6 +41,20 @@ type EventVersion = Int
 type EventTableName = String
 type PreviousEventTableName = String
 type ChunkSize = Int
+
+class Hashable a => IsPgIndex a where
+    toPgIndex :: a -> Text -- FIXME: Should not be Text
+    fromPgIndex :: Text -> a
+    toQuery :: a -> PG.Query
+    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
+
+instance IsPgIndex NoIndex where
+    toPgIndex = const "0"
+    fromPgIndex _ = NoIndex
+
+instance IsPgIndex Indexed where
+    toPgIndex (Indexed t) = t
+    fromPgIndex = Indexed
 
 type EventMigration = PreviousEventTableName -> EventTableName -> Connection -> IO ()
 

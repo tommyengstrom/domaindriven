@@ -1,10 +1,12 @@
 cabal-version: 3.12
 
-name:           domaindriven-core
+name:           shape-coerce
 version:        0.5.0
-synopsis:       Batteries included event sourcing and CQRS
-description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
-category:       Web
+synopsis:       Generic coercion between types with the same shape
+description:    A general-purpose generic coercion utility that allows converting between
+                types that share the same structure (constructors, fields) but differ in
+                module or package origin.
+category:       Generics
 homepage:       https://github.com/tommyengstrom/domaindriven#readme
 bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
 author:         Tommy Engström
@@ -13,9 +15,6 @@ copyright:      2025 Tommy Engström
 license:        BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
-extra-source-files:
-    README.md
-    ChangeLog.md
 
 source-repository head
   type: git
@@ -74,59 +73,9 @@ common default_opts
 library
   import: default_opts
   exposed-modules:
-      DomainDriven.Persistance.Class
-      DomainDriven.Persistance.ForgetfulInMemory
-      DomainDriven.Persistance.Postgres
-      DomainDriven.Persistance.Postgres.Internal
-      DomainDriven.Persistance.Postgres.Migration
-      DomainDriven.Persistance.Postgres.Types
+      Data.ShapeCoerce
   hs-source-dirs:
       src
   build-depends:
-      aeson
-    , base
+      base
     , containers
-    , deepseq
-    , exceptions
-    , generic-lens
-    , hashable
-    , microlens
-    , mtl
-    , postgresql-simple
-    , random
-    , resource-pool
-    , streamly
-    , streamly-core
-    , text
-    , time
-    , unliftio
-    , unordered-containers
-    , uuid
-  default-language: Haskell2010
-
-test-suite domaindriven-core-test
-  import: default_opts
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  ghc-options:
-    -threaded
-    -rtsopts
-    -with-rtsopts=-N
-  other-modules:
-      DomainDriven.Persistance.PostgresSpec
-      DomainDriven.Persistance.Postgres.TypesSpec
-  hs-source-dirs:
-      test
-  build-depends:
-      aeson
-    , base
-    , containers
-    , domaindriven-core
-    , hspec
-    , postgresql-simple
-    , streamly
-    , text
-    , time
-    , unliftio
-    , unliftio-pool
-    , uuid

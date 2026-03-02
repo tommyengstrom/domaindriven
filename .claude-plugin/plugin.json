@@ -1,0 +1,11 @@
+{
+  "name": "domaindriven",
+  "description": "Claude skill for the domaindriven Haskell event sourcing and CQRS library",
+  "version": "0.1.0",
+  "author": {
+    "name": "Tommy Engström"
+  },
+  "repository": "https://github.com/tommyengstrom/domaindriven",
+  "license": "BSD-3-Clause",
+  "keywords": ["haskell", "event-sourcing", "cqrs", "domain-driven-design", "effectful", "servant"]
+}

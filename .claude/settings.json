@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+        ]
+      }
+      
+    ],
+    "PostToolUse": [ ]
+  }
+}

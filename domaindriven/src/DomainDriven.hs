@@ -1,39 +1,14 @@
-module DomainDriven (module X) where
+module DomainDriven
+    ( -- * Domain configuration (re-exported)
+        module DomainDriven.Domain
 
-import Data.UUID as X (UUID)
+      -- * Effects and helpers
+    , module X
+    )
+where
 
-import DomainDriven.Persistance.Class as X
-    ( ReadModel (..)
-    , Stored (..)
-    , WriteModel (..)
-    , mkId
-    , runCmd
-    )
-import DomainDriven.Server.Api as X
-    ( CbCmd
-    , CbQuery
-    , Cmd
-    , Field (..)
-    , JsonObject (..)
-    , NamedField (..)
-    , Query
-    )
-import DomainDriven.Server.DomainDrivenApi as X
-    ( ApiTagFromLabel (..)
-    , DomainDrivenApi
-    , DomainDrivenServer (..)
-    )
-import DomainDriven.Server.MapModel as X
-    ( MapEvent (..)
-    , MapModel (..)
-    , MapModelAndEvent (..)
-    )
-import DomainDriven.Server.Server as X
-    ( CbCmdServer (..)
-    , CbQueryServer (..)
-    , CmdServer (..)
-    , QueryServer (..)
-    , ReadPersistence (..)
-    , WritePersistence (..)
-    )
-import Generics.SOP.NP as X (NP (..))
+import DomainDriven.Aggregate as X
+import DomainDriven.Domain
+import DomainDriven.Interpreter as X
+import DomainDriven.Projection as X
+import DomainDriven.Persistance.Class as X (Indexed (..), NoIndex (..), Stored (..))
