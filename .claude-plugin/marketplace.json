@@ -1,0 +1,13 @@
+{
+  "name": "domaindriven",
+  "owner": {
+    "name": "Tommy Engström"
+  },
+  "plugins": [
+    {
+      "name": "domaindriven",
+      "source": ".",
+      "description": "Claude skill for the domaindriven Haskell event sourcing and CQRS library"
+    }
+  ]
+}
