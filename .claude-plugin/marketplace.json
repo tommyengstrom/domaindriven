@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "domaindriven",
-      "source": ".",
+      "source": "./",
       "description": "Claude skill for the domaindriven Haskell event sourcing and CQRS library"
     }
   ]
