@@ -17,13 +17,25 @@ my-project/
 │       ├── Migration/V50.hs      # Migration from 49 → 50
 │       └── ...
 └── services/my-project/          # Main service
-    └── src/MyProject/Runner.hs   # Chains migrations, verifies consistency
+    └── src/MyProject/
+        ├── Model.hs              # Domain model and events
+        ├── EventHandler.hs       # applyEvent
+        ├── Effect.hs             # runEffectStack: runs Aggregate + Projection effects
+        ├── Api.hs                # Servant API type and handlers
+        ├── Api/                  # Split large APIs into sub-modules
+        ├── Hooks/                # Effectful hooks, one per file
+        │   └── OnUserCreated.hs
+        └── Runner.hs             # Chains migrations, verifies consistency
 ```
 
 ### `<project>-events`
 Canonical, current event types. This is the only package you edit when changing events. Events live in a separate package so the migration package can import frozen snapshots at each version — without the split, you can't have two versions of the same module in scope at once.
 
+**Must not depend on the main service package.** Keep dependencies minimal — typically just `aeson`, `text`, `time`, and similar leaf libraries. The events package defines pure data types; it should not pull in Servant, Effectful, database libraries, or anything heavy.
+
 ### `<project>-migrations`
+**Must not depend on the main service package.** Dependencies should be limited to `<project>-events`, `domaindriven-core`, `shape-coerce`, and basic libraries. Keeping this package lightweight ensures fast compilation of migration logic.
+
 Two kinds of modules:
 - **Event snapshots** (`EventN.*`): Frozen copies of `<project>-events` at version N. Created by copying all modules from `<project>-events` into an `EventN.*` namespace.
 - **Migration modules** (`Migration.VN`): Convert `Event(N-1)` → `EventN` using `shapeCoerce`.

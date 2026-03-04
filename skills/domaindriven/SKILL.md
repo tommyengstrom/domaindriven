@@ -13,6 +13,8 @@ Dependencies: `domaindriven-core` (persistence backends), `domaindriven` (Effect
 
 ## Core Pattern
 
+Put the domain model and events in `Model.hs`, `applyEvent` in `EventHandler.hs`, and the Servant API type and handlers in `Api.hs`. If the API grows large, split parts into `Api/SubApi.hs` etc. Put the effect stack runner in `Effect.hs` and Effectful hooks in `Hooks/HookName.hs`.
+
 ```haskell
 -- 1. Domain triple
 type MyDomain = Domain MyModel MyEvent NoIndex
@@ -43,9 +45,9 @@ myHandler = MyAPI
         pure (const (), [ThingHappened])  -- (extractor from updated model, events)
     }
 
--- 6. Wire effect stack
-runEffects :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, IOE] a -> Handler a
-runEffects m = do
+-- 6. Wire effect stack (in Effect.hs)
+runEffectStack :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, IOE] a -> Handler a
+runEffectStack m = do
     a <- liftIO . runEff . runErrorNoCallStack @ServerError
         . runAggregate backend . runProjection backend $ m
     either throwError pure a
@@ -130,7 +132,7 @@ Serve with:
 
 ```haskell
 serve (Proxy @(FieldNameAsPathApi CounterAPI))
-    $ hoistServer (Proxy @(FieldNameAsPathApi CounterAPI)) runEffects
+    $ hoistServer (Proxy @(FieldNameAsPathApi CounterAPI)) runEffectStack
     $ FieldNameAsPathServer counterHandler
 ```
 
