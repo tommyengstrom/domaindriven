@@ -51,6 +51,10 @@ runEffects m = do
     either throwError pure a
 ```
 
+## Event Design
+
+Keep events small (one fact per event), use hierarchical sum-of-sums for the top-level event type, and put events in a separate package for migration safety. See [event-design.md](event-design.md) for principles and examples.
+
 ## Key Types
 
 ```haskell
@@ -76,7 +80,13 @@ data Projection domain :: Effect where
     GetEventListI :: DomainIndex domain -> Projection domain m [Stored (DomainEvent domain)]
 ```
 
-## `runTransaction` Return Convention
+## Transaction Conventions
+
+Each endpoint should use a single `runTransaction` call unless there's a strong reason not to. The Postgres backend holds an exclusive advisory lock for the entire transaction, making the read-validate-emit cycle atomic — no other request can interleave.
+
+**When to split**: If the endpoint must do time-consuming work (e.g. external API calls) that would hold the lock too long, do the slow part outside `runTransaction`, then call `runTransaction` to emit events.
+
+### Return Convention
 
 The callback returns `(Model -> a, [Event])`:
 - First element extracts return value from the *updated* model (after events applied)

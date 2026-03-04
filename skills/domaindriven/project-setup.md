@@ -4,6 +4,8 @@ Split your project into three packages for safe, incremental event schema evolut
 
 ## Package Structure
 
+For event design principles (small events, hierarchical types) see [event-design.md](event-design.md).
+
 ```
 my-project/
 ├── lib/my-project-events/        # Current event types
@@ -19,7 +21,7 @@ my-project/
 ```
 
 ### `<project>-events`
-Canonical, current event types. This is the only package you edit when changing events.
+Canonical, current event types. This is the only package you edit when changing events. Events live in a separate package so the migration package can import frozen snapshots at each version — without the split, you can't have two versions of the same module in scope at once.
 
 ### `<project>-migrations`
 Two kinds of modules:
@@ -114,6 +116,31 @@ discardedMigration _ etName conn = void $ createEventTable' conn etName
 ```
 
 You can also remove the corresponding `EventN.*` snapshot modules from the migrations package.
+
+## Event Snapshot Script
+
+Automates step 1 of "Creating a New Event Snapshot". Adapt `SOURCE_PKG` and `MODULE_PREFIX` to your project:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_PKG="../my-project-events"
+MODULE_PREFIX="MyProject"
+
+# Find highest existing EventN directory
+LAST=$(ls -d src/Event* 2>/dev/null | grep -oP 'Event\K[0-9]+' | sort -n | tail -1)
+NEXT=$(( ${LAST:-0} + 1 ))
+TARGET="src/Event${NEXT}"
+
+echo "Creating event snapshot v${NEXT} in ${TARGET}"
+mkdir -p "${TARGET}"
+cp -R "${SOURCE_PKG}/src/${MODULE_PREFIX}/." "${TARGET}/"
+find "${TARGET}" -name '*.hs' -exec sed -i "s/${MODULE_PREFIX}\./Event${NEXT}./g" {} +
+echo "Done. Remember to add Event${NEXT}.* modules to the .cabal file."
+```
+
+Run from the `<project>-migrations` directory.
 
 ## Workflow Summary
 
