@@ -7,3 +7,4 @@ dist-newstyle/
 .vscode
 .repro
 ai_docs
+.claude/settings.local.json
