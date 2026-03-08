@@ -130,3 +130,33 @@ executable fieldname-as-path-example
     , servant
     , servant-server
     , warp
+
+executable crm-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      Api
+      Command
+      Event
+      EventHandler
+      Model
+      Server
+      Types
+  hs-source-dirs:
+      crm
+  build-depends:
+      aeson
+    , base
+    , containers
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , optics-core
+    , optics-extra
+    , servant
+    , servant-server
+    , text
+    , uuid
+    , warp

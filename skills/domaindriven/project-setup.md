@@ -5,6 +5,8 @@ Split your project into three packages for safe, incremental event schema evolut
 ## Package Structure
 
 For event design principles (small events, hierarchical types) see [event-design.md](event-design.md).
+For handler patterns (withX, lookups, setField) see [handler-patterns.md](handler-patterns.md).
+For application wiring (effects, testing, config) see [app-wiring.md](app-wiring.md).
 
 ```
 my-project/
@@ -18,14 +20,17 @@ my-project/
 │       └── ...
 └── services/my-project/          # Main service
     └── src/MyProject/
-        ├── Model.hs              # Domain model and events
-        ├── EventHandler.hs       # applyEvent
-        ├── Effect.hs             # runEffectStack: runs Aggregate + Projection effects
-        ├── Api.hs                # Servant API type and handlers
+        ├── Types.hs              # ID newtypes, enumerations, entity records
+        ├── Event.hs              # Hierarchical event types (or import from events pkg)
+        ├── Model.hs              # Domain model, emptyModel, Domain type alias
+        ├── EventHandler.hs       # applyEvent with optics-based dispatch
+        ├── Command.hs            # Request body types (one per mutation endpoint)
+        ├── Api.hs                # Servant API types with FieldNameAsPath
         ├── Api/                  # Split large APIs into sub-modules
+        ├── Server.hs             # Handlers, Effects alias, withX helpers
         ├── Hooks/                # Effectful hooks, one per file
         │   └── OnUserCreated.hs
-        └── Runner.hs             # Chains migrations, verifies consistency
+        └── Main.hs               # Entry point, backend creation, effect stack wiring
 ```
 
 ### `<project>-events`

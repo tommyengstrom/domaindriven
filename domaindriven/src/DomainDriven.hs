@@ -11,4 +11,4 @@ import DomainDriven.Aggregate as X
 import DomainDriven.Domain
 import DomainDriven.Interpreter as X
 import DomainDriven.Projection as X
-import DomainDriven.Persistance.Class as X (Indexed (..), NoIndex (..), Stored (..))
+import DomainDriven.Persistance.Class as X (AnyWriteModel (..), Indexed (..), NoIndex (..), Stored (..))
