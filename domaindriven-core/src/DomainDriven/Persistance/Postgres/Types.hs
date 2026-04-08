@@ -12,7 +12,6 @@ import Data.Int
 import Data.Pool.Introspection as Pool
 import Data.String
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Time
 import Data.Typeable
 import Data.UUID (UUID)
@@ -45,8 +44,6 @@ type ChunkSize = Int
 class Hashable a => IsPgIndex a where
     toPgIndex :: a -> Text -- FIXME: Should not be Text
     fromPgIndex :: Text -> a
-    toQuery :: a -> PG.Query
-    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
 
 instance IsPgIndex NoIndex where
     toPgIndex = const "0"

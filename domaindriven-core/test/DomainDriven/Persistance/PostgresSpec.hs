@@ -120,11 +120,9 @@ setupPersistance postHook test = do
     pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test
-        ( p
-            { chunkSize = 2
-            , logger = const $ pure () -- putStrLn . ("[DomainDriven] " <>) . show
-            , updateHook = postHook
-            }
+        ( withUpdateHook postHook
+            . withLogger (const $ pure ()) -- putStrLn . ("[DomainDriven] " <>) . show
+            $ withChunkSize 2 p
         , pool
         )
 
@@ -139,7 +137,7 @@ setupPersistanceIndexed test = do
             <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
     pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
-    test (p{chunkSize = 2}, pool)
+    test (withChunkSize 2 p, pool)
 
 mkTestConn :: IO Connection
 mkTestConn =
@@ -258,6 +256,62 @@ indexedSpec = describe "Indexed models" $ do
         models `shouldSatisfy` (== [2, 4 .. 40]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
+
+    it "Indices with apostrophes are read safely across all read paths" $ \(p, pool) -> do
+        let index = Indexed "foo'bar"
+            evs = [AddOne, SubtractOne, AddOne]
+
+        storedEvs <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                evs
+
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) index storedEvs
+
+        queried <- withResource pool $ \conn ->
+            queryEvents @TestEvent conn (getEventTableName eventTable) index
+        listed <- getEventList p index
+        streamed <- Stream.toList $ getEventStream p index
+        model <- getModel p index
+
+        fmap (storedEvent . fst) queried `shouldBe` evs
+        fmap storedEvent listed `shouldBe` evs
+        streamed `shouldBe` listed
+        model `shouldBe` 1
+
+    it "SQL metacharacters in an index do not widen the filter" $ \(p, pool) -> do
+        let attackerIndex = Indexed "a' OR '1'='1"
+            victimIndex = Indexed "victim"
+            attackerEvents = [AddOne]
+            victimEvents = [AddOne, AddOne]
+
+        storedAttackerEvents <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                attackerEvents
+        storedVictimEvents <-
+            traverse
+                (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId)
+                victimEvents
+
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) attackerIndex storedAttackerEvents
+        _ <- withResource pool $ \conn ->
+            writeEvents conn (getEventTableName eventTable) victimIndex storedVictimEvents
+
+        queried <- withResource pool $ \conn ->
+            queryEvents @TestEvent conn (getEventTableName eventTable) attackerIndex
+        listed <- getEventList p attackerIndex
+        streamed <- Stream.toList $ getEventStream p attackerIndex
+        attackerModel <- getModel p attackerIndex
+        victimModel <- getModel p victimIndex
+
+        fmap (storedEvent . fst) queried `shouldBe` attackerEvents
+        fmap storedEvent listed `shouldBe` attackerEvents
+        streamed `shouldBe` listed
+        attackerModel `shouldBe` 1
+        victimModel `shouldBe` 2
 
 streamingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
@@ -473,4 +527,52 @@ loggingSpec = describe "Callstacks" $ do
         -> IO (TVar [LogEntry], PostgresEvent NoIndex TestModel TestEvent)
     withStmLogger p = do
         logVar <- newTVarIO []
-        pure (logVar, p{logger = \s -> atomically $ modifyTVar logVar (s :)})
+        pure (logVar, withLogger (\s -> atomically $ modifyTVar logVar (s :)) p)
+
+withChunkSize
+    :: ChunkSize
+    -> PostgresEvent index model event
+    -> PostgresEvent index model event
+withChunkSize newChunkSize PostgresEvent{connectionPool, eventTableName, modelIORef, app, seed, updateHook, logger} =
+    PostgresEvent
+        { connectionPool
+        , eventTableName
+        , modelIORef
+        , app
+        , seed
+        , chunkSize = newChunkSize
+        , updateHook
+        , logger
+        }
+
+withLogger
+    :: (LogEntry -> IO ())
+    -> PostgresEvent index model event
+    -> PostgresEvent index model event
+withLogger newLogger PostgresEvent{connectionPool, eventTableName, modelIORef, app, seed, chunkSize, updateHook} =
+    PostgresEvent
+        { connectionPool
+        , eventTableName
+        , modelIORef
+        , app
+        , seed
+        , chunkSize
+        , updateHook
+        , logger = newLogger
+        }
+
+withUpdateHook
+    :: (PostgresEvent index model event -> index -> model -> [Stored event] -> IO ())
+    -> PostgresEvent index model event
+    -> PostgresEvent index model event
+withUpdateHook newUpdateHook PostgresEvent{connectionPool, eventTableName, modelIORef, app, seed, chunkSize, logger} =
+    PostgresEvent
+        { connectionPool
+        , eventTableName
+        , modelIORef
+        , app
+        , seed
+        , chunkSize
+        , updateHook = newUpdateHook
+        , logger
+        }

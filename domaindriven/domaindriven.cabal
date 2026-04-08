@@ -75,6 +75,8 @@ library
   exposed-modules:
       DomainDriven
       DomainDriven.Aggregate
+      DomainDriven.BeamAggregate
+      DomainDriven.BeamProjection
       DomainDriven.Domain
       DomainDriven.Interpreter
       DomainDriven.Projection
@@ -83,7 +85,10 @@ library
   hs-source-dirs:
       src
   build-depends:
-      base
+      aeson
+    , base
+    , beam-core
+    , beam-postgres
     , bytestring
     , domaindriven-core
     , effectful-core
@@ -108,13 +113,21 @@ test-suite domaindriven-test
   build-tool-depends:
     hspec-discover:hspec-discover
   other-modules:
+    DomainDriven.BeamSpec
     DomainDriven.InMemorySpec
   hs-source-dirs:
     test
   build-depends:
-      base
+      aeson
+    , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , domaindriven-core
     , domaindriven
     , effectful-core
     , effectful-plugin
     , hspec
+    , postgresql-simple
+    , text
+    , unliftio-pool

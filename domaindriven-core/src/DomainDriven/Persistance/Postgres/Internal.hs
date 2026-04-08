@@ -22,6 +22,7 @@ import Data.String
 import Data.Time
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
+import Database.PostgreSQL.Simple.Types qualified as PGTypes
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
@@ -296,14 +297,13 @@ queryEvents
     -> index
     -> IO [(Stored a, EventNumber)]
 queryEvents conn eventTable index = do
-    traverse fromEventRow =<< query_ conn q
+    traverse fromEventRow =<< query conn q (Only $ toPgIndex index)
   where
     q :: PG.Query
     q =
         "select id, event_number,timestamp,event from "
             <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
+            <> " where index = ?"
             <> " order by event_number"
 
 queryEventsAfter
@@ -323,8 +323,7 @@ queryEventsAfter conn eventTable (EventNumber lastEvent) =
                 <> " order by event_number"
             )
 
-newtype EventQuery = EventQuery {getPgQuery :: PG.Query}
-    deriving (Show, Generic)
+newtype EventQuery = EventQuery {getPgQuery :: Connection -> IO PG.Query}
 
 mkEventsAfterQuery
     :: IsPgIndex index
@@ -332,23 +331,34 @@ mkEventsAfterQuery
     -> index
     -> EventNumber
     -> EventQuery
-mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
-    EventQuery $
+mkEventsAfterQuery eventTable index (EventNumber lastEvent) = EventQuery $ \conn ->
+    PGTypes.Query
+        <$> formatQuery
+            conn
+            q
+            (toPgIndex index, lastEvent)
+  where
+    q :: PG.Query
+    q =
         "select id, event_number,timestamp,event from "
             <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " and event_number > "
-            <> fromString (show lastEvent)
+            <> " where index = ?"
+            <> " and event_number > ?"
             <> " order by event_number"
 
 mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
-mkEventQuery eventTable index =
-    EventQuery $
+mkEventQuery eventTable index = EventQuery $ \conn ->
+    PGTypes.Query
+        <$> formatQuery
+            conn
+            q
+            (Only $ toPgIndex index)
+  where
+    q :: PG.Query
+    q =
         "select id, event_number,timestamp,event from "
             <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
+            <> " where index = ?"
             <> " order by event_number"
 
 headMay :: [a] -> Maybe a
@@ -561,7 +571,7 @@ mkEventStream chunkSize conn q = do
                 Right a -> pure $ Just (a, cursor)
 
     Stream.bracketIO
-        (Cursor.declareCursor conn (getPgQuery q))
+        (getPgQuery q conn >>= Cursor.declareCursor conn)
         Cursor.closeCursor
         ( Stream.mapM fromEventRow
             . Stream.unfoldMany Unfold.fromList

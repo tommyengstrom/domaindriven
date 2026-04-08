@@ -12,6 +12,14 @@ import DomainDriven.Persistance.Postgres.Internal as X
     , simplePoolWith
     , simplePoolWith'
     )
+import DomainDriven.Persistance.Postgres.Beam as X
+    ( BeamProjectionSpec (..)
+    , PostgresBeam (..)
+    , postgresBeamBackend
+    , rebuildProjection
+    , runBeamCmd
+    , runBeamPg
+    )
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
     , EventMigration

@@ -77,6 +77,7 @@ library
       DomainDriven.Persistance.Class
       DomainDriven.Persistance.ForgetfulInMemory
       DomainDriven.Persistance.Postgres
+      DomainDriven.Persistance.Postgres.Beam
       DomainDriven.Persistance.Postgres.Internal
       DomainDriven.Persistance.Postgres.Migration
       DomainDriven.Persistance.Postgres.Types
@@ -85,6 +86,9 @@ library
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , containers
     , deepseq
     , exceptions
@@ -113,6 +117,7 @@ test-suite domaindriven-core-test
     -rtsopts
     -with-rtsopts=-N
   other-modules:
+      DomainDriven.Persistance.Postgres.BeamSpec
       DomainDriven.Persistance.PostgresSpec
       DomainDriven.Persistance.Postgres.TypesSpec
   hs-source-dirs:
@@ -120,6 +125,9 @@ test-suite domaindriven-core-test
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , containers
     , domaindriven-core
     , hspec

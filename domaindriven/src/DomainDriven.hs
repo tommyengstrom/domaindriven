@@ -8,6 +8,8 @@ module DomainDriven
 where
 
 import DomainDriven.Aggregate as X
+import DomainDriven.BeamAggregate as X
+import DomainDriven.BeamProjection as X
 import DomainDriven.Domain
 import DomainDriven.Interpreter as X
 import DomainDriven.Projection as X

@@ -1,43 +1,82 @@
 # DomainDriven Examples
 
-Example applications demonstrating the domaindriven library.
-All three examples use a simple counter domain to keep the focus on the library features.
+Example applications demonstrating the `domaindriven` library.
 
-## Examples
+The examples now come in two persistence families:
 
-### 1. Simple Counter (`simple/`)
+- Legacy event-sourced state:
+  `simple-example`, `fieldname-as-path-example`, `postgres-example`, `crm-example`
+- Beam-backed relational projections:
+  `simple-beam-example`, `fieldname-as-path-beam-example`, `postgres-beam-example`, `crm-beam-example`
+
+## In-Memory Examples
+
+### Simple Counter (`simple/`)
 Getting started example with in-memory persistence. No database required.
 
-Features: model/event/applyEvent pattern, Aggregate & Projection effects, `GET /events` endpoint.
+Features: model/event/applyEvent pattern, `Aggregate` and `Projection` effects, `GET /events`.
 
 ```bash
-cabal run simple-example          # starts on port 7878
-curl localhost:7878               # get counter value
-curl -X POST localhost:7878/increase
-curl localhost:7878/events        # list stored events
+cabal run simple-example
 ```
 
-### 2. PostgreSQL + Event Migration (`postgres/`)
+### FieldNameAsPath (`fieldname-as-path/`)
+Same counter domain as `simple/`, but record field names become URL paths automatically.
+
+```bash
+cabal run fieldname-as-path-example
+```
+
+### CRM (`crm/`)
+Three-level customer/order/item example using the in-memory backend.
+
+```bash
+cabal run crm-example
+```
+
+## PostgreSQL Event Backend
+
+### PostgreSQL + Event Migration (`postgres/`)
 Counter with PostgreSQL persistence and event schema evolution.
 
-Features: `simplePool` connection pooling, `postgresWriteModel`, event migration from V1 (unit events) to V2 (events with Int payload) via `ShapeCoercible` and `MigrateUsing`.
+Features: `simplePool`, `postgresWriteModel`, `MigrateUsing`, and `ShapeCoercible` event migration from V1 to V2.
 
-Requires a running PostgreSQL instance:
+```bash
+cabal run postgres-example
+```
+
+## Beam Projection Backends
+
+All Beam examples require a running PostgreSQL instance:
+
 ```bash
 createdb -U postgres domaindriven
 ```
 
+### Simple Counter (`simple-beam/`)
+Counter backed by a Beam projection table plus the normal event table.
+
 ```bash
-cabal run postgres-example        # starts on port 7879 (requires PostgreSQL)
-curl -X POST -H 'Content-Type: application/json' -d '5' localhost:7879/increase
-curl localhost:7879
+cabal run simple-beam-example
 ```
 
-### 3. FieldNameAsPath (`fieldname-as-path/`)
-Same counter as `simple/`, but uses `FieldNameAsPathApi` so record field names become URL paths automatically — no explicit path strings needed.
+### FieldNameAsPath (`fieldname-as-path-beam/`)
+Same API as the FieldNameAsPath counter, but backed by Beam projection tables.
 
 ```bash
-cabal run fieldname-as-path-example  # starts on port 7880
-curl localhost:7880/get
-curl -X POST localhost:7880/increase
+cabal run fieldname-as-path-beam-example
+```
+
+### PostgreSQL + Event Migration (`postgres-beam/`)
+Same migrated counter domain as `postgres/`, but with Beam-managed relational state rebuilt from the newest event table.
+
+```bash
+cabal run postgres-beam-example
+```
+
+### CRM (`crm-beam/`)
+Beam-backed CRM projection using relational tables for customers, orders, and items.
+
+```bash
+cabal run crm-beam-example
 ```

@@ -84,15 +84,20 @@ executable postgres-example
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , domaindriven-core
     , domaindriven
     , effectful
     , effectful-core
     , effectful-plugin
     , postgresql-simple
+    , resource-pool
     , shape-coerce
     , servant
     , servant-server
+    , text
     , warp
 
 executable simple-example
@@ -103,6 +108,9 @@ executable simple-example
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , domaindriven-core
     , domaindriven
     , effectful
@@ -122,6 +130,9 @@ executable fieldname-as-path-example
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , domaindriven-core
     , domaindriven
     , effectful
@@ -147,6 +158,9 @@ executable crm-example
   build-depends:
       aeson
     , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
     , containers
     , domaindriven-core
     , domaindriven
@@ -155,6 +169,129 @@ executable crm-example
     , effectful-plugin
     , optics-core
     , optics-extra
+    , servant
+    , servant-server
+    , text
+    , uuid
+    , warp
+
+executable postgres-beam-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      PostgresCounterBeam
+      Event.V1
+      Event.V2
+      EventMigration
+  hs-source-dirs:
+      postgres-beam
+    , postgres
+  build-depends:
+      aeson
+    , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , postgresql-simple
+    , resource-pool
+    , shape-coerce
+    , servant
+    , servant-server
+    , text
+    , warp
+
+executable simple-beam-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      SimpleCounterBeam
+  hs-source-dirs:
+      simple-beam
+    , beam-shared
+  build-depends:
+      aeson
+    , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , postgresql-simple
+    , resource-pool
+    , servant
+    , servant-server
+    , text
+    , time
+    , uuid
+    , warp
+
+executable fieldname-as-path-beam-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      SimpleCounterBeam
+  hs-source-dirs:
+      fieldname-as-path-beam
+    , beam-shared
+  build-depends:
+      aeson
+    , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , postgresql-simple
+    , resource-pool
+    , servant
+    , servant-server
+    , text
+    , time
+    , uuid
+    , warp
+
+executable crm-beam-example
+  import: shared_opts
+  main-is: Main.hs
+  other-modules:
+      Api
+      Command
+      CrmBeamProjection
+      Event
+      EventHandler
+      Model
+      Server
+      Types
+  hs-source-dirs:
+      crm-beam
+    , crm
+  build-depends:
+      aeson
+    , base
+    , beam-core
+    , beam-migrate
+    , beam-postgres
+    , containers
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , optics-core
+    , optics-extra
+    , postgresql-simple
+    , resource-pool
     , servant
     , servant-server
     , text
