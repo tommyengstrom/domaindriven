@@ -13,49 +13,91 @@ Dependencies: `domaindriven-core` (persistence backends), `domaindriven` (Effect
 
 ## Core Pattern
 
-Put the domain model and events in `Model.hs`, `applyEvent` in `EventHandler.hs`, and the Servant API type and handlers in `Api.hs`. If the API grows large, split parts into `Api/SubApi.hs` etc. Put the effect stack runner in `Effect.hs` and Effectful hooks in `Hooks/HookName.hs`.
+### File layout
+
+- `Types.hs` — ID newtypes, enumerations, entity records
+- `Event.hs` — Hierarchical event types
+- `Model.hs` — Model type, `emptyCrmModel`, Domain type alias
+- `EventHandler.hs` — `applyEvent` with optics-based dispatch
+- `Command.hs` — Request body types (one per mutation endpoint)
+- `Api.hs` — Servant API types with `FieldNameAsPath`
+- `Server.hs` — Handlers, `Effects` alias, `withX` helpers, event wrappers
+- `Main.hs` — Entry point, backend creation, effect stack wiring
+
+For larger apps, split `Api.hs` and `Server.hs` by sub-domain (e.g. `Api/Books.hs`, `Server/Books.hs`).
+
+### Running example: Library with Books
+
+All patterns below use a Library/Book domain — a `Map BookId Book` inside a Library model, with hierarchical events and nested API with Captures.
 
 ```haskell
 -- 1. Domain triple
-type MyDomain = Domain MyModel MyEvent NoIndex
+type LibraryDomain = Domain LibraryModel LibraryEvent NoIndex
 
--- 2. Events (must derive Generic, ToJSON, FromJSON)
-data MyEvent = ThingHappened | ValueSet Int
+-- 2. Model as Map (the natural pattern for entity collections)
+data LibraryModel = LibraryModel
+    { books :: Map BookId Book
+    }
+    deriving stock (Show, Eq, Generic)
 
--- 3. Apply events to build state
-applyEvent :: MyModel -> Stored MyEvent -> MyModel
-applyEvent m (Stored evt _ _) = case evt of
-    ThingHappened -> m { flag = True }
-    ValueSet n    -> m { value = n }
+emptyLibraryModel :: LibraryModel
+emptyLibraryModel = LibraryModel mempty
 
--- 4. Create backend
+-- 3. Hierarchical events with entity IDs (see event-design.md)
+data LibraryEvent
+    = BookEvent { bookId :: BookId, bookEvent :: BookEvent }
+    deriving (Generic, ToJSON, FromJSON)
+
+data BookEvent
+    = BookAdded { title :: Text, author :: Text }
+    | BookRemoved
+    | TitleChanged { title :: Text }
+    deriving (Generic, ToJSON, FromJSON)
+
+-- 4. Apply events with optics (see event-design.md for full dispatch)
+applyEvent :: LibraryModel -> Stored LibraryEvent -> LibraryModel
+applyEvent model (Stored (BookEvent{bookId = bid, bookEvent = be}) _ _) =
+    applyBookEvent bid be model
+
+applyBookEvent :: BookId -> BookEvent -> LibraryModel -> LibraryModel
+applyBookEvent bid ev model = case ev of
+    BookAdded{title, author} ->
+        model & #books % at bid .~ Just Book{bookId = bid, title, author}
+    BookRemoved ->
+        model & #books % at bid .~ Nothing
+    TitleChanged{title} ->
+        model & #books % ix bid % #title .~ title
+
+-- 5. Create backend
 -- Testing:
-backend <- createForgetful applyEvent initialModel
+backend <- createForgetful applyEvent emptyLibraryModel
 -- Production:
 pool <- simplePool' connectInfo
-backend <- postgresWriteModel pool eventTable applyEvent initialModel
+backend <- postgresWriteModel pool eventTable applyEvent emptyLibraryModel
 
--- 5. Handlers use Aggregate (write) and Projection (read) effects
-myHandler
-    :: (Aggregate MyDomain :> es, Projection MyDomain :> es, Error ServerError :> es)
-    => MyAPI (AsServerT (Eff es))
-myHandler = MyAPI
-    { getState = getModel        -- Projection: read current state
-    , doThing  = runTransaction \model ->
-        pure (const (), [ThingHappened])  -- (extractor from updated model, events)
-    }
-
--- 6. Wire effect stack (in Effect.hs)
-runEffectStack :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, IOE] a -> Handler a
-runEffectStack m = do
-    a <- liftIO . runEff . runErrorNoCallStack @ServerError
-        . runAggregate backend . runProjection backend $ m
-    either throwError pure a
+-- 6. Handlers use withX pattern + Effects alias (see handler-patterns.md)
+-- 7. Wire effect stack (see app-wiring.md)
 ```
+
+## Commands
+
+Commands are request-body types — what the client *wants* to happen. They are separate from events (what *did* happen). Define one per mutation endpoint in `Command.hs`:
+
+```haskell
+data CreateBook = CreateBook { title :: Text, author :: Text }
+    deriving stock (Generic, Show)
+    deriving anyclass (FromJSON, ToJSON)
+
+newtype ChangeTitle = ChangeTitle { title :: Text }
+    deriving stock (Generic, Show)
+    deriving anyclass (FromJSON, ToJSON)
+```
+
+Use `newtype` for single-field commands, `data` for multi-field.
 
 ## Event Design
 
-Keep events small (one fact per event), use hierarchical sum-of-sums for the top-level event type, and put events in a separate package for migration safety. See [event-design.md](event-design.md) for principles and examples.
+Keep events small (one fact per event), use hierarchical sum-of-sums for the top-level event type, and put events in a separate package for migration safety. See [event-design.md](event-design.md) for principles, optics-based dispatch, and the optics cheat sheet.
 
 ## Key Types
 
@@ -70,6 +112,11 @@ data Domain (model :: Type) (event :: Type) (index :: Type) = Domain
 
 data NoIndex = NoIndex
 newtype Indexed = Indexed Text
+
+-- Backend polymorphism (in domaindriven-core):
+data AnyWriteModel model event index
+    = forall p. (WriteModel p, Model p ~ model, Event p ~ event, Index p ~ index)
+    => AnyWriteModel p
 
 data Aggregate (domain :: Type) :: Effect where
     RunTransactionI
@@ -93,6 +140,7 @@ Each endpoint should use a single `runTransaction` call unless there's a strong 
 The callback returns `(Model -> a, [Event])`:
 - First element extracts return value from the *updated* model (after events applied)
 - `const ()` when nothing to return, `id` to return whole model, `(.someField)` for a field
+- **Important**: the `returnFn` is a pure function — no `Eff` effects available. Use pure lookup helpers here (see [handler-patterns.md](handler-patterns.md)).
 
 ## Indexed Aggregates
 
@@ -106,6 +154,8 @@ increase idx = runTransactionI idx \model -> pure ((.counter), [Increased])
 
 ## Servant Integration
 
+### FieldNameAsPath basics
+
 `FieldNameAsPath` derives URL paths from record field names. Each field name becomes a path segment automatically:
 
 ```haskell
@@ -118,16 +168,6 @@ data CounterAPI mode = CounterAPI
 instance ApiTagFromLabel CounterAPI
 ```
 
-Compare with standard Servant Generic where you must spell out paths in the type:
-
-```haskell
-data CounterAPI mode = CounterAPI
-    { get      :: mode :- Get '[JSON] Int                       -- GET  /
-    , increase :: mode :- "increase" :> Post '[JSON] Int        -- POST /increase
-    , decrease :: mode :- "decrease" :> Post '[JSON] Int        -- POST /decrease
-    } deriving Generic
-```
-
 Serve with:
 
 ```haskell
@@ -136,34 +176,92 @@ serve (Proxy @(FieldNameAsPathApi CounterAPI))
     $ FieldNameAsPathServer counterHandler
 ```
 
+### Nested APIs with Captures
+
+For real applications, nest API records using `Capture` + `FieldNameAsPathApi`. Use the `list_`/`create`/`detail` pattern at collection levels and `get_` for single-entity retrieval (underscores avoid Prelude clashes):
+
+```haskell
+-- Collection level: /books
+data BooksApi mode = BooksApi
+    { list_  :: mode :- Get '[JSON] [Book]
+    , create :: mode :- ReqBody '[JSON] CreateBook :> Post '[JSON] Book
+    , detail :: mode :- Capture "bookId" BookId :> FieldNameAsPathApi BookApi
+    } deriving stock Generic
+
+instance ApiTagFromLabel BooksApi
+
+-- Entity level: /books/{bookId}/...
+data BookApi mode = BookApi
+    { get_        :: mode :- Get '[JSON] Book
+    , changeTitle :: mode :- ReqBody '[JSON] ChangeTitle :> Post '[JSON] Book
+    , remove      :: mode :- Delete '[JSON] NoContent
+    , chapters    :: mode :- FieldNameAsPathApi ChaptersApi   -- nest further
+    } deriving stock Generic
+
+instance ApiTagFromLabel BookApi
+```
+
+Each nested level needs its own `instance ApiTagFromLabel`. The handler nesting mirrors the API type:
+
+```haskell
+booksServer :: Effects es => BooksApi (AsServerT (Eff es))
+booksServer = BooksApi
+    { list_  = Map.elems . (.books) <$> getModel @LibraryDomain
+    , create = \cmd -> ...
+    , detail = \bid -> FieldNameAsPathServer $ bookServer bid
+    }
+
+bookServer :: Effects es => BookId -> BookApi (AsServerT (Eff es))
+bookServer bid = BookApi
+    { get_        = getModel @LibraryDomain >>= lookupBook bid
+    , changeTitle = \cmd -> withBook bid \_book ->
+          pure [wrapBookE bid TitleChanged{title = cmd.title}]
+    , remove      = ...
+    , chapters    = FieldNameAsPathServer $ chaptersServer bid
+    }
+```
+
+## Handler Patterns
+
+See [handler-patterns.md](handler-patterns.md) for:
+- `withX` entity handler pattern (base + composed child versions)
+- Lookup helpers (Eff + Pure variants)
+- `setField` helper for generic field updates
+- Event wrapping helpers
+- Create with optional events
+- Validation (`validateNotBlank`, `blankToNothing`)
+
+## Application Wiring
+
+See [app-wiring.md](app-wiring.md) for:
+- `Effects` type alias with qualified `Effectful.:>`
+- Effect stack ordering (type list vs interpreter chain)
+- `AnyWriteModel` backend polymorphism
+- Config and `runEffectStack`
+- Testing with `createForgetful`
+- Multiple domains
+- Bootstrap / seed data
+
 ## Event Migration (Postgres)
 
 Use `shape-coerce` for migrations. Let the compiler guide you:
 
 1. First, try just `shapeCoerce`. If the old and new event types are structurally identical (same constructor names, same fields), it works automatically via Generics.
 
-2. If the types differ, the compiler will tell you exactly what doesn't match (constructor name mismatch, field mismatch, etc.). Write a manual `ShapeCoercible` instance for the cases it can't derive:
+2. If the types differ, the compiler will tell you exactly what doesn't match. Write a manual `ShapeCoercible` instance:
 
 ```haskell
--- V1
-data CounterEvent = CounterIncreased | CounterDecreased
-
--- V2: constructors changed, so automatic shapeCoerce fails at compile time.
--- Write the instance the compiler is asking for:
-data CounterEvent = CounterIncreasedBy Int | CounterDecreasedBy Int
-
 instance ShapeCoercible V1.CounterEvent V2.CounterEvent where
     shapeCoerce = \case
         V1.CounterIncreased -> V2.CounterIncreasedBy 1
         V1.CounterDecreased -> V2.CounterDecreasedBy 1
 ```
 
-3. Wire it into the migration. `Stored` is a `Functor` so `shapeCoerce` on `Stored a -> Stored b` works automatically once the inner event type has an instance:
+3. Wire it into the migration chain:
 
 ```haskell
 eventTable :: EventTable
 eventTable = MigrateUsing myMigration $ InitialVersion "my_events"
--- Creates my_events_v1 (initial), my_events_v2 (after migration)
 
 myMigration :: EventMigration
 myMigration prev next conn = migrate1to1 @NoIndex conn prev next shapeCoerce
@@ -174,11 +272,25 @@ For multi-package project setup with compile-time migration safety, see [project
 ## Imports
 
 ```haskell
-import DomainDriven  -- re-exports everything from the effectful layer
--- Or individually:
-import DomainDriven.Persistance.Class          -- Stored, ReadModel, WriteModel, NoIndex, Indexed
-import DomainDriven.Persistance.ForgetfulInMemory -- createForgetful
-import DomainDriven.Persistance.Postgres       -- PostgresEvent, postgresWriteModel, simplePool
-import DomainDriven.Persistance.Postgres.Migration -- migrate1to1, migrate1toMany
-import Data.ShapeCoerce                        -- shapeCoerce, ShapeCoercible
+import DomainDriven                                        -- re-exports Aggregate, Projection, interpreters, Stored, NoIndex, AnyWriteModel
+import DomainDriven.FieldNameAsPath (ApiTagFromLabel, FieldNameAsPathApi, FieldNameAsPathServer(..))
+import DomainDriven.Persistance.Class (mkId)               -- UUID generation
+import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)  -- testing backend
+import DomainDriven.Persistance.Postgres (postgresWriteModel, simplePool')  -- production backend
+
+-- Effectful (qualified to avoid Servant collision):
+import Effectful hiding ((:>))
+import Effectful qualified
+import Effectful.Error.Static (Error, runErrorNoCallStack, throwError)
+import Effectful.Reader.Static qualified as Reader          -- for Config pattern
+
+-- Servant:
+import Servant hiding (throwError)
+import Servant qualified
+import Servant.Server.Generic (AsServerT)
+
+-- Optics (for applyEvent):
+import Optics.Core (at, ix, (%))
+import Optics.Operators ((.~))
+import Data.Function ((&))
 ```

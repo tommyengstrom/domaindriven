@@ -58,6 +58,45 @@ class ReadModel p => WriteModel p where
             )
         -- ^ How to create the return value from updated model
 
+-- | Existential wrapper that hides the concrete backend type while preserving
+-- the 'WriteModel' interface. This enables backend polymorphism — the same
+-- @Config@ and server code can work with both production ('Postgres') and
+-- test ('ForgetfulInMemory') backends:
+--
+-- @
+-- data Config = Config
+--     { backend :: AnyWriteModel MyModel MyEvent NoIndex
+--     , ...
+--     }
+--
+-- -- Production:
+-- Config { backend = AnyWriteModel postgresBackend, ... }
+--
+-- -- Tests:
+-- Config { backend = AnyWriteModel forgetfulBackend, ... }
+-- @
+data AnyWriteModel model event index
+    = forall p.
+        ( WriteModel p
+        , Model p ~ model
+        , Event p ~ event
+        , Index p ~ index
+        ) =>
+        AnyWriteModel p
+
+instance ReadModel (AnyWriteModel model event index) where
+    type Model (AnyWriteModel model event index) = model
+    type Event (AnyWriteModel model event index) = event
+    type Index (AnyWriteModel model event index) = index
+    applyEvent (AnyWriteModel p) = applyEvent p
+    getModel (AnyWriteModel p) = getModel p
+    getEventList (AnyWriteModel p) = getEventList p
+    getEventStream (AnyWriteModel p) = getEventStream p
+
+instance WriteModel (AnyWriteModel model event index) where
+    postUpdateHook (AnyWriteModel p) = postUpdateHook p
+    transactionalUpdate (AnyWriteModel p) = transactionalUpdate p
+
 -- | Wrapper for stored data
 -- This ensures all events have a unique ID and a timestamp, without having to deal with
 -- that when implementing the model.
