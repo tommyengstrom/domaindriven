@@ -52,6 +52,8 @@ data ChapterEvent
 1. **Overview** — the top-level type shows the domain shape at a glance.
 2. **Migration** — `shapeCoerce` handles unchanged sub-types automatically. If only `BookEvent` changed between versions, you only write a manual `ShapeCoercible` instance for `BookEvent`.
 
+> **Common mistake:** if an event carries an entity ID and only mutates that entity's state, it belongs nested under that entity's event type — not at the top level. Reserve top-level constructors for cross-cutting concerns that affect global state. A flat top-level event type is a smell: you lose the migration leverage that `shapeCoerce` gives you over unchanged sub-types, and the domain shape stops being visible at a glance.
+
 ## ID-Routed Dispatch with Optics
 
 For hierarchical events, build a dispatch chain where each level pattern-matches on its event constructors and either applies the change via optics or delegates to the next level.

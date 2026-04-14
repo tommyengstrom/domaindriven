@@ -178,21 +178,21 @@ serve (Proxy @(FieldNameAsPathApi CounterAPI))
 
 ### Nested APIs with Captures
 
-For real applications, nest API records using `Capture` + `FieldNameAsPathApi`. Use the `list_`/`create`/`detail` pattern at collection levels and `get_` for single-entity retrieval (underscores avoid Prelude clashes):
+For real applications, nest API records using `Capture` + `FieldNameAsPathApi`. Use `list`/`create` plus a resource-named capture field at collection levels, and `get` for single-entity retrieval. Field names in API record types are record selectors inside a named type — they do **not** clash with Prelude, so no trailing underscores are needed.
 
 ```haskell
 -- Collection level: /books
 data BooksApi mode = BooksApi
-    { list_  :: mode :- Get '[JSON] [Book]
+    { list   :: mode :- Get '[JSON] [Book]
     , create :: mode :- ReqBody '[JSON] CreateBook :> Post '[JSON] Book
-    , detail :: mode :- Capture "bookId" BookId :> FieldNameAsPathApi BookApi
+    , book   :: mode :- Capture "bookId" BookId :> FieldNameAsPathApi BookApi
     } deriving stock Generic
 
 instance ApiTagFromLabel BooksApi
 
 -- Entity level: /books/{bookId}/...
 data BookApi mode = BookApi
-    { get_        :: mode :- Get '[JSON] Book
+    { get         :: mode :- Get '[JSON] Book
     , changeTitle :: mode :- ReqBody '[JSON] ChangeTitle :> Post '[JSON] Book
     , remove      :: mode :- Delete '[JSON] NoContent
     , chapters    :: mode :- FieldNameAsPathApi ChaptersApi   -- nest further
@@ -201,25 +201,31 @@ data BookApi mode = BookApi
 instance ApiTagFromLabel BookApi
 ```
 
+Nested capture fields become URL path segments, so name them after the resource (`book`, `chapter`, …) — never a generic word like `detail`, which would produce meaningless URLs like `/detail/{bookId}/...`.
+
 Each nested level needs its own `instance ApiTagFromLabel`. The handler nesting mirrors the API type:
 
 ```haskell
 booksServer :: Effects es => BooksApi (AsServerT (Eff es))
 booksServer = BooksApi
-    { list_  = Map.elems . (.books) <$> getModel @LibraryDomain
+    { list   = Map.elems . (.books) <$> getModel @LibraryDomain
     , create = \cmd -> ...
-    , detail = \bid -> FieldNameAsPathServer $ bookServer bid
+    , book   = \bid -> FieldNameAsPathServer $ bookServer bid
     }
 
 bookServer :: Effects es => BookId -> BookApi (AsServerT (Eff es))
 bookServer bid = BookApi
-    { get_        = getModel @LibraryDomain >>= lookupBook bid
+    { get         = getModel @LibraryDomain >>= lookupBook bid
     , changeTitle = \cmd -> withBook bid \_book ->
           pure [wrapBookE bid TitleChanged{title = cmd.title}]
     , remove      = ...
     , chapters    = FieldNameAsPathServer $ chaptersServer bid
     }
 ```
+
+### Auth Headers
+
+When an API needs auth, declare the header as **required** at the API type level so handlers receive a non-`Maybe` token. Reject missing or invalid credentials at the API boundary (throwing 401 there), not deep in business logic — otherwise `Maybe Token` propagates through every handler and 401 handling leaks into domain code.
 
 ## Handler Patterns
 
