@@ -1,7 +1,7 @@
 {
   "name": "domaindriven",
   "description": "Claude skill for the domaindriven Haskell event sourcing and CQRS library",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Tommy Engström"
   },
