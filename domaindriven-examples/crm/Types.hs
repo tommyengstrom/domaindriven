@@ -1,6 +1,7 @@
 -- | Domain primitives — ID newtypes and enumerations.
 module Types where
 
+import Control.DeepSeq (NFData)
 import Data.Aeson (FromJSON, FromJSONKey, ToJSON, ToJSONKey)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
@@ -15,15 +16,15 @@ import Prelude
 
 newtype CustomerId = CustomerId UUID
     deriving stock (Show, Eq, Ord, Generic)
-    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData)
+    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData, NFData)
 
 newtype OrderId = OrderId UUID
     deriving stock (Show, Eq, Ord, Generic)
-    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData)
+    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData, NFData)
 
 newtype ItemId = ItemId UUID
     deriving stock (Show, Eq, Ord, Generic)
-    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData)
+    deriving newtype (FromJSON, ToJSON, FromJSONKey, ToJSONKey, FromHttpApiData, NFData)
 
 --------------------------------------------------------------------------------
 -- Enumerations
@@ -31,7 +32,7 @@ newtype ItemId = ItemId UUID
 
 data OrderStatus = Pending | Confirmed | Shipped | Cancelled
     deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (FromJSON, ToJSON, NFData)
 
 --------------------------------------------------------------------------------
 -- Entity types

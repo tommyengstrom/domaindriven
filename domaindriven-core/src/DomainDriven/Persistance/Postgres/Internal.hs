@@ -1,6 +1,9 @@
 -- | Postgres events with state as an IORef
 module DomainDriven.Persistance.Postgres.Internal where
 
+import Control.Concurrent (getNumCapabilities)
+import Control.DeepSeq (NFData, force)
+import Control.Exception (evaluate)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -74,7 +77,10 @@ data PostgresEvent index model event = PostgresEvent
     , app :: model -> Stored event -> model
     , seed :: model
     , chunkSize :: ChunkSize
-    -- ^ Number of events read from postgres per batch
+    -- ^ Number of events fetched from Postgres per cursor batch. A round-trip /
+    -- memory knob, independent of parse parallelism.
+    , parseConcurrency :: ParseConcurrency
+    -- ^ Number of parser threads that parse a fetched batch concurrently.
     , updateHook
         :: PostgresEvent index model event
         -> index
@@ -92,12 +98,15 @@ data PostgresEventTrans index model event = PostgresEventTrans
     , app :: model -> Stored event -> model
     , seed :: model
     , chunkSize :: ChunkSize
+    -- ^ Number of events fetched from Postgres per cursor batch. A round-trip /
+    -- memory knob, independent of parse parallelism.
+    , parseConcurrency :: ParseConcurrency
+    -- ^ Number of parser threads that parse a fetched batch concurrently.
     , logger :: LogEntry -> IO ()
-    -- ^ Number of events read from postgres per batch
     }
     deriving (Generic)
 
-instance (IsPgIndex i, FromJSON e) => ReadModel (PostgresEvent i m e) where
+instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) where
     type Model (PostgresEvent i m e) = m
     type Index (PostgresEvent i m e) = i
     type Event (PostgresEvent i m e) = e
@@ -105,7 +114,13 @@ instance (IsPgIndex i, FromJSON e) => ReadModel (PostgresEvent i m e) where
     getModel pg index = liftIO $ withIOTrans pg (`getModel'` index)
 
     getEventList pg index = withResource (connectionPool pg) $ \conn ->
-        fmap fst <$> queryEvents (Pool.resource conn) (pg ^. field @"eventTableName") index
+        fmap fst
+            <$> queryEventsWithParseConcurrency
+                (pg ^. field @"parseConcurrency")
+                (pg ^. field @"chunkSize")
+                (Pool.resource conn)
+                (pg ^. field @"eventTableName")
+                index
 
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
@@ -272,6 +287,7 @@ createPostgresPersistance
     -> IO (PostgresEvent index model event)
 createPostgresPersistance pool eventTable app' seed' = do
     ref <- newIORef HM.empty
+    defaultParseConcurrency <- max 1 <$> getNumCapabilities
     pure $
         PostgresEvent
             { connectionPool = pool
@@ -279,7 +295,8 @@ createPostgresPersistance pool eventTable app' seed' = do
             , modelIORef = ref
             , app = app'
             , seed = seed'
-            , chunkSize = 50
+            , chunkSize = defaultReadChunkSize
+            , parseConcurrency = defaultParseConcurrency
             , updateHook = \_ _ _ _ -> pure ()
             , logger = \case
                 e@(DbTransactionDuration dt _) -> when (dt > 1) $ putStrLn $ "[DomainDriven] " <> show e
@@ -288,35 +305,62 @@ createPostgresPersistance pool eventTable app' seed' = do
                 e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
             }
 
+-- | Default number of events fetched per Postgres cursor batch. Also sets the
+-- parse-task granularity: each batch is split into @chunkSize \`div\`
+-- parseConcurrency@-row tasks across the parser threads.
+defaultReadChunkSize :: ChunkSize
+defaultReadChunkSize = 2048
+
 queryEvents
     :: forall a index
-     . (IsPgIndex index, FromJSON a)
+     . (IsPgIndex index, FromJSON a, NFData a)
     => Connection
     -> EventTableName
     -> index
     -> IO [(Stored a, EventNumber)]
-queryEvents conn eventTable index = do
-    traverse fromEventRow =<< query_ conn q
+queryEvents = queryEventsWithParseConcurrency 1 defaultReadChunkSize
+
+queryEventsWithParseConcurrency
+    :: forall a index
+     . (IsPgIndex index, FromJSON a, NFData a)
+    => ParseConcurrency
+    -> ChunkSize
+    -> Connection
+    -> EventTableName
+    -> index
+    -> IO [(Stored a, EventNumber)]
+queryEventsWithParseConcurrency workers chunkSize conn eventTable index = do
+    parseEventRows workers chunkSize =<< query_ conn q
   where
     q :: PG.Query
     q =
-        "select id, event_number,timestamp,event from "
+        "select id, event_number,timestamp,event::text from "
             <> quoteIdent eventTable
             <> " where index = "
             <> toQuery index
             <> " order by event_number"
 
 queryEventsAfter
-    :: FromJSON a
+    :: (FromJSON a, NFData a)
     => Connection
     -> EventTableName
     -> EventNumber
     -> IO [(Stored a, EventNumber)]
-queryEventsAfter conn eventTable (EventNumber lastEvent) =
-    traverse fromEventRow
+queryEventsAfter = queryEventsAfterWithParseConcurrency 1 defaultReadChunkSize
+
+queryEventsAfterWithParseConcurrency
+    :: (FromJSON a, NFData a)
+    => ParseConcurrency
+    -> ChunkSize
+    -> Connection
+    -> EventTableName
+    -> EventNumber
+    -> IO [(Stored a, EventNumber)]
+queryEventsAfterWithParseConcurrency workers chunkSize conn eventTable (EventNumber lastEvent) =
+    parseEventRows workers chunkSize
         =<< query_
             conn
-            ( "select id, event_number,timestamp,event from "
+            ( "select id, event_number,timestamp,event::text from "
                 <> quoteIdent eventTable
                 <> " where event_number > "
                 <> fromString (show lastEvent)
@@ -334,7 +378,7 @@ mkEventsAfterQuery
     -> EventQuery
 mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
     EventQuery $
-        "select id, event_number,timestamp,event from "
+        "select id, event_number,timestamp,event::text from "
             <> quoteIdent eventTable
             <> " where index = "
             <> toQuery index
@@ -345,7 +389,7 @@ mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
 mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
 mkEventQuery eventTable index =
     EventQuery $
-        "select id, event_number,timestamp,event from "
+        "select id, event_number,timestamp,event::text from "
             <> quoteIdent eventTable
             <> " where index = "
             <> toQuery index
@@ -429,6 +473,7 @@ writeEvents conn eventTable index storedEvents = do
 
 getEventStream'
     :: ( FromJSON event
+       , NFData event
        , IsPgIndex index
        )
     => PostgresEventTrans index model event
@@ -436,7 +481,8 @@ getEventStream'
     -> Stream IO (Stored event)
 getEventStream' pgt index =
     fst
-        <$> mkEventStream
+        <$> mkEventStreamWithParseConcurrency
+            (pgt ^. #parseConcurrency)
             (pgt ^. #chunkSize)
             (pgt ^. #transaction . #connectionResource . #resource)
             (pgt ^. #eventTableName . to (`mkEventQuery` index))
@@ -465,6 +511,7 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
                 , app = pg ^. field @"app"
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
+                , parseConcurrency = pg ^. field @"parseConcurrency"
                 , logger = pg ^. field @"logger"
                 }
 
@@ -542,16 +589,26 @@ withIOTrans pg f = do
                 , app = pg ^. field @"app"
                 , seed = pg ^. field @"seed"
                 , chunkSize = pg ^. field @"chunkSize"
+                , parseConcurrency = pg ^. field @"parseConcurrency"
                 , logger = pg ^. field @"logger"
                 }
 
 mkEventStream
-    :: FromJSON event
+    :: (FromJSON event, NFData event)
     => ChunkSize
     -> Connection
     -> EventQuery
     -> Stream IO (Stored event, EventNumber)
-mkEventStream chunkSize conn q = do
+mkEventStream = mkEventStreamWithParseConcurrency 1
+
+mkEventStreamWithParseConcurrency
+    :: (FromJSON event, NFData event)
+    => ParseConcurrency
+    -> ChunkSize
+    -> Connection
+    -> EventQuery
+    -> Stream IO (Stored event, EventNumber)
+mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn q = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
             r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
@@ -563,15 +620,55 @@ mkEventStream chunkSize conn q = do
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
         Cursor.closeCursor
-        ( Stream.mapM fromEventRow
-            . Stream.unfoldMany Unfold.fromList
-            . fmap toList
+        ( Stream.unfoldEach Unfold.fromList
+            . Stream.mapM (parseEventRows parseConcurrency chunkSize . toList)
             . Stream.unfoldrM step
         )
 
+-- | Parse and fully force a single fetched event row. Run on a parser thread so
+-- the (deep) parse cost stays off the consuming thread.
+parseRowResult
+    :: (FromJSON event, NFData event)
+    => EventRowOut
+    -> IO (Either PersistanceError (Stored event, EventNumber))
+parseRowResult = evaluate . force . fromEventRowResult
+
+-- | Parse a batch of fetched event rows, fully forcing each parsed event off the
+-- calling thread. Up to @workers@ parser threads parse concurrently; results are
+-- returned in input order, and the first parse error (by input order) is thrown.
+--
+-- Rows are split into @chunkSize \`div\` workers@-row tasks: roughly one task per
+-- worker per fetched batch, so the parse granularity scales inversely with the
+-- worker count (more cores → more, finer tasks for better balance) and needs no
+-- separate tuning knob. Together with 'Stream.eager' this matches a hand-rolled
+-- thread pool at low core counts and beats it at high core counts.
+parseEventRows
+    :: (FromJSON event, NFData event)
+    => ParseConcurrency
+    -> ChunkSize
+    -> [EventRowOut]
+    -> IO [(Stored event, EventNumber)]
+parseEventRows workers chunkSize rows = do
+    let taskSize = max 1 (chunkSize `div` max 1 workers)
+    parsed <-
+        if workers <= 1
+            then traverse parseRowResult rows
+            else
+                Stream.fold Fold.toList
+                    . Stream.unfoldEach Unfold.fromList
+                    . Stream.parMapM
+                        ( Stream.maxThreads workers
+                            . Stream.eager True
+                            . Stream.ordered True
+                        )
+                        (traverse parseRowResult)
+                    . Stream.foldMany (Fold.take taskSize Fold.toList)
+                    $ Stream.fromList rows
+    either throwM pure (sequence parsed)
+
 getModel'
     :: forall e index m
-     . (IsPgIndex index, FromJSON e)
+     . (IsPgIndex index, FromJSON e, NFData e)
     => PostgresEventTrans index m e
     -> index
     -> IO m
@@ -599,7 +696,7 @@ getCurrentState pg index =
 
 refreshModel
     :: forall i m e
-     . (IsPgIndex i, FromJSON e)
+     . (IsPgIndex i, FromJSON e, NFData e)
     => PostgresEventTrans i m e
     -> i
     -> IO (m, EventNumber)
@@ -607,7 +704,8 @@ refreshModel pgt index = withExclusiveLock pgt index $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     NumberedModel model lastEventNo <- getCurrentState pgt index
     let eventStream =
-            mkEventStream
+            mkEventStreamWithParseConcurrency
+                (pgt ^. field @"parseConcurrency")
                 (pgt ^. field @"chunkSize")
                 (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
                 (mkEventsAfterQuery (pgt ^. field @"eventTableName") index lastEventNo)
@@ -652,7 +750,7 @@ withExclusiveLock pgt index a = do
         EventTableLockDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
     pure r
 
-instance (IsPgIndex i, ToJSON e, FromJSON e) => WriteModel (PostgresEvent i m e) where
+instance (IsPgIndex i, ToJSON e, FromJSON e, NFData e) => WriteModel (PostgresEvent i m e) where
     postUpdateHook pg i m e = liftIO $ (pg ^. field @"updateHook") pg i m e
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->

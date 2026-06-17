@@ -44,15 +44,16 @@ emptyLibraryModel :: LibraryModel
 emptyLibraryModel = LibraryModel mempty
 
 -- 3. Hierarchical events with entity IDs (see event-design.md)
+--    Every event type must derive NFData (import Control.DeepSeq (NFData)).
 data LibraryEvent
     = BookEvent { bookId :: BookId, bookEvent :: BookEvent }
-    deriving (Generic, ToJSON, FromJSON)
+    deriving (Generic, ToJSON, FromJSON, NFData)
 
 data BookEvent
     = BookAdded { title :: Text, author :: Text }
     | BookRemoved
     | TitleChanged { title :: Text }
-    deriving (Generic, ToJSON, FromJSON)
+    deriving (Generic, ToJSON, FromJSON, NFData)
 
 -- 4. Apply events with optics (see event-design.md for full dispatch)
 applyEvent :: LibraryModel -> Stored LibraryEvent -> LibraryModel

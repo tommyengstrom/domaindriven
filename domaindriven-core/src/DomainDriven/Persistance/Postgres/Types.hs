@@ -5,8 +5,10 @@ module DomainDriven.Persistance.Postgres.Types
     )
 where
 
+import Control.DeepSeq (NFData)
 import Control.Monad.Catch
 import Data.Aeson
+import Data.ByteString (ByteString)
 import Data.Hashable (Hashable)
 import Data.Int
 import Data.Pool.Introspection as Pool
@@ -14,7 +16,6 @@ import Data.String
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time
-import Data.Typeable
 import Data.UUID (UUID)
 import Database.PostgreSQL.Simple (Connection)
 import Database.PostgreSQL.Simple qualified as PG
@@ -34,13 +35,15 @@ quoteIdent name = "\"" <> fromString (concatMap escChar name) <> "\""
 data PersistanceError
     = EncodingError String
     | ValueError String
-    deriving (Show, Eq, Typeable, Exception)
+    deriving stock (Show, Eq, Generic)
+    deriving anyclass (Exception, NFData)
 
 type EventTableBaseName = String
 type EventVersion = Int
 type EventTableName = String
 type PreviousEventTableName = String
 type ChunkSize = Int
+type ParseConcurrency = Int
 
 class Hashable a => IsPgIndex a where
     toPgIndex :: a -> Text -- FIXME: Should not be Text
@@ -64,7 +67,7 @@ data EventTable
 
 newtype EventNumber = EventNumber {unEventNumber :: Int64}
     deriving (Show, Generic)
-    deriving newtype (Eq, Ord, Num)
+    deriving newtype (Eq, Ord, Num, NFData)
 
 instance FF.FromField EventNumber where
     fromField f bs = EventNumber <$> FF.fromField f bs
@@ -92,15 +95,16 @@ data EventRowOut = EventRowOut
     { key :: UUID
     , commitNumber :: EventNumber
     , timestamp :: UTCTime
-    , event :: Value
+    , event :: ByteString
     }
     deriving (Show, Eq, Generic, PG.FromRow)
 
-fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
-fromEventRow (EventRowOut evKey no ts ev) = case fromJSON ev of
-    Success a -> pure (Stored a ts evKey, no)
-    Error err ->
-        throwM
+fromEventRowResult
+    :: FromJSON e => EventRowOut -> Either PersistanceError (Stored e, EventNumber)
+fromEventRowResult (EventRowOut evKey no ts ev) = case eitherDecodeStrict' ev of
+    Right a -> a `seq` Right (Stored a ts evKey, no)
+    Left err ->
+        Left
             . EncodingError
             $ "Failed to parse event "
                 <> show evKey
@@ -108,3 +112,6 @@ fromEventRow (EventRowOut evKey no ts ev) = case fromJSON ev of
                 <> err
                 <> "\nWhen trying to parse:\n"
                 <> show ev
+
+fromEventRow :: (FromJSON e, MonadThrow m) => EventRowOut -> m (Stored e, EventNumber)
+fromEventRow = either throwM pure . fromEventRowResult

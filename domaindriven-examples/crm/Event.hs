@@ -4,6 +4,7 @@
 -- in the event handler.
 module Event where
 
+import Control.DeepSeq (NFData)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -20,7 +21,7 @@ data CrmEvent
         , customerEvent :: CustomerEvent
         }
     deriving stock (Show, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (FromJSON, ToJSON, NFData)
 
 --------------------------------------------------------------------------------
 -- Customer-level events
@@ -36,7 +37,7 @@ data CustomerEvent
         , orderEvent :: OrderEvent
         }
     deriving stock (Show, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (FromJSON, ToJSON, NFData)
 
 --------------------------------------------------------------------------------
 -- Order-level events (includes item events as a 3rd level)
@@ -51,4 +52,4 @@ data OrderEvent
     | ItemRemoved {itemId :: ItemId}
     | ItemQuantityChanged {itemId :: ItemId, quantity :: Int}
     deriving stock (Show, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (FromJSON, ToJSON, NFData)

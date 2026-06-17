@@ -10,12 +10,14 @@ import Effectful
 import Test.Hspec
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.DeepSeq (NFData)
+import GHC.Generics (Generic)
 import Prelude
 
 type TestModel = Int
 
 data TestEvent = AddOne | SubtractOne | Reset
-    deriving (Show, Eq)
+    deriving (Show, Eq, Generic, NFData)
 
 applyTestEvent :: TestModel -> Stored TestEvent -> TestModel
 applyTestEvent m ev = case storedEvent ev of

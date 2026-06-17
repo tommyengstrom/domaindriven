@@ -19,5 +19,6 @@ import DomainDriven.Persistance.Postgres.Types as X
     , EventTableBaseName
     , EventTableName
     , IsPgIndex (..)
+    , ParseConcurrency
     , PreviousEventTableName
     )

@@ -1,7 +1,7 @@
 cabal-version: 3.12
 
 name:           domaindriven-core
-version:        0.5.0
+version:        0.6.0
 synopsis:       Batteries included event sourcing and CQRS
 description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 category:       Web
@@ -85,6 +85,7 @@ library
   build-depends:
       aeson
     , base
+    , bytestring
     , containers
     , deepseq
     , exceptions
@@ -120,7 +121,9 @@ test-suite domaindriven-core-test
   build-depends:
       aeson
     , base
+    , bytestring
     , containers
+    , deepseq
     , domaindriven-core
     , hspec
     , postgresql-simple
@@ -129,4 +132,26 @@ test-suite domaindriven-core-test
     , time
     , unliftio
     , unliftio-pool
+    , uuid
+
+benchmark parallel-event-parsing
+  import: default_opts
+  type: exitcode-stdio-1.0
+  main-is: ParallelEventParsing.hs
+  hs-source-dirs:
+      benchmark
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , criterion
+    , deepseq
+    , domaindriven-core
+    , text
+    , time
+    , unliftio
     , uuid

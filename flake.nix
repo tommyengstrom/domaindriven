@@ -19,9 +19,10 @@
           ];
 
           buildInputs = [
-            pkgs.fish
             ghc
             pkgs.cabal-install
+            pkgs.process-compose
+            pkgs.haskell.packages.ghc9103.ghcid
             pkgs.haskell.packages.ghc9103.haskell-language-server
             pkgs.haskell.packages.ghc9103.hspec-discover
             pkgs.zlib.dev
@@ -30,14 +31,30 @@
             pkgs.libpq
           ];
 
-          SHELL = "${pkgs.fish}/bin/fish";
-
-          shellHook = ''
-            export PKG_CONFIG_PATH="${pkgs.xz.dev}/lib/pkgconfig:${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            export LIBRARY_PATH="${pkgs.xz.out}/lib:${pkgs.zlib.out}/lib:${pkgs.gmp.out}/lib:${pkgs.libpq.out}/lib:$LIBRARY_PATH"
-            export LD_LIBRARY_PATH="${pkgs.xz.out}/lib:${pkgs.zlib.out}/lib:${pkgs.gmp.out}/lib:${pkgs.libpq.out}/lib:$LD_LIBRARY_PATH"
-            exec ${pkgs.fish}/bin/fish
-          '';
+          env = {
+            PKG_CONFIG_PATH = pkgs.lib.makeSearchPath "lib/pkgconfig" [
+              pkgs.xz.dev
+              pkgs.zlib.dev
+            ];
+            C_INCLUDE_PATH = pkgs.lib.makeSearchPath "include" [
+              pkgs.xz.dev
+              pkgs.zlib.dev
+              pkgs.gmp.dev
+              pkgs.libpq.dev
+            ];
+            LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+              pkgs.xz.out
+              pkgs.zlib.out
+              pkgs.gmp.out
+              pkgs.libpq.out
+            ];
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+              pkgs.xz.out
+              pkgs.zlib.out
+              pkgs.gmp.out
+              pkgs.libpq.out
+            ];
+          };
         };
       });
 }

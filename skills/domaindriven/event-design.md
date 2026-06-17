@@ -1,5 +1,11 @@
 # Event Design Principles
 
+> **Required instances:** every event type (at every level of the hierarchy)
+> must derive `NFData` in addition to `ToJSON`/`FromJSON`. The persistence layer
+> forces parsed events with `deepseq`, and the requirement is enforced uniformly
+> across all backends via a superclass on `ReadModel`. `deriving (Generic,
+> ToJSON, FromJSON, NFData)` covers it (`import Control.DeepSeq (NFData)`).
+
 ## Small Events
 
 Each event should capture exactly one fact. If a command does multiple things, emit multiple events.
@@ -28,7 +34,7 @@ Use a sum-of-sums pattern for the top-level event type. Each level wraps the nex
 -- Top-level event (what gets stored)
 data LibraryEvent
     = BookEvent { bookId :: BookId, bookEvent :: BookEvent }
-    deriving (Generic, ToJSON, FromJSON)
+    deriving (Generic, ToJSON, FromJSON, NFData)
 
 -- Book-level events
 data BookEvent
@@ -37,14 +43,14 @@ data BookEvent
     | TitleChanged { title :: Text }
     | AuthorChanged { author :: Text }
     | ChapterEvent { chapterId :: ChapterId, chapterEvent :: ChapterEvent }
-    deriving (Generic, ToJSON, FromJSON)
+    deriving (Generic, ToJSON, FromJSON, NFData)
 
 -- Chapter-level events (3rd level)
 data ChapterEvent
     = ChapterAdded { title :: Text, pageCount :: Int }
     | ChapterRemoved
     | ChapterTitleChanged { title :: Text }
-    deriving (Generic, ToJSON, FromJSON)
+    deriving (Generic, ToJSON, FromJSON, NFData)
 ```
 
 ### Benefits

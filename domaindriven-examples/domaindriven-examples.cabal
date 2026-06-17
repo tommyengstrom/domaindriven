@@ -1,7 +1,7 @@
 cabal-version: 3.12
 
 name:           domaindriven-examples
-version:        0.5.0
+version:        0.6.0
 synopsis:       Examples for domaindriven
 description:    Examples demonstrating the domaindriven library
 category:       Web
@@ -84,6 +84,7 @@ executable postgres-example
   build-depends:
       aeson
     , base
+    , deepseq
     , domaindriven-core
     , domaindriven
     , effectful
@@ -103,6 +104,7 @@ executable simple-example
   build-depends:
       aeson
     , base
+    , deepseq
     , domaindriven-core
     , domaindriven
     , effectful
@@ -122,6 +124,7 @@ executable fieldname-as-path-example
   build-depends:
       aeson
     , base
+    , deepseq
     , domaindriven-core
     , domaindriven
     , effectful
@@ -148,6 +151,7 @@ executable crm-example
       aeson
     , base
     , containers
+    , deepseq
     , domaindriven-core
     , domaindriven
     , effectful

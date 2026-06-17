@@ -8,3 +8,5 @@ dist-newstyle/
 .repro
 ai_docs
 .claude/settings.local.json
+.pc-logs
+ghcid.log

@@ -10,6 +10,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 module Main where
 
+import Control.DeepSeq (NFData)
 import Control.Monad (when)
 import Data.Aeson (FromJSON, ToJSON)
 import DomainDriven
@@ -40,7 +41,7 @@ data CounterModel = CounterModel
 data CounterEvent
     = CounterIncreased
     | CounterDecreased
-    deriving (Show, Generic, ToJSON, FromJSON)
+    deriving (Show, Generic, ToJSON, FromJSON, NFData)
 
 --------------------------------------------------------------------------------
 -- Define event handler

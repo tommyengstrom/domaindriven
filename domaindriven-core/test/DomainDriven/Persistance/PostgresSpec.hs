@@ -5,9 +5,12 @@ module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
-import Control.Exception (SomeException)
+import Control.DeepSeq (NFData (rnf))
+import Control.Exception (SomeException, displayException)
 import Control.Monad
-import Data.Aeson (FromJSON, ToJSON, Value)
+import Data.Aeson (FromJSON (parseJSON), ToJSON, Value, encode, object, withObject, (.:), (.=))
+import Data.ByteString (ByteString)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
 import Data.List qualified as L
 import Data.Set (Set)
@@ -24,10 +27,17 @@ import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
     ( LogEntry (..)
     , getEventTableName
+    , parseEventRows
     , queryEvents
     , writeEvents
     )
 import DomainDriven.Persistance.Postgres.Migration
+import DomainDriven.Persistance.Postgres.Types
+    ( EventNumber (..)
+    , EventRowOut (..)
+    , PersistanceError (..)
+    , quoteIdent
+    )
 import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
 import Streamly.Data.Stream.Prelude qualified as Stream
@@ -60,6 +70,7 @@ eventTable2 = MigrateUsing mig eventTable
 
 spec :: Spec
 spec = do
+    parallelParsingSpec
     aroundAll (setupPersistance noHook) streamingSpec
     aroundAll (setupPersistance noHook) $ do
         writeEventsSpec
@@ -90,7 +101,21 @@ data TestEvent
     = AddOne
     | SubtractOne
     | Reset
-    deriving (Show, Eq, Generic, FromJSON, ToJSON)
+    deriving (Show, Eq, Generic, FromJSON, ToJSON, NFData)
+
+data ForceProbeEvent = ForceProbeEvent ~String
+
+instance FromJSON ForceProbeEvent where
+    parseJSON = withObject "ForceProbeEvent" $ \o -> do
+        shouldThrowOnForce <- o .: "shouldThrowOnForce"
+        let payload =
+                if shouldThrowOnForce
+                    then error "force-probe"
+                    else "ok"
+        pure (ForceProbeEvent payload)
+
+instance NFData ForceProbeEvent where
+    rnf (ForceProbeEvent payload) = rnf payload
 
 applyTestEvent :: TestModel -> Stored TestEvent -> TestModel
 applyTestEvent m ev = case storedEvent ev of
@@ -122,6 +147,7 @@ setupPersistance postHook test = do
     test
         ( p
             { chunkSize = 2
+            , parseConcurrency = 2
             , logger = const $ pure () -- putStrLn . ("[DomainDriven] " <>) . show
             , updateHook = postHook
             }
@@ -139,7 +165,7 @@ setupPersistanceIndexed test = do
             <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
     pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
-    test (p{chunkSize = 2}, pool)
+    test (p{chunkSize = 2, parseConcurrency = 2}, pool)
 
 mkTestConn :: IO Connection
 mkTestConn =
@@ -162,6 +188,13 @@ dropEventTables conn = do
     traverse_
         (\t -> execute_ conn ("drop table \"" <> fromString (fromOnly t) <> "\""))
         testTables
+
+dropEventTableChain :: Connection -> EventTable -> IO ()
+dropEventTableChain conn et =
+    traverse_ dropTable (reverse $ tableNames et)
+  where
+    dropTable tableName =
+        void $ execute_ conn ("drop table if exists " <> quoteIdent tableName)
 
 tableNames :: EventTable -> [EventTableName]
 tableNames et = case et of
@@ -200,6 +233,71 @@ writeEventsSpec = describe "queryEvents" $ do
             writeEvents conn (getEventTableName eventTable) NoIndex storedEvs
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
+
+parallelParsingSpec :: Spec
+parallelParsingSpec = describe "parseEventRows" $ do
+    -- A small chunk size so that, with > parseTaskSize rows, the input is split
+    -- into many concurrent tasks (taskSize = chunkSize `div` workers). With
+    -- workers = 4 this yields ~64-row tasks, so these specs genuinely exercise
+    -- parallel parsing rather than collapsing to a single task.
+    let testChunkSize = 256 :: Int
+        eventCount = 1000 :: Int
+
+    it "preserves event order when parsing in parallel" $ do
+        let ts = UTCTime (fromGregorian 2020 10 15) 0
+            events = take eventCount $ cycle [AddOne, SubtractOne, Reset]
+            rows =
+                zipWith
+                    ( \eventNumber event ->
+                        EventRowOut nil (EventNumber eventNumber) ts (encodeStrict event)
+                    )
+                    [1 ..]
+                    events
+
+        serial <- parseEventRows @TestEvent 1 testChunkSize rows
+        parsedInParallel <- parseEventRows @TestEvent 4 testChunkSize rows
+
+        parsedInParallel `shouldBe` serial
+        fmap snd parsedInParallel `shouldBe` fmap (EventNumber . fromIntegral) [1 .. eventCount]
+        fmap (storedEvent . fst) parsedInParallel `shouldBe` events
+
+    it "throws the first parse error by input order" $ do
+        firstBadUuid <- V4.nextRandom
+        secondBadUuid <- V4.nextRandom
+        let ts = UTCTime (fromGregorian 2020 10 15) 0
+            invalidEvent = encodeStrict $ object ["invalid" .= (1 :: Int)]
+            -- Two bad rows in different concurrent tasks (positions 10 and 600,
+            -- taskSize ~64); the error from the earlier input position must win.
+            rows =
+                [ if i == 10
+                    then EventRowOut firstBadUuid (EventNumber i) ts invalidEvent
+                    else
+                        if i == 600
+                            then EventRowOut secondBadUuid (EventNumber i) ts invalidEvent
+                            else EventRowOut nil (EventNumber i) ts (encodeStrict AddOne)
+                | i <- [1 .. fromIntegral eventCount]
+                ]
+
+        parseEventRows @TestEvent 4 testChunkSize rows `shouldThrow` \case
+            EncodingError msg -> show firstBadUuid `L.isInfixOf` msg
+            ValueError _ -> False
+
+    it "fully forces parsed events before returning" $ do
+        let ts = UTCTime (fromGregorian 2020 10 15) 0
+            row =
+                EventRowOut
+                    nil
+                    1
+                    ts
+                    ( encodeStrict $
+                        object ["shouldThrowOnForce" .= True]
+                    )
+
+        parseEventRows @ForceProbeEvent 1 testChunkSize [row] `shouldThrow` \e ->
+            "force-probe" `L.isInfixOf` displayException (e :: SomeException)
+
+encodeStrict :: ToJSON a => a -> ByteString
+encodeStrict = LBS.toStrict . encode
 
 indexedSpec :: SpecWith (PostgresEvent Indexed TestModel TestEvent, Pool Connection)
 indexedSpec = describe "Indexed models" $ do
@@ -305,7 +403,9 @@ queryEventsSpec = describe "queryEvents" $ do
         event_numbers `shouldSatisfy` (\n -> and $ zipWith (>) (drop 1 n) n)
 
 postHookSpec
-    :: Chan () -> TVar (Set UUID) -> SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
+    :: Chan ()
+    -> TVar (Set UUID)
+    -> SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 postHookSpec hookDone processedEvents = describe "updateHook" $ do
     it "Ensure we start with empty TVar" $ \_ -> do
         events <- readTVarIO processedEvents
@@ -387,6 +487,88 @@ migrationSpec = describe "migrate1to1" $ do
                 prevExists `shouldBe` True
                 brokenExists `shouldBe` False
             _ -> fail "Unexpectedly lacking table versions!"
+
+    it "migrate1toManyWithState threads state in order and resets it per index" $ \(_p, pool) -> do
+        let statefulTable :: EventTable
+            statefulTable = InitialVersion "test_events_stateful"
+
+            migratedTable :: EventTable
+            migratedTable = MigrateUsing statefulMigration statefulTable
+
+            eventValue :: String -> Value
+            eventValue label = object ["label" .= label]
+
+            storedValue :: Value -> IO (Stored Value)
+            storedValue value =
+                Stored value (UTCTime (fromGregorian 2020 10 15) 0) <$> mkId
+
+            statefulMigration :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
+            statefulMigration prevName name conn =
+                migrate1toManyWithState @Indexed @Value @Value @Int
+                    conn
+                    prevName
+                    name
+                    ( \state stored ->
+                        let state' = state + 1
+                            migrated =
+                                stored
+                                    { storedEvent =
+                                        object
+                                            [ "sequence" .= state'
+                                            , "input" .= storedEvent stored
+                                            ]
+                                    }
+                         in (state', [migrated])
+                    )
+                    0
+
+        withResource pool (`dropEventTableChain` migratedTable)
+        _ <-
+            postgresWriteModelNoMigration
+                pool
+                (getEventTableName statefulTable)
+                (\model _ -> model)
+                ()
+                :: IO (PostgresEvent Indexed () Value)
+
+        aEvents <- traverse (storedValue . eventValue) ["a1", "a2"]
+        bEvents <- traverse (storedValue . eventValue) ["b1"]
+        withResource pool $ \conn -> do
+            void $
+                writeEvents
+                    conn
+                    (getEventTableName statefulTable)
+                    (Indexed "a")
+                    aEvents
+            void $
+                writeEvents
+                    conn
+                    (getEventTableName statefulTable)
+                    (Indexed "b")
+                    bEvents
+
+        _ <-
+            postgresWriteModel
+                pool
+                migratedTable
+                (\model _ -> model)
+                ()
+                :: IO (PostgresEvent Indexed () Value)
+
+        withResource pool $ \conn -> do
+            aMigrated <-
+                fmap (storedEvent . fst)
+                    <$> queryEvents @Value conn (getEventTableName migratedTable) (Indexed "a")
+            bMigrated <-
+                fmap (storedEvent . fst)
+                    <$> queryEvents @Value conn (getEventTableName migratedTable) (Indexed "b")
+
+            aMigrated
+                `shouldBe` [ object ["sequence" .= (1 :: Int), "input" .= eventValue "a1"]
+                           , object ["sequence" .= (2 :: Int), "input" .= eventValue "a2"]
+                           ]
+            bMigrated
+                `shouldBe` [object ["sequence" .= (1 :: Int), "input" .= eventValue "b1"]]
 
 migrationConcurrencySpec
     :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)

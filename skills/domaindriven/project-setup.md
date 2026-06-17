@@ -36,12 +36,12 @@ my-project/
 ### `<project>-events`
 Canonical, current event types. This is the only package you edit when changing events. Events live in a separate package so the migration package can import frozen snapshots at each version — without the split, you can't have two versions of the same module in scope at once.
 
-**Must not depend on the main service package.** Keep dependencies minimal — typically just `aeson`, `text`, `time`, and similar leaf libraries. The events package defines pure data types; it should not pull in Servant, Effectful, database libraries, or anything heavy.
+**Must not depend on the main service package.** Keep dependencies minimal — typically just `aeson`, `deepseq`, `text`, `time`, and similar leaf libraries. Every event type must derive `NFData`, so the package that defines current events needs a direct `deepseq` dependency. The events package defines pure data types; it should not pull in Servant, Effectful, database libraries, or anything heavy.
 
 **All types referenced by event field definitions live here too** — domain primitives, value objects, enums, newtypes. If an event field uses `Email` or `PhoneNumber`, those types belong in `<project>-events`, not in the main service package. Otherwise handlers end up wrapping/unwrapping shims to convert between "the service's `Email`" and "the event's `Email`", and migrations get harder because the frozen snapshots can't see the current domain types.
 
 ### `<project>-migrations`
-**Must not depend on the main service package.** Dependencies should be limited to `<project>-events`, `domaindriven-core`, `shape-coerce`, and basic libraries. Keeping this package lightweight ensures fast compilation of migration logic.
+**Must not depend on the main service package.** Dependencies should be limited to `<project>-events`, `domaindriven-core`, `shape-coerce`, `deepseq`, and basic libraries. Frozen event snapshots also derive `NFData`, so the migrations package needs `deepseq` when it owns those snapshot modules. Keeping this package lightweight ensures fast compilation of migration logic.
 
 Two kinds of modules:
 - **Event snapshots** (`EventN.*`): Frozen copies of `<project>-events` at version N. Created by copying all modules from `<project>-events` into an `EventN.*` namespace.

@@ -23,7 +23,15 @@ newtype Indexed = Indexed Text
     deriving stock (Show, Generic)
     deriving newtype (Eq, Ord, Hashable)
 
-class ReadModel p where
+-- | Read access to an event-sourced model.
+--
+-- The event type @'Event' p@ must have an 'NFData' instance. The Postgres
+-- backend uses it to fully force freshly parsed events on the parsing worker
+-- threads (rather than on the consuming thread); the requirement is imposed
+-- uniformly on every backend so that event types are interchangeable across
+-- backends. Deriving it is cheap — @deriving (Generic, NFData)@ for most
+-- event types.
+class NFData (Event p) => ReadModel p where
     type Model p :: Type
     type Event p :: Type
     type Index p :: Type
@@ -84,7 +92,7 @@ data AnyWriteModel model event index
         ) =>
         AnyWriteModel p
 
-instance ReadModel (AnyWriteModel model event index) where
+instance NFData event => ReadModel (AnyWriteModel model event index) where
     type Model (AnyWriteModel model event index) = model
     type Event (AnyWriteModel model event index) = event
     type Index (AnyWriteModel model event index) = index
@@ -93,7 +101,7 @@ instance ReadModel (AnyWriteModel model event index) where
     getEventList (AnyWriteModel p) = getEventList p
     getEventStream (AnyWriteModel p) = getEventStream p
 
-instance WriteModel (AnyWriteModel model event index) where
+instance NFData event => WriteModel (AnyWriteModel model event index) where
     postUpdateHook (AnyWriteModel p) = postUpdateHook p
     transactionalUpdate (AnyWriteModel p) = transactionalUpdate p
 

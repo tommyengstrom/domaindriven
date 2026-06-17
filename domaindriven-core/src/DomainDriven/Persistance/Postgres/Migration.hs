@@ -2,9 +2,11 @@
 
 module DomainDriven.Persistance.Postgres.Migration where
 
+import Control.DeepSeq (NFData)
 import Control.Monad
 import Data.Aeson
 import Data.Foldable
+import Data.IORef
 import Data.Int
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
@@ -43,7 +45,7 @@ migrateValue1to1' chunkSize conn prevTName tName f =
 
 migrate1to1
     :: forall index a b
-     . (FromJSON a, ToJSON b, IsPgIndex index)
+     . (FromJSON a, NFData a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -53,7 +55,7 @@ migrate1to1 = migrate1to1' @index defaultChunkSize
 
 migrate1to1'
     :: forall index a b
-     . (FromJSON a, ToJSON b, IsPgIndex index)
+     . (FromJSON a, NFData a, ToJSON b, IsPgIndex index)
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -65,7 +67,7 @@ migrate1to1' chunkSize conn prevTName tName f = do
 
 migrate1toMany
     :: forall index a b
-     . (FromJSON a, ToJSON b, IsPgIndex index)
+     . (FromJSON a, NFData a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -75,7 +77,7 @@ migrate1toMany = migrate1toMany' @index defaultChunkSize
 
 migrate1toMany'
     :: forall index a b
-     . (FromJSON a, ToJSON b, IsPgIndex index)
+     . (FromJSON a, NFData a, ToJSON b, IsPgIndex index)
     => ChunkSize
     -> Connection
     -> PreviousEventTableName
@@ -87,7 +89,7 @@ migrate1toMany' chunkSize conn prevTName tName f = do
 
 migrate1toManyWithState
     :: forall index a b state
-     . (FromJSON a, ToJSON b, IsPgIndex index)
+     . (FromJSON a, NFData a, ToJSON b, IsPgIndex index)
     => Connection
     -> PreviousEventTableName
     -> EventTableName
@@ -99,6 +101,7 @@ migrate1toManyWithState = migrate1toManyWithState' @index defaultChunkSize
 migrate1toManyWithState'
     :: forall index a b state
      . ( FromJSON a
+       , NFData a
        , ToJSON b
        , IsPgIndex index
        )
@@ -111,13 +114,20 @@ migrate1toManyWithState'
     -> IO ()
 migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
     indices <- fetchAllIndices conn prevTName :: IO [index]
-    for_ indices $ \i ->
+    for_ indices $ \i -> do
+        stateRef <- newIORef initialState
         Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt i)))
-            . Stream.unfoldMany Unfold.fromList
-            . fmap snd
-            $ Stream.scan (Fold.foldl' (f . fst) (initialState, []))
+            . Stream.unfoldEach Unfold.fromList
+            . Stream.mapM (mapMigratedEvents stateRef)
             $ fst <$> mkEventStream chunkSize conn (mkEventQuery prevTName i)
   where
+    mapMigratedEvents :: IORef state -> Stored a -> IO [Stored b]
+    mapMigratedEvents stateRef event = do
+        state <- readIORef stateRef
+        let (newState, events) = f state event
+        newState `seq` writeIORef stateRef newState
+        pure events
+
     writeIt :: index -> [Stored b] -> IO Int64
     writeIt index events =
         PG.executeMany

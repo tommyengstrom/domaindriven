@@ -2,6 +2,7 @@
 
 module DomainDriven.Persistance.ForgetfulInMemory where
 
+import Control.DeepSeq (NFData)
 import Data.Generics.Labels ()
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
@@ -37,7 +38,7 @@ data ForgetfulInMemory model index event = ForgetfulInMemory
     }
     deriving (Generic)
 
-instance Hashable index => ReadModel (ForgetfulInMemory model index event) where
+instance (Hashable index, NFData event) => ReadModel (ForgetfulInMemory model index event) where
     type Model (ForgetfulInMemory model index event) = model
     type Event (ForgetfulInMemory model index event) = event
     type Index (ForgetfulInMemory model index event) = index
@@ -55,7 +56,7 @@ instance Hashable index => ReadModel (ForgetfulInMemory model index event) where
             (const (pure ()))
             Stream.fromList
 
-instance Hashable index => WriteModel (ForgetfulInMemory model index event) where
+instance (Hashable index, NFData event) => WriteModel (ForgetfulInMemory model index event) where
     postUpdateHook p index model events = liftIO $ updateHook p index model events
     transactionalUpdate ff index evalCmd =
         bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
