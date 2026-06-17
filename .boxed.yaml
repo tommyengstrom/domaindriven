@@ -1,0 +1,17 @@
+# Boxed project config.
+# Edit the defaults below for this project.
+
+exposed-ports: []
+#   - 9000
+#   - 9001
+
+host-postgres:
+  enabled: true
+  port: 5432
+
+worktree:
+  after-create: ""
+#  after-create: |
+#     if [ -f "$BOXED_SOURCE_REPO/.env.local" ] && [ ! -e .env.local ]; then
+#       cp -p "$BOXED_SOURCE_REPO/.env.local" .env.local
+#     fi

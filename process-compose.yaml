@@ -1,0 +1,51 @@
+# Haskell graph:
+#   1-deps-cabal -> 2-cabal-build-all -> 3-cabal-test-all
+#                                      -> 3-cabal-benchmark-all
+#                -> 2-ghcid              <- live feedback
+version: "0.5"
+log_location: ./.pc-logs
+processes:
+  0-keepalive:
+    # Never exits, so process-compose stays open when one-shot processes finish
+    # or fail. This leaves logs available for inspection.
+    command: "bash -c 'while true; do sleep 3600; done'"
+    availability:
+      restart: always
+
+  1-deps-cabal:
+    command: "cabal update && cabal build all --only-dependencies --enable-tests --enable-benchmarks -O0"
+    availability:
+      restart: "no"
+
+  2-cabal-build-all:
+    command: "cabal build all --enable-tests --enable-benchmarks -O0"
+    availability:
+      restart: "no"
+    depends_on:
+      1-deps-cabal:
+        condition: process_completed_successfully
+
+  2-ghcid:
+    command: "./run-ghcid.sh"
+    is_tty: true
+    depends_on:
+      1-deps-cabal:
+        condition: process_completed_successfully
+
+  3-cabal-test-all:
+    command: "cabal test all -O0"
+    is_tty: true
+    availability:
+      restart: "no"
+    depends_on:
+      2-cabal-build-all:
+        condition: process_completed_successfully
+
+  3-cabal-benchmark-all:
+    command: "cabal bench all -O0"
+    is_tty: true
+    availability:
+      restart: "no"
+    depends_on:
+      2-cabal-build-all:
+        condition: process_completed_successfully
