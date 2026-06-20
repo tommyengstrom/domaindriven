@@ -117,7 +117,7 @@ migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
     for_ indices $ \i -> do
         stateRef <- newIORef initialState
         Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt i)))
-            . Stream.unfoldEach Unfold.fromList
+            . Stream.unfoldMany Unfold.fromList
             . Stream.mapM (mapMigratedEvents stateRef)
             $ fst <$> mkEventStream chunkSize conn (mkEventQuery prevTName i)
   where
