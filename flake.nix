@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        ghc = pkgs.haskell.compiler.ghc9103;
+        ghc = pkgs.haskell.compiler.ghc9124;
       in
       {
         devShells.default = pkgs.mkShell.override { stdenv = pkgs.stdenvNoCC; } {
@@ -22,9 +22,9 @@
             ghc
             pkgs.cabal-install
             pkgs.process-compose
-            pkgs.haskell.packages.ghc9103.ghcid
-            pkgs.haskell.packages.ghc9103.haskell-language-server
-            pkgs.haskell.packages.ghc9103.hspec-discover
+            pkgs.haskell.packages.ghc9124.ghcid
+            pkgs.haskell.packages.ghc9124.haskell-language-server
+            pkgs.haskell.packages.ghc9124.hspec-discover
             pkgs.zlib.dev
             pkgs.gmp.dev
             pkgs.xz.dev
