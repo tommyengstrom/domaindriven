@@ -11,20 +11,30 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         ghc = pkgs.haskell.compiler.ghc9124;
+        # Checks for transitive dev-tool dependencies can hang under GHC 9.12.4
+        # (notably QuickCheck's terminal test in Nix's headless sandbox). This
+        # affects only how Nix builds the shell tools; project tests still run
+        # through Cabal and process-compose.
+        haskellPackages = pkgs.haskell.packages.ghc9124.override {
+          overrides = hfinal: hprev: {
+            mkDerivation = args: hprev.mkDerivation (args // { doCheck = false; });
+          };
+        };
       in
       {
         devShells.default = pkgs.mkShell.override { stdenv = pkgs.stdenvNoCC; } {
-          nativeBuildInputs = [
-            pkgs.pkg-config
-          ];
-
           buildInputs = [
             ghc
             pkgs.cabal-install
+            pkgs.curl
+            pkgs.pkg-config
+            pkgs.libpq.pg_config
             pkgs.process-compose
-            pkgs.haskell.packages.ghc9124.ghcid
-            pkgs.haskell.packages.ghc9124.haskell-language-server
-            pkgs.haskell.packages.ghc9124.hspec-discover
+            haskellPackages.ghcid
+            # HLS is intentionally omitted: its GHC 9.12.4 profiling build
+            # currently triggers an upstream compiler panic.
+            haskellPackages.hspec-discover
+            haskellPackages.implicit-hie
             pkgs.zlib.dev
             pkgs.gmp.dev
             pkgs.xz.dev

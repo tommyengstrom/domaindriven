@@ -620,7 +620,7 @@ mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn q = do
     Stream.bracketIO
         (Cursor.declareCursor conn (getPgQuery q))
         Cursor.closeCursor
-        ( Stream.unfoldMany Unfold.fromList
+        ( Stream.unfoldEach Unfold.fromList
             . Stream.mapM (parseEventRows parseConcurrency chunkSize . toList)
             . Stream.unfoldrM step
         )
@@ -655,7 +655,7 @@ parseEventRows workers chunkSize rows = do
             then traverse parseRowResult rows
             else
                 Stream.fold Fold.toList
-                    . Stream.unfoldMany Unfold.fromList
+                    . Stream.unfoldEach Unfold.fromList
                     . Stream.parMapM
                         ( Stream.maxThreads workers
                             . Stream.eager True

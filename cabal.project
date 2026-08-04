@@ -3,8 +3,14 @@ packages:
   domaindriven-core/
   domaindriven/
   domaindriven-examples/
+  forked/servant-openapi3/
 
--- Use Stackage LTS 24.2 as the main package source
-import: https://www.stackage.org/lts-24.31/cabal.config
+-- Use Stackage Nightly 2026-07-31 as the main package source
+import: https://www.stackage.org/nightly-2026-07-31/cabal.config
 
-with-compiler: ghc-9.10.3
+with-compiler: ghc-9.12.4
+
+source-repository-package
+  type: git
+  location: https://github.com/eir-forsakring/servant-openapi3.git
+  tag: b30abbc3bc8392ac321c94ec55160b12ea3fc635

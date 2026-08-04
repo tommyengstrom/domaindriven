@@ -108,14 +108,18 @@ test-suite domaindriven-test
   build-tool-depends:
     hspec-discover:hspec-discover
   other-modules:
+    DomainDriven.FieldNameAsPathSpec
     DomainDriven.InMemorySpec
   hs-source-dirs:
     test
   build-depends:
-      base
+      aeson
+    , base
     , deepseq
     , domaindriven-core
     , domaindriven
     , effectful-core
     , effectful-plugin
     , hspec
+    , servant
+    , servant-openapi3

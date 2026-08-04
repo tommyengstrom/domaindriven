@@ -37,7 +37,7 @@ jobs:
             ~/.cabal/store
             ~/.cabal/packages
             dist-newstyle
-          key: ${{ runner.os }}-cabal-${{ hashFiles('cabal.project', '**/*.cabal') }}
+          key: ${{ runner.os }}-cabal-${{ hashFiles('flake.lock', 'cabal.project', '**/*.cabal') }}
           restore-keys: |
             ${{ runner.os }}-cabal-
 
