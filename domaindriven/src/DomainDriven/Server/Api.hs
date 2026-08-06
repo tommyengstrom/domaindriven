@@ -110,6 +110,7 @@ instance
     , ToSchema (JsonObject fields)
     , ToSchema t
     , KnownSymbol name
+    , IsOptional t
     )
     => ToSchema (JsonObject ('NamedField name t ': fields))
     where
