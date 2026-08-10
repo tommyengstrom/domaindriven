@@ -27,6 +27,7 @@
             ghc
             pkgs.cabal-install
             pkgs.curl
+            pkgs.git
             pkgs.pkg-config
             pkgs.libpq.pg_config
             pkgs.process-compose

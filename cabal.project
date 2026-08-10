@@ -3,10 +3,9 @@ packages:
   domaindriven-core/
   domaindriven/
   domaindriven-examples/
-  forked/servant-openapi3/
 
--- Use Stackage Nightly 2026-07-31 as the main package source
-import: https://www.stackage.org/nightly-2026-07-31/cabal.config
+-- Use Stackage Nightly 2026-08-10 as the main package source
+import: https://www.stackage.org/nightly-2026-08-10/cabal.config
 
 with-compiler: ghc-9.12.4
 
