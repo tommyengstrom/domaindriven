@@ -1,7 +1,7 @@
 cabal-version: 3.12
 
 name:           domaindriven-core
-version:        0.6.0
+version:        0.6.1
 synopsis:       Batteries included event sourcing and CQRS
 description:    Please see the README on GitHub at <https://github.com/tommyengstrom/domaindriven#readme>
 category:       Web

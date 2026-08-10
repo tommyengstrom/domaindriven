@@ -728,14 +728,14 @@ refreshModel pgt index = withExclusiveLock pgt index $ do
     pure (newModel, lastNewEventNo)
 
 exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
-exclusiveLock (OngoingTransaction connR _ _) _etName index = do
+exclusiveLock (OngoingTransaction connR _ _) etName index = do
     -- We use advisory locks in favor of row level locks as we would not have the ability
     -- to lock an index before the first event is written with row level locks.
     void $
         ( query
             (Pool.resource connR)
             "SELECT pg_advisory_xact_lock(?)"
-            (Only (fromIntegral (hash index) :: Int64))
+            (Only (fromIntegral (hash (etName, index)) :: Int64))
             :: IO [Only ()]
         )
 

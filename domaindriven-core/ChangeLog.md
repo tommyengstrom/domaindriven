@@ -1,5 +1,14 @@
 # Changelog for domaindriven
 
+## 0.6.1
+
+- Switched the build from Stackage LTS 24.31 to Nightly 2026-08-10 with GHC
+  9.12.4.
+- PostgreSQL advisory lock keys now include the resolved event table name as
+  well as the aggregate index, so equal indices in unrelated tables no longer
+  block each other. Because this changes the lock-key protocol, all writers
+  sharing a database should be upgraded together.
+
 ## 0.6.0
 
 - **Breaking:** event types now require an `NFData` instance. This is enforced

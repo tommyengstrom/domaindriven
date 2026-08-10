@@ -6,9 +6,18 @@ module DomainDriven.Persistance.PostgresSpec where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.DeepSeq (NFData (rnf))
-import Control.Exception (SomeException, displayException)
+import Control.Exception (SomeException, bracket, bracket_, displayException)
 import Control.Monad
-import Data.Aeson (FromJSON (parseJSON), ToJSON, Value, encode, object, withObject, (.:), (.=))
+import Data.Aeson
+    ( FromJSON (parseJSON)
+    , ToJSON
+    , Value
+    , encode
+    , object
+    , withObject
+    , (.:)
+    , (.=)
+    )
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
@@ -68,6 +77,12 @@ eventTable2 = MigrateUsing mig eventTable
     mig :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
     mig prevName name conn = migrate1to1 @NoIndex @Value conn prevName name id
 
+lockEventTable1 :: EventTable
+lockEventTable1 = InitialVersion "test_lock_events_1"
+
+lockEventTable2 :: EventTable
+lockEventTable2 = InitialVersion "test_lock_events_2"
+
 spec :: Spec
 spec = do
     parallelParsingSpec
@@ -94,6 +109,7 @@ spec = do
     around (setupPersistance noHook) migrationConcurrencySpec
     around (setupPersistance noHook) loggingSpec
     around setupPersistanceIndexed indexedSpec
+    around setupTableScopedLocks tableScopedLockSpec
 
 type TestModel = Int
 
@@ -166,6 +182,32 @@ setupPersistanceIndexed test = do
     pool <- newPool poolCfg
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2, parseConcurrency = 2}, pool)
+
+setupTableScopedLocks
+    :: ( ( PostgresEvent NoIndex TestModel TestEvent
+         , PostgresEvent NoIndex TestModel TestEvent
+         )
+         -> IO ()
+       )
+    -> IO ()
+setupTableScopedLocks test =
+    bracket (simplePool mkLockTimeoutConn) destroyAllResources $ \pool ->
+        bracket_ cleanupTables cleanupTables $ do
+            p1 <- postgresWriteModel pool lockEventTable1 applyTestEvent 0
+            p2 <- postgresWriteModel pool lockEventTable2 applyTestEvent 0
+            test (p1, p2)
+  where
+    mkLockTimeoutConn :: IO Connection
+    mkLockTimeoutConn = do
+        conn <- mkTestConn
+        void $ execute_ conn "set lock_timeout = '1s'"
+        pure conn
+
+    cleanupTables :: IO ()
+    cleanupTables = bracket mkTestConn close $ \conn ->
+        traverse_
+            (dropEventTableChain conn)
+            [lockEventTable1, lockEventTable2]
 
 mkTestConn :: IO Connection
 mkTestConn =
@@ -356,6 +398,40 @@ indexedSpec = describe "Indexed models" $ do
         models `shouldSatisfy` (== [2, 4 .. 40]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
+
+tableScopedLockSpec
+    :: SpecWith
+        ( PostgresEvent NoIndex TestModel TestEvent
+        , PostgresEvent NoIndex TestModel TestEvent
+        )
+tableScopedLockSpec = describe "Advisory locks" $ do
+    it "Do not block the same index in different event tables" $ \(p1, p2) -> do
+        firstCommandStarted <- newChan
+        releaseFirstCommand <- newChan
+
+        let firstCommand :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            firstCommand _ = do
+                writeChan firstCommandStarted ()
+                readChan releaseFirstCommand
+                pure (id, [AddOne])
+
+            runSecondCommand :: IO (Either SqlError TestModel)
+            runSecondCommand = do
+                readChan firstCommandStarted
+                result <- try @IO @SqlError $ runCmd p2 NoIndex $ \_ ->
+                    pure (id, [AddOne])
+                writeChan releaseFirstCommand ()
+                pure result
+
+        (firstResult, secondResult) <-
+            concurrently
+                (runCmd p1 NoIndex firstCommand)
+                runSecondCommand
+
+        firstResult `shouldBe` 1
+        case secondResult of
+            Right secondModel -> secondModel `shouldBe` 1
+            Left err -> expectationFailure $ "Second table lock was blocked: " <> show err
 
 streamingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 streamingSpec = describe "steaming" $ do
