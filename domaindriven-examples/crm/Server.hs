@@ -13,7 +13,6 @@ import Command
 import Data.Map.Strict qualified as Map
 import DomainDriven
 import DomainDriven.FieldNameAsPath (FieldNameAsPathServer (..))
-import DomainDriven.Persistance.Class (mkId)
 import Effectful hiding ((:>))
 import Effectful qualified
 import Effectful.Error.Static (Error, throwError)
@@ -32,7 +31,7 @@ type Effects es =
     ( Projection CrmDomain Effectful.:> es
     , Aggregate CrmDomain Effectful.:> es
     , Error ServerError Effectful.:> es
-    , IOE Effectful.:> es
+    , GenId Effectful.:> es
     )
 
 --------------------------------------------------------------------------------
@@ -114,7 +113,7 @@ customersServer =
             CrmModel{customers} <- getModel @CrmDomain
             pure $ Map.elems customers
         , create = \cmd -> runTransaction @CrmDomain \_ -> do
-            cid <- CustomerId <$> liftIO mkId
+            cid <- CustomerId <$> genId
             let evts = [wrapCustE cid CustomerCreated{name = cmd.name, email = cmd.email}]
             pure (\m' -> lookupCustomerPure cid m', evts)
         , detail = \cid ->
@@ -147,7 +146,7 @@ ordersServer cid =
             cust <- lookupCustomer cid m
             pure $ Map.elems cust.orders
         , create = \cmd -> do
-            oid <- OrderId <$> liftIO mkId
+            oid <- OrderId <$> genId
             _ <-
                 withCustomer cid \_cust ->
                     pure [wrapOrdE cid oid OrderCreated{description = cmd.description}]
@@ -174,7 +173,7 @@ orderServer cid oid =
             _ <- withOrder cid oid \_ _ -> pure [wrapOrdE cid oid OrderRemoved]
             pure NoContent
         , addItem = \cmd -> do
-            iid <- ItemId <$> liftIO mkId
+            iid <- ItemId <$> genId
             withOrder cid oid \_ _ ->
                 pure
                     [ wrapOrdE

@@ -7,6 +7,7 @@ How to wire up effects, backends, configuration, and tests.
 Define an `Effects` type alias constraining the effect stack. Import Effectful's `(:>)` qualified to avoid collision with Servant's `(:>)`:
 
 ```haskell
+import DomainDriven (Aggregate, GenId, Projection, genId)
 import Effectful qualified
 import Effectful.Error.Static (Error)
 
@@ -14,7 +15,7 @@ type Effects es =
     ( Projection LibraryDomain Effectful.:> es
     , Aggregate LibraryDomain Effectful.:> es
     , Error ServerError Effectful.:> es
-    , IOE Effectful.:> es
+    , GenId Effectful.:> es
     )
 ```
 
@@ -22,7 +23,15 @@ Then use it in handler signatures:
 
 ```haskell
 myHandler :: Effects es => LibraryApi (AsServerT (Eff es))
+
+createBook :: Effects es => CreateBook -> Eff es Book
+createBook cmd = do
+    bid <- BookId <$> genId
+    runTransaction @LibraryDomain \_model ->
+        pure (lookupBookPure bid, [wrapBookE bid BookAdded{title = cmd.title, author = cmd.author}])
 ```
+
+`GenId` keeps application ID generation testable without exposing `IOE` throughout handler code. The concrete runner stack still contains `IOE`, because the `Aggregate`, `Projection`, and production `GenId` interpreters perform IO.
 
 ## Effect Stack Ordering
 
@@ -35,12 +44,14 @@ type AppM = Eff
      , Aggregate LibraryDomain
      , Error ServerError          -- must be above domain effects so handlers can throw
      , Reader.Reader Config       -- available to all effects above
+     , GenId                      -- interpreted at the outer IO boundary
      , IOE                        -- innermost: always at the bottom
      ]
 
 -- Interpreter chain (innermost first):
 runEffectStack m =
     runEff                            -- IOE
+        . runGenId                    -- GenId
         . Reader.runReader config     -- Reader
         . runErrorNoCallStack         -- Error
         . runAggregate backend        -- Aggregate
@@ -48,7 +59,10 @@ runEffectStack m =
         $ m
 ```
 
-**Key rule:** `Error ServerError` must be peeled *after* domain effects so that transaction callbacks can throw servant errors.
+**Key rules:**
+
+- `Error ServerError` must be peeled *after* domain effects so that transaction callbacks can throw servant errors.
+- Keep `IOE` in the concrete `AppM` stack, but omit it from application `Effects` constraints unless a handler performs unrelated IO directly. Interpret `GenId` with `runGenId` immediately before `runEff`.
 
 ## `AnyWriteModel` — Backend Polymorphism
 
@@ -89,6 +103,7 @@ runEffectStack :: AnyWriteModel MyModel MyEvent NoIndex -> Config -> AppM a -> H
 runEffectStack (AnyWriteModel backend) config m = do
     result <- liftIO
         $ runEff
+        . runGenId
         . Reader.runReader config
         . runErrorNoCallStack @ServerError
         . runAggregate backend
@@ -105,21 +120,24 @@ runEffectStack (AnyWriteModel backend) config m = do
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)
 
 runTest
-    :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, IOE] a
+    :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, GenId, IOE] a
     -> IO (Either ServerError a)
 runTest action = do
     backend <- createForgetful applyEvent initialModel
     runEff
+        . runGenId
         . runErrorNoCallStack @ServerError
         . runAggregate backend
         . runProjection backend
         $ action
 
 runTestOrFail
-    :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, IOE] a
+    :: Eff '[Projection MyDomain, Aggregate MyDomain, Error ServerError, GenId, IOE] a
     -> IO a
 runTestOrFail action = runTest action >>= either (fail . show) pure
 ```
+
+For deterministic tests, replace `runGenId` with `runGenIdWith (pure fixedUuid)`. The supplied action runs once per `genId` request, so it can also be backed by `State` to provide a sequence of IDs.
 
 ### WAI integration test (with hspec)
 
@@ -145,19 +163,20 @@ When your app has multiple domains (e.g. EditorDomain + GameDomain), put **one**
 -- Servant monad carries EditorDomain only:
 type AppM = Eff
     '[ Projection EditorDomain, Aggregate EditorDomain
-     , Error ServerError, Reader.Reader Config, IOE
+     , Error ServerError, Reader.Reader Config, GenId, IOE
      ]
 
 -- GameDomain runs its own stack where needed (e.g. WebSocket handler):
 case config.gameBackend of
     AnyWriteModel backend ->
         runEff
+            . runGenId
             . runAggregate @_ @GameDomain backend
             . runProjection @_ @GameDomain backend
             $ gameLoop
 ```
 
-Each domain gets its own `type XDomain = Domain XModel XEvent XIndex`.
+Each domain gets its own `type XDomain = Domain XModel XEvent XIndex`. Include and interpret `GenId` in a standalone stack only when that action generates application IDs; every concrete backend stack still retains `IOE`.
 
 ## Bootstrap / Seed Data
 

@@ -1,5 +1,7 @@
 module DomainDriven.Interpreter
     ( runAggregate
+    , runGenId
+    , runGenIdWith
     , runProjection
     , runSubAggregateI
     , runSubProjectionI
@@ -12,12 +14,33 @@ module DomainDriven.Interpreter
 import Data.Maybe (mapMaybe)
 import DomainDriven.Aggregate
 import DomainDriven.Domain
+import DomainDriven.GenId
 import DomainDriven.Projection
 import DomainDriven.Persistance.Class (NoIndex (..), ReadModel, WriteModel)
 import DomainDriven.Persistance.Class qualified as P
+import Data.UUID (UUID)
 import Effectful
 import Effectful.Dispatch.Dynamic
 import Prelude
+
+-- | Run 'GenId' using the core random UUID generator.
+runGenId
+    :: IOE :> es
+    => Eff (GenId : es) a
+    -> Eff es a
+runGenId = runGenIdWith $ liftIO P.mkId
+
+-- | Run 'GenId' using a caller-provided UUID action.
+--
+-- The action is evaluated once for every call to 'genId', which allows tests
+-- to supply fixed or stateful deterministic generators without adding 'IOE'
+-- to application code.
+runGenIdWith
+    :: Eff es UUID
+    -> Eff (GenId : es) a
+    -> Eff es a
+runGenIdWith generate = interpret $ \_ -> \case
+    GenId -> generate
 
 -- | Run the 'Projection' effect using any 'ReadModel' backend.
 runProjection
