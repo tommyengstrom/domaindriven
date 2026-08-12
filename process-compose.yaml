@@ -26,7 +26,19 @@ processes:
         condition: process_completed_successfully
 
   2-ghcid:
-    command: "./run-ghcid.sh"
+    command: |
+      set --
+      while IFS= read -r cabal_file; do
+        [ -n "$cabal_file" ] && set -- "$@" --restart "$cabal_file"
+      done <<EOF
+      $(git ls-files --cached --others --exclude-standard -- '*.cabal')
+      EOF
+
+      exec ghcid \
+        --command "cabal v2-repl all:libs all:exes all:tests all:benchmarks --enable-multi-repl" \
+        --restart "cabal.project" \
+        "$@" \
+        -o "ghcid.log"
     is_tty: true
     depends_on:
       1-deps-cabal:

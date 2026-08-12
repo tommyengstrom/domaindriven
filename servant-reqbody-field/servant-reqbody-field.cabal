@@ -1,0 +1,140 @@
+cabal-version: 3.12
+
+name:           servant-reqbody-field
+version:        0.1.0.0
+tested-with:    GHC == 9.12.4
+synopsis:       Decode individual fields from a shared Servant JSON request body
+description:    A Servant combinator for projecting handler arguments from fields of one JSON object request body.
+category:       Web
+homepage:       https://github.com/tommyengstrom/domaindriven#readme
+bug-reports:    https://github.com/tommyengstrom/domaindriven/issues
+author:         Tommy Engström
+maintainer:     tommy@tommyengstrom.com
+copyright:      2026 Tommy Engström
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/tommyengstrom/domaindriven
+  subdir: servant-reqbody-field
+
+common default_opts
+  default-language: Haskell2010
+  default-extensions:
+      DataKinds
+      DeriveGeneric
+      EmptyDataDecls
+      FlexibleContexts
+      FlexibleInstances
+      GeneralizedNewtypeDeriving
+      ImportQualifiedPost
+      KindSignatures
+      LambdaCase
+      MultiParamTypeClasses
+      OverloadedStrings
+      ScopedTypeVariables
+      TypeApplications
+      TypeFamilies
+      TypeOperators
+      UndecidableInstances
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wincomplete-patterns
+    -Wunused-packages
+    -Wno-missing-import-lists
+
+library
+  import: default_opts
+  exposed-modules:
+      Servant.ReqBodyField
+  hs-source-dirs:
+      src
+  build-depends:
+      aeson >=2.2.5.0 && <2.3
+    , base >=4.21.2.0 && <4.22
+    , bytestring >=0.12.2.0 && <0.13
+    , http-media >=0.8.1.1 && <0.9
+    , http-types >=0.12.5 && <0.13
+    , lens >=5.3.6 && <5.4
+    , openapi3 >=3.2.5 && <3.3
+    , servant >=0.20.3.0 && <0.21
+    , servant-client-core >=0.20.3.0 && <0.21
+    , servant-openapi3 >=2.0.2.0 && <2.1
+    , servant-server >=0.20.3.0 && <0.21
+    , text >=2.1.4 && <2.2
+    , vault >=0.3.2.0 && <0.4
+    , wai >=3.2.5 && <3.3
+
+test-suite servant-reqbody-field-test
+  import: default_opts
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs:
+      test
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  build-tool-depends:
+    hspec-discover:hspec-discover >=2.11.17 && <2.12
+  other-modules:
+      Servant.ReqBodyField.ClientSpec
+      Servant.ReqBodyField.LinkSpec
+      Servant.ReqBodyField.OpenApiSpec
+      Servant.ReqBodyField.ServerSpec
+  build-depends:
+      aeson >=2.2.5.0 && <2.3
+    , async >=2.2.6 && <2.3
+    , base >=4.21.2.0 && <4.22
+    , bytestring >=0.12.2.0 && <0.13
+    , free >=5.2 && <5.3
+    , hspec >=2.11.17 && <2.12
+    , http-media >=0.8.1.1 && <0.9
+    , http-types >=0.12.5 && <0.13
+    , lens >=5.3.6 && <5.4
+    , openapi3 >=3.2.5 && <3.3
+    , servant >=0.20.3.0 && <0.21
+    , servant-client-core >=0.20.3.0 && <0.21
+    , servant-openapi3 >=2.0.2.0 && <2.1
+    , servant-reqbody-field
+    , servant-server >=0.20.3.0 && <0.21
+    , text >=2.1.4 && <2.2
+    , transformers >=0.6.3.0 && <0.7
+    , wai >=3.2.5 && <3.3
+    , wai-extra >=3.1.18 && <3.2
+
+benchmark reqbody-field-comparison
+  import: default_opts
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs:
+      benchmark
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+  build-depends:
+      aeson >=2.2.5.0 && <2.3
+    , base >=4.21.2.0 && <4.22
+    , bytestring >=0.12.2.0 && <0.13
+    , criterion >=1.6.5 && <1.7
+    , free >=5.2 && <5.3
+    , http-media >=0.8.1.1 && <0.9
+    , http-types >=0.12.5 && <0.13
+    , servant >=0.20.3.0 && <0.21
+    , servant-client-core >=0.20.3.0 && <0.21
+    , servant-reqbody-field
+    , servant-server >=0.20.3.0 && <0.21
+    , text >=2.1.4 && <2.2
+    , wai >=3.2.5 && <3.3
+    , wai-extra >=3.1.18 && <3.2

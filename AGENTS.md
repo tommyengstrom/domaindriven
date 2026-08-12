@@ -4,19 +4,21 @@
 
 Use `process-compose` for the normal build, test, benchmark, and live-feedback workflow in this repository.
 
-Before starting a new `process-compose` session, always try to attach to an already running session:
+Check whether `process-compose` is already running before starting work:
 
 ```bash
-process-compose attach
+process-compose list -owide
 ```
 
-Only start a new session when attaching fails because no session is running:
+When the session needs to be restarted, bring it down; it will restart automatically:
 
 ```bash
-process-compose up
+process-compose down
 ```
 
 The configured process graph lives in `process-compose.yaml`. It includes dependency setup, full builds, tests, benchmarks, and `ghcid` live feedback.
+
+Prefer relying on `ghcid` for compiler feedback.
 
 Useful checks:
 
