@@ -110,6 +110,7 @@ test-suite domaindriven-test
   other-modules:
     DomainDriven.FieldNameAsPathSpec
     DomainDriven.InMemorySpec
+    DomainDriven.InterpreterSpec
   hs-source-dirs:
     test
   build-depends:
