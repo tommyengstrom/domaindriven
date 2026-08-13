@@ -20,7 +20,7 @@
 module Main where
 
 import Api (CustomersApi)
-import DomainDriven (Aggregate, NoIndex, Projection, runAggregate, runProjection)
+import DomainDriven (Aggregate, GenId, NoIndex, Projection, runAggregate, runGenId, runProjection)
 import DomainDriven.FieldNameAsPath (FieldNameAsPathApi, FieldNameAsPathServer (..))
 import DomainDriven.Persistance.ForgetfulInMemory (ForgetfulInMemory, createForgetful)
 import Effectful hiding ((:>))
@@ -49,6 +49,7 @@ mkApp backend =
             '[ Projection CrmDomain
              , Aggregate CrmDomain
              , Error ServerError
+             , GenId
              , IOE
              ]
             a
@@ -57,6 +58,7 @@ mkApp backend =
         a <-
             liftIO
                 . runEff
+                . runGenId
                 . runErrorNoCallStack @ServerError
                 . runAggregate backend
                 $ runProjection backend m

@@ -76,6 +76,7 @@ library
       DomainDriven
       DomainDriven.Aggregate
       DomainDriven.Domain
+      DomainDriven.GenId
       DomainDriven.Interpreter
       DomainDriven.Projection
       DomainDriven.FieldNameAsPath
@@ -96,6 +97,7 @@ library
     , servant-openapi3
     , servant-server
     , text
+    , uuid
 
 test-suite domaindriven-test
   import: shared_opts
@@ -109,6 +111,7 @@ test-suite domaindriven-test
     hspec-discover:hspec-discover
   other-modules:
     DomainDriven.FieldNameAsPathSpec
+    DomainDriven.GenIdSpec
     DomainDriven.InMemorySpec
     DomainDriven.InterpreterSpec
   hs-source-dirs:
@@ -124,3 +127,4 @@ test-suite domaindriven-test
     , hspec
     , servant
     , servant-openapi3
+    , uuid

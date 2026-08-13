@@ -76,7 +76,8 @@ backend <- createForgetful applyEvent emptyLibraryModel
 pool <- simplePool' connectInfo
 backend <- postgresWriteModel pool eventTable applyEvent emptyLibraryModel
 
--- 6. Handlers use withX pattern + Effects alias (see handler-patterns.md)
+-- 6. Handlers use withX pattern + Effects alias; use genId for entity IDs
+--    instead of requiring IOE (see handler-patterns.md and app-wiring.md)
 -- 7. Wire effect stack (see app-wiring.md)
 ```
 
@@ -128,6 +129,12 @@ data Aggregate (domain :: Type) :: Effect where
 data Projection domain :: Effect where
     GetModelI    :: DomainIndex domain -> Projection domain m (DomainModel domain)
     GetEventListI :: DomainIndex domain -> Projection domain m [Stored (DomainEvent domain)]
+
+-- Application/entity ID generation without exposing IOE to handlers:
+data GenId :: Effect where
+    GenId :: GenId m UUID
+
+genId :: GenId :> es => Eff es UUID
 ```
 
 ## Transaction Conventions
@@ -238,10 +245,25 @@ See [handler-patterns.md](handler-patterns.md) for:
 - Create with optional events
 - Validation (`validateNotBlank`, `blankToNothing`)
 
+### Application ID generation
+
+Handlers that allocate application/entity IDs depend on `GenId`, not `IOE`, and call `genId` directly:
+
+```haskell
+createBook :: Effects es => CreateBook -> Eff es Book
+createBook cmd = do
+    bid <- BookId <$> genId
+    runTransaction @LibraryDomain \_model ->
+        pure (lookupBookPure bid, [wrapBookE bid BookAdded{title = cmd.title, author = cmd.author}])
+```
+
+Interpret `GenId` with `runGenId` only at the outer IO boundary. Persistence-generated stored-event UUIDs remain a backend concern and do not use this application effect.
+
 ## Application Wiring
 
 See [app-wiring.md](app-wiring.md) for:
 - `Effects` type alias with qualified `Effectful.:>`
+- `GenId` in application constraints and `runGenId` at the IO boundary
 - Effect stack ordering (type list vs interpreter chain)
 - `AnyWriteModel` backend polymorphism
 - Config and `runEffectStack`
@@ -279,9 +301,8 @@ For multi-package project setup with compile-time migration safety, see [project
 ## Imports
 
 ```haskell
-import DomainDriven                                        -- re-exports Aggregate, Projection, interpreters, Stored, NoIndex, AnyWriteModel
+import DomainDriven                                        -- re-exports Aggregate, Projection, GenId, genId, runGenId, Stored, NoIndex, AnyWriteModel
 import DomainDriven.FieldNameAsPath (ApiTagFromLabel, FieldNameAsPathApi, FieldNameAsPathServer(..))
-import DomainDriven.Persistance.Class (mkId)               -- UUID generation
 import DomainDriven.Persistance.ForgetfulInMemory (createForgetful)  -- testing backend
 import DomainDriven.Persistance.Postgres (postgresWriteModel, simplePool')  -- production backend
 
