@@ -9,6 +9,13 @@ import Data.ByteString.Builder qualified as Builder
 import Data.Kind
 import Data.OpenApi (OpenApi, prependPath)
 import Data.Text qualified as Text
+import DomainDriven.Aggregate (Aggregate)
+import DomainDriven.Domain
+import DomainDriven.Interpreter
+import DomainDriven.Projection (Projection)
+import DomainDriven.Persistance.Class (NoIndex)
+import Effectful (Eff)
+import Effectful qualified
 import GHC.Generics qualified as GHC
 import GHC.TypeLits
 import Generics.SOP
@@ -59,6 +66,130 @@ newtype
 deriving newtype instance
     GHC.Generic (mkServerRecord (AsServerT m))
     => GHC.Generic (FieldNameAsPathServer mkServerRecord m)
+
+-- | Hoist a raw Servant Generic server and wrap it exactly once for use with
+-- 'FieldNameAsPathApi'.
+--
+-- 'NamedRoutes' is used only as the structural witness that teaches Servant how
+-- to traverse the raw Generic record. The mounted API remains
+-- 'FieldNameAsPathApi', so record field names still become path segments.
+-- Existing nested @FieldNameAsPathServer@ fields are preserved.
+-- Aggregate-only child servers can compose the lower-level interpreter directly:
+--
+-- @
+-- hoistFieldNameAsPathServer
+--     (runSubAggregate @ChildDomain @ParentDomain projectModel injectEvent)
+--     childWriteServer
+-- @
+hoistFieldNameAsPathServer
+    :: forall api m n
+     . HasServer (NamedRoutes api) '[]
+    => (forall x. m x -> n x)
+    -> api (AsServerT m)
+    -> FieldNameAsPathServer api n
+hoistFieldNameAsPathServer transform =
+    FieldNameAsPathServer
+        . hoistServer (Proxy @(NamedRoutes api)) transform
+
+-- | Mount a read/write child Generic server through a parent domain.
+--
+-- The input is the raw child record, not a @FieldNameAsPathServer@. The result
+-- is wrapped once and can be placed directly in a parent record field whose API
+-- is 'FieldNameAsPathApi'. Only @mapIndex@ sees the child index: it selects the
+-- parent persistence index (and therefore the lock index for locking backends),
+-- while all mapped indexes share the same fixed child view.
+zoomServerI
+    :: forall sub parent api es
+     . ( HasServer (NamedRoutes api) '[]
+       , Aggregate parent Effectful.:> es
+       , Projection parent Effectful.:> es
+       )
+    => (DomainIndex sub -> DomainIndex parent)
+    -> (DomainModel parent -> DomainModel sub)
+    -> (DomainEvent sub -> DomainEvent parent)
+    -> (DomainEvent parent -> Maybe (DomainEvent sub))
+    -> api (AsServerT (Eff (Aggregate sub : Projection sub : es)))
+    -> FieldNameAsPathServer api (Eff es)
+zoomServerI mapIndex projectModel injectEvent projectEvent =
+    hoistFieldNameAsPathServer @api
+        ( runSubDomainI @sub @parent
+            mapIndex
+            projectModel
+            injectEvent
+            projectEvent
+        )
+
+-- | @NoIndex@ specialization of 'zoomServerI'.
+--
+-- For example, a child server exposing a billing model while retaining the
+-- parent's wider event language can be mounted with:
+--
+-- @
+-- zoomServer @BillingDomain @ClaimDomain
+--     claimBilling
+--     id
+--     Just
+--     billingServer
+-- @
+zoomServer
+    :: forall sub parent api es
+     . ( HasServer (NamedRoutes api) '[]
+       , DomainIndex sub ~ NoIndex
+       , DomainIndex parent ~ NoIndex
+       , Aggregate parent Effectful.:> es
+       , Projection parent Effectful.:> es
+       )
+    => (DomainModel parent -> DomainModel sub)
+    -> (DomainEvent sub -> DomainEvent parent)
+    -> (DomainEvent parent -> Maybe (DomainEvent sub))
+    -> api (AsServerT (Eff (Aggregate sub : Projection sub : es)))
+    -> FieldNameAsPathServer api (Eff es)
+zoomServer projectModel injectEvent projectEvent =
+    hoistFieldNameAsPathServer @api
+        (runSubDomain @sub @parent projectModel injectEvent projectEvent)
+
+-- | Mount a read-only child Generic server through a parent 'Projection'.
+--
+-- This variant does not require a parent 'Aggregate' or a dummy event injector.
+-- It still projects both model reads and complete event-history reads.
+zoomProjectionServerI
+    :: forall sub parent api es
+     . ( HasServer (NamedRoutes api) '[]
+       , Projection parent Effectful.:> es
+       )
+    => (DomainIndex sub -> DomainIndex parent)
+    -> (DomainModel parent -> DomainModel sub)
+    -> (DomainEvent parent -> Maybe (DomainEvent sub))
+    -> api (AsServerT (Eff (Projection sub : es)))
+    -> FieldNameAsPathServer api (Eff es)
+zoomProjectionServerI mapIndex projectModel projectEvent =
+    hoistFieldNameAsPathServer @api
+        (runSubProjectionI @sub @parent mapIndex projectModel projectEvent)
+
+-- | @NoIndex@ specialization of 'zoomProjectionServerI'.
+--
+-- A projection-only mount needs no aggregate effect:
+--
+-- @
+-- zoomProjectionServer @BillingDomain @ClaimDomain
+--     claimBilling
+--     Just
+--     billingReadServer
+-- @
+zoomProjectionServer
+    :: forall sub parent api es
+     . ( HasServer (NamedRoutes api) '[]
+       , DomainIndex sub ~ NoIndex
+       , DomainIndex parent ~ NoIndex
+       , Projection parent Effectful.:> es
+       )
+    => (DomainModel parent -> DomainModel sub)
+    -> (DomainEvent parent -> Maybe (DomainEvent sub))
+    -> api (AsServerT (Eff (Projection sub : es)))
+    -> FieldNameAsPathServer api (Eff es)
+zoomProjectionServer projectModel projectEvent =
+    hoistFieldNameAsPathServer @api
+        (runSubProjection @sub @parent projectModel projectEvent)
 
 class DomainDrivenServerFields (mkApiRecord :: Type -> Type) (m :: Type -> Type) where
     recordOfServersFromFields
