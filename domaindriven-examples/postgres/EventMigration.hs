@@ -41,7 +41,11 @@ migrate prevEtName etName conn = do
         etName
         fixEvent
 
+-- | The migration chain, newest first. Each 'MigrateWith' carries a tag that is recorded
+-- in the @domaindriven_migrations@ table when the migration runs, so a later startup
+-- can verify that code and database agree. 'TableName' names the oldest version this
+-- code still knows about; the current table is @counter_events_v2@.
 eventTable :: EventTable
 eventTable =
-    MigrateUsing migrate
-        $ InitialVersion "counter_events"
+    MigrateWith "int-payload" migrate
+        $ TableName "counter_events" 1
