@@ -3,7 +3,7 @@
 -- Demonstrates:
 --   * PostgresEvent backend with connection pooling (simplePool)
 --   * Event versioning: V1 (unit events) → V2 (events with Int payload)
---   * Wiring an EventTable with MigrateUsing into postgresWriteModel
+--   * Wiring a tagged EventTable chain (MigrateWith / TableName) into postgresWriteModel
 --   * ReqBody for parameterised commands
 module Main where
 

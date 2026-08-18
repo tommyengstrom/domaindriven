@@ -17,12 +17,15 @@ import Data.HashMap.Strict qualified as HM
 import Data.Hashable (hash)
 import Data.IORef
 import Data.Int
-import Data.Maybe (fromMaybe)
+import Data.List (intercalate, sort, sortOn)
+import Data.Map.Strict qualified as M
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
 import Data.Time
+import Data.Traversable (for)
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
 import DomainDriven.Persistance.Class
@@ -31,12 +34,15 @@ import GHC.Generics (Generic)
 import GHC.Stack
 import Lens.Micro
     ( to
+    , (&)
+    , (<>~)
     , (^.)
     )
 import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
+import Text.Read (readMaybe)
 import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
@@ -47,6 +53,14 @@ data LogEntry
     | EventTableLockDuration NominalDiffTime OneLineCallStack
     | EventTableMigrationDuration NominalDiffTime EventTableName
     | WaitForConnectionDuration NominalDiffTime OneLineCallStack
+    | -- | Emitted right before the migration lock is requested at startup, so a startup
+      -- that hangs behind another instance's migration says why.
+      WaitingForMigrationLock EventTableBaseName
+    | -- | The current table was created on a database without tables for the base name;
+      -- the given number of migrations were recorded as applied without running.
+      EventTableBootstrapped EventTableName Int
+    | -- | An existing table without a metadata row was recorded as the current version.
+      EventTableAdopted EventTableName
     deriving (Show, Generic)
 
 newtype OneLineCallStack = OneLineCallStack CallStack
@@ -124,21 +138,63 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
 
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
-getEventTableName :: EventTable -> EventTableName
-getEventTableName = validate . go 0
+-- | The base name and 'TableName' version at the bottom of the chain.
+eventTableBase :: EventTable -> (EventTableBaseName, EventTableVersion)
+eventTableBase = \case
+    MigrateWith _ _ prev -> eventTableBase prev
+    TableName base v -> (base, v)
+
+-- | The 'MigrateWith' steps of the chain, oldest first, each with the version it produces.
+eventTableSteps :: EventTable -> [(EventTableVersion, MigrationTag, EventMigration)]
+eventTableSteps et = zipWith (\v (t, mig) -> (v, t, mig)) [snd (eventTableBase et) + 1 ..] (go et [])
   where
-    go :: Int -> EventTable -> String
-    go i = \case
-        MigrateUsing _ u -> go (i + 1) u
-        InitialVersion n -> n <> "_v" <> show (i + 1)
+    go (MigrateWith t mig prev) acc = go prev ((t, mig) : acc)
+    go TableName{} acc = acc
+
+-- | The version of the current (newest) table of the chain.
+eventTableVersion :: EventTable -> EventTableVersion
+eventTableVersion = \case
+    MigrateWith _ _ prev -> eventTableVersion prev + 1
+    TableName _ v -> v
+
+-- | Table name for a version of a base name: @\<base\>_v\<version\>@.
+eventTableNameFor :: EventTableBaseName -> EventTableVersion -> EventTableName
+eventTableNameFor base v = base <> "_v" <> show v
+
+isValidBaseName :: EventTableBaseName -> Bool
+isValidBaseName name = not (null name) && all isValidChar name
+  where
+    isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
+
+-- | Name of the current table of the chain.
+getEventTableName :: EventTable -> EventTableName
+getEventTableName et = validate $ eventTableNameFor (fst $ eventTableBase et) (eventTableVersion et)
+  where
     validate name
-        | all isValidChar name && not (null name) = name
+        | isValidBaseName name = name
         | otherwise =
             error $
                 "[DomainDriven] Invalid event table name: "
                     <> show name
                     <> ". Names must be non-empty and contain only [a-zA-Z0-9_]."
-    isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
+
+-- | Check an 'EventTable' chain without touching the database: the base name must be
+-- non-empty and contain only @[a-zA-Z0-9_]@, the 'TableName' version must be at least 1,
+-- and the migration tags must be non-empty and unique within the chain. Throws
+-- 'MigrationError'. 'postgresWriteModel' runs this before connecting.
+validateEventTable :: MonadThrow m => EventTable -> m ()
+validateEventTable et = do
+    unless (isValidBaseName base) $ throwM $ InvalidEventTableBaseName base
+    unless (baseVersion >= 1) $ throwM $ InvalidEventTableVersion base baseVersion
+    for_ steps $ \(v, t, _) -> when (null t) $ throwM $ InvalidMigrationTag base v t
+    for_ duplicateTags $ \(t, vs) -> throwM $ DuplicateMigrationTag base t vs
+  where
+    (base, baseVersion) = eventTableBase et
+    steps = eventTableSteps et
+    duplicateTags =
+        filter ((> 1) . length . snd)
+            . M.toList
+            $ M.fromListWith (flip (<>)) [(t, [v]) | (v, t, _) <- steps]
 
 -- | Create the table required for storing state and events, if they do not yet exist.
 createEventTable :: PostgresEventTrans index model event -> IO ()
@@ -166,6 +222,11 @@ createEventTable' conn eventTable = do
             <> quoteIdent eventTable
             <> " (index, event_number);"
 
+-- | The columns every event table has; used to recognise event tables when adopting
+-- tables that are not recorded in the metadata table.
+eventTableColumns :: [String]
+eventTableColumns = ["id", "index", "event_number", "timestamp", "event"]
+
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
     createRetireFunction conn
@@ -182,6 +243,18 @@ createRetireFunction conn =
         $ "create or replace function retired_table() returns trigger as \
           \$$ begin raise exception 'Event table has been retired.'; end; $$ \
           \language plpgsql;"
+
+-- | Whether the table has been retired ('retireTable'), i.e. rejects inserts.
+isRetired :: Connection -> EventTableName -> IO Bool
+isRetired conn tableName =
+    queryBool
+        conn
+        "select exists \
+        \(select 1 from information_schema.triggers \
+        \ where trigger_schema = current_schema() \
+        \   and event_object_table = ? \
+        \   and trigger_name = 'retired')"
+        (Only tableName)
 
 -- | Create a connection pool with default settings (1 stripe, 5 connections, 60s idle).
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
@@ -224,7 +297,9 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
     withIOTrans pg createEventTable
     pure pg
 
--- | Setup the persistance model and verify that the tables exist.
+-- | Setup the persistance model, verifying the 'EventTable' chain against the database
+-- and running any outstanding migrations (see 'runMigrations'). Throws 'MigrationError'
+-- if the chain is invalid or disagrees with the database.
 postgresWriteModel
     :: HasCallStack
     => Pool Connection
@@ -233,48 +308,385 @@ postgresWriteModel
     -> model
     -> IO (PostgresEvent index model event)
 postgresWriteModel pool eventTable app' seed' = do
+    validateEventTable eventTable
     pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
-    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
+    withResource pool $ ensureMigrationsTable . Pool.resource
+    withIOTrans pg $ \pgt ->
+        runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
     pure pg
 
-newtype Exists = Exists
-    { exists :: Bool
+--------------------------------------------------------------------------------
+-- Migration metadata
+--------------------------------------------------------------------------------
+
+-- | Name of the table recording, per event table base name, which versions exist and
+-- which migration (by tag) produced them.
+migrationsTableName :: EventTableName
+migrationsTableName = "domaindriven_migrations"
+
+-- | Advisory lock key serialising the creation of the metadata table.
+migrationsTableLockKey :: Int64
+migrationsTableLockKey = fromIntegral $ hash ("domaindriven/migrations-table" :: String)
+
+-- | Advisory lock key serialising migrators of one base name. A tagged tuple, so that the
+-- key cannot coincide with the writer locks (@hash (tableName, index)@).
+migrationLockKey :: EventTableBaseName -> Int64
+migrationLockKey base = fromIntegral $ hash ("domaindriven/migration" :: String, base)
+
+-- | Create the metadata table if it does not exist, in its own short, committed
+-- transaction (so it never holds up other services' startups behind a slow migration).
+ensureMigrationsTable :: Connection -> IO ()
+ensureMigrationsTable conn = do
+    exists <- tableExists conn migrationsTableName
+    unless exists . withTransaction conn $ do
+        -- `create table if not exists` still races on the catalog; serialise creators.
+        advisoryXactLock conn migrationsTableLockKey
+        void . execute_ conn $
+            "create table if not exists "
+                <> quoteIdent migrationsTableName
+                <> " \
+                   \( base_name text not null\
+                   \, version int not null\
+                   \, tag text null\
+                   \, origin text not null\
+                   \, created_at timestamptz not null default now()\
+                   \, primary key (base_name, version)\
+                   \, unique (base_name, tag)\
+                   \)"
+
+-- | A row of the metadata table.
+data MigrationRow = MigrationRow
+    { version :: EventTableVersion
+    , tag :: Maybe MigrationTag
+    -- ^ Nothing: unknown (adopted table, or the base version of a bootstrapped chain)
+    , origin :: MigrationOrigin
     }
     deriving (Show, Eq, Generic)
-    deriving anyclass (FromRow)
 
-runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
-runMigrations logger trans et = do
-    tableExistQuery <-
+-- | What the database knows about a base name.
+data EventTableState = EventTableState
+    { recorded :: [MigrationRow]
+    -- ^ Metadata rows, ascending by version
+    , existingVersions :: [EventTableVersion]
+    -- ^ Versions for which a table exists in the current schema, ascending
+    }
+    deriving (Show, Eq, Generic)
+
+-- | The current version according to the metadata (the highest recorded one).
+eventTableStateCurrent :: EventTableState -> Maybe EventTableVersion
+eventTableStateCurrent st = case st ^. #recorded of
+    [] -> Nothing
+    rows -> Just $ maximum [v | MigrationRow v _ _ <- rows]
+
+readEventTableState :: Connection -> EventTableBaseName -> IO EventTableState
+readEventTableState conn base = do
+    rows <-
         query
             conn
-            "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
-            (Only $ getEventTableName et)
+            ( "select version, tag, origin from "
+                <> quoteIdent migrationsTableName
+                <> " where base_name = ? order by version"
+            )
+            (Only base)
+    recorded <- for rows $ \(v, t, o) -> case parseMigrationOrigin o of
+        Just origin -> pure $ MigrationRow v t origin
+        Nothing ->
+            throwM . InvalidMigrationMetadata base $
+                "unknown origin " <> show o <> " recorded for version " <> show v
+    existingVersions <- existingEventTableVersions conn base
+    pure EventTableState{recorded, existingVersions}
 
-    case (et, tableExistQuery) of
-        (InitialVersion _, [Only True]) -> pure ()
-        (MigrateUsing{}, [Only True]) -> pure ()
-        (InitialVersion _, [Only False]) -> createTable
-        (MigrateUsing mig prevEt, [Only False]) -> do
-            -- Ensure migrations are done up until the previous table
-            runMigrations logger trans prevEt
-            -- Then lock lock the previous table before we start
-            exclusiveLock trans (getEventTableName prevEt) NoIndex
-            t0 <- getCurrentTime
-            createTable
-            mig (getEventTableName prevEt) (getEventTableName et) conn
-            retireTable conn (getEventTableName prevEt)
-            t1 <- getCurrentTime
-            logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
-        (_, r) -> fail $ "Unexpected table query result: " <> show r
+-- | Versions of the base name for which a table @\<base\>_v\<n\>@ exists in the current
+-- schema, ascending. Prefix bases (@foo@ vs @foo_v2@) do not match each other.
+existingEventTableVersions :: Connection -> EventTableBaseName -> IO [EventTableVersion]
+existingEventTableVersions conn base = do
+    names <-
+        query
+            conn
+            "select table_name::text from information_schema.tables \
+            \ where table_schema = current_schema() \
+            \   and table_type = 'BASE TABLE' \
+            \   and table_name::text ~ ?"
+            (Only $ "^" <> base <> "_v[1-9][0-9]*$")
+    pure . sort $ mapMaybe (readMaybe . drop (length base + 2) . fromOnly) names
+
+tableExists :: Connection -> EventTableName -> IO Bool
+tableExists conn tableName =
+    queryBool
+        conn
+        "select exists \
+        \(select 1 from information_schema.tables \
+        \ where table_schema = current_schema() and table_name = ?)"
+        (Only tableName)
+
+tableColumns :: Connection -> EventTableName -> IO [String]
+tableColumns conn tableName =
+    fmap fromOnly
+        <$> query
+            conn
+            "select column_name::text from information_schema.columns \
+            \ where table_schema = current_schema() and table_name = ?"
+            (Only tableName)
+
+currentSchema :: Connection -> IO String
+currentSchema conn =
+    query_ conn "select current_schema()::text" >>= \case
+        [Only s] -> pure s
+        _ -> pure "<unknown>"
+
+countRows :: Connection -> EventTableName -> IO Int64
+countRows conn tableName =
+    query_ conn ("select count(*) from " <> quoteIdent tableName) >>= \case
+        [Only n] -> pure n
+        _ -> pure 0
+
+queryBool :: ToRow q => Connection -> PG.Query -> q -> IO Bool
+queryBool conn q params =
+    query conn q params >>= \case
+        [Only b] -> pure b
+        _ -> pure False
+
+insertMigrationRow
+    :: Connection
+    -> EventTableBaseName
+    -> EventTableVersion
+    -> Maybe MigrationTag
+    -> MigrationOrigin
+    -> IO ()
+insertMigrationRow conn base v t origin =
+    void $
+        execute
+            conn
+            ( "insert into "
+                <> quoteIdent migrationsTableName
+                <> " (base_name, version, tag, origin) values (?, ?, ?, ?)"
+            )
+            (base, v, t, migrationOriginText origin)
+
+-- | Drop every event table of a base name (all versions in the current schema) together
+-- with its rows in the metadata table. Meant for test fixtures and for resetting
+-- development databases: dropping only the tables leaves metadata behind, and the next
+-- startup then fails with 'CurrentEventTableMissing'.
+dropEventTables :: Connection -> EventTableBaseName -> IO ()
+dropEventTables conn base = do
+    unless (isValidBaseName base) $ throwM $ InvalidEventTableBaseName base
+    versions <- existingEventTableVersions conn base
+    for_ (reverse versions) $ \v ->
+        execute_ conn $ "drop table if exists " <> quoteIdent (eventTableNameFor base v)
+    hasMetadata <- tableExists conn migrationsTableName
+    when hasMetadata . void $
+        execute
+            conn
+            ("delete from " <> quoteIdent migrationsTableName <> " where base_name = ?")
+            (Only base)
+
+--------------------------------------------------------------------------------
+-- Startup verification and migration
+--------------------------------------------------------------------------------
+
+-- | Verify the 'EventTable' chain against the database and bring the database forward
+-- to the chain's current version. Runs in the transaction of the given
+-- 'OngoingTransaction', which must be freshly begun (nothing may have been executed in
+-- it yet); the metadata table must already exist ('ensureMigrationsTable').
+--
+-- 1. Serialise migrators of the base name with an advisory lock.
+-- 2. Read the metadata rows and the existing tables of the base name; adopt tables that
+--    are not recorded (databases from before 0.7.0, or migrations run by 0.6 code).
+-- 3. Verify: the tags in code must agree with the recorded tags, the database must not
+--    be ahead of the code, its current table must exist, and it must not be behind the
+--    'TableName' version. Any disagreement throws 'MigrationError' before anything runs.
+-- 4. A database without tables for the base name gets only the current table, with
+--    metadata rows for the whole chain; no migration function runs.
+-- 5. Otherwise, one step per missing version: lock the previous table against writers,
+--    create the new table, run the migration function, retire the previous table and
+--    record the step.
+runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
+runMigrations logger trans et = do
+    -- Every statement below must see what was committed while we waited for the locks,
+    -- so pin the isolation level rather than relying on the server default.
+    void $ execute_ conn "set transaction isolation level read committed"
+    logger $ WaitingForMigrationLock base
+    advisoryXactLock conn (migrationLockKey base)
+    state <- adoptUnrecordedTables logger conn base =<< readEventTableState conn base
+    verifyEventTableState conn et state
+    case eventTableStateCurrent state of
+        Nothing -> bootstrap
+        Just current ->
+            for_ (filter (\(v, _, _) -> v > current) steps) $
+                migrateStep current (state ^. #existingVersions)
   where
     conn :: Connection
     conn = trans ^. field @"connectionResource" . field @"resource"
 
-    createTable :: IO ()
-    createTable = do
-        let tableName = getEventTableName et
-        void $ createEventTable' conn tableName
+    (base, baseVersion) = eventTableBase et
+    steps = eventTableSteps et
+    final = eventTableVersion et
+
+    -- Fresh database: create only the current table and record the whole chain, so that
+    -- the history stays checkable after the migrations are deleted from code.
+    bootstrap :: IO ()
+    bootstrap = do
+        void $ createEventTable' conn (eventTableNameFor base final)
+        insertMigrationRow conn base baseVersion Nothing OriginBootstrap
+        for_ steps $ \(v, t, _) -> insertMigrationRow conn base v (Just t) OriginBootstrap
+        logger $ EventTableBootstrapped (eventTableNameFor base final) (length steps)
+
+    migrateStep
+        :: EventTableVersion
+        -> [EventTableVersion]
+        -> (EventTableVersion, MigrationTag, EventMigration)
+        -> IO ()
+    migrateStep current existingVersions (v, t, mig) = do
+        let prevName = eventTableNameFor base (v - 1)
+            newName = eventTableNameFor base v
+        -- The pre-0.7 migration lock (also the NoIndex writer lock), kept for one
+        -- transition release so that concurrent 0.6 migrators still exclude us. Taken
+        -- before the table lock: a 0.6 migrator retires the previous table with a
+        -- statement that conflicts with the table lock, so the other order can deadlock.
+        advisoryXactLock conn (writerLockKey prevName NoIndex)
+        -- Blocks every insert into the previous table (indexed writers included) until we
+        -- commit, while reads keep working. Together with read committed isolation, the
+        -- copy below therefore sees every event that will ever be in the table.
+        void . execute_ conn $ "lock table " <> quoteIdent prevName <> " in exclusive mode"
+        alreadyMigrated <- tableExists conn newName
+        if alreadyMigrated
+            then
+                -- A 0.6 migrator ran this step while we waited for its lock. The tables
+                -- below the new one are the ones found at startup plus those the earlier
+                -- steps of this run produced.
+                adoptEventTable logger conn base (existingVersions <> [current + 1 .. v - 1]) v
+            else do
+                t0 <- getCurrentTime
+                void $ createEventTable' conn newName
+                mig prevName newName conn
+                retireTable conn prevName
+                insertMigrationRow conn base v (Just t) OriginMigration
+                t1 <- getCurrentTime
+                logger $ EventTableMigrationDuration (diffUTCTime t1 t0) newName
+
+-- | Record tables that exist without a metadata row. Without any rows (a database from
+-- before 0.7.0) the highest existing version is adopted as current. With rows, tables
+-- above the recorded maximum are adopted as long as they form a contiguous run from the
+-- maximum (a 0.6 instance ran migrations without recording them); a table further up
+-- is a stray and throws 'UnrecordedEventTable'. Gaps below the current version are
+-- ignored: retired tables may have been dropped to free space.
+adoptUnrecordedTables
+    :: (LogEntry -> IO ())
+    -> Connection
+    -> EventTableBaseName
+    -> EventTableState
+    -> IO EventTableState
+adoptUnrecordedTables logger conn base st = do
+    toAdopt <- either throwM pure adoptable
+    for_ toAdopt $ adoptEventTable logger conn base existing
+    pure $ st & #recorded <>~ [MigrationRow v Nothing OriginAdopted | v <- toAdopt]
+  where
+    existing = st ^. #existingVersions
+    adoptable :: Either MigrationError [EventTableVersion]
+    adoptable = case (eventTableStateCurrent st, existing) of
+        (_, []) -> Right []
+        (Nothing, versions) -> Right [maximum versions]
+        (Just recordedMax, versions) ->
+            let above = filter (> recordedMax) versions
+                run = map snd . takeWhile (uncurry (==)) $ zip [recordedMax + 1 ..] above
+             in case filter (`notElem` run) above of
+                    [] -> Right run
+                    stray : _ ->
+                        Left . UnrecordedEventTable base (eventTableNameFor base stray) $
+                            "event table versions must be contiguous, but "
+                                <> eventTableNameFor base (stray - 1)
+                                <> " does not exist"
+
+-- | Record an existing table as the (new) current version with unknown tag, after checking
+-- that it can be the product of a migration: it has the event table columns, and every
+-- lower table that still exists has been retired (only the current table accepts writes).
+adoptEventTable
+    :: (LogEntry -> IO ())
+    -> Connection
+    -> EventTableBaseName
+    -> [EventTableVersion]
+    -- ^ Existing versions of the base name
+    -> EventTableVersion
+    -> IO ()
+adoptEventTable logger conn base existingVersions v = do
+    let name = eventTableNameFor base v
+    columns <- tableColumns conn name
+    case filter (`notElem` columns) eventTableColumns of
+        [] -> pure ()
+        missing ->
+            throwM . UnrecordedEventTable base name $
+                "it lacks the event table column(s) " <> intercalate ", " missing
+    for_ (filter (< v) existingVersions) $ \lower -> do
+        let lowerName = eventTableNameFor base lower
+        retired <- isRetired conn lowerName
+        unless retired . throwM . UnrecordedEventTable base name $
+            lowerName
+                <> " still accepts writes (it has not been retired), so "
+                <> name
+                <> " cannot be the result of a migration"
+    insertMigrationRow conn base v Nothing OriginAdopted
+    logger $ EventTableAdopted name
+
+-- | Throw 'MigrationError' if the chain and the database disagree. Nothing is modified.
+verifyEventTableState :: Connection -> EventTable -> EventTableState -> IO ()
+verifyEventTableState conn et st = do
+    unless (null disagreements) . throwM $
+        MigrationTagMismatch base codeBase disagreements (findTagShift codeTags recordedTags)
+    for_ (eventTableStateCurrent st) $ \current -> do
+        when (current > final) . throwM $ DatabaseAheadOfCode base current final
+        unless (current `elem` (st ^. #existingVersions)) $ do
+            schema <- currentSchema conn
+            throwM $ CurrentEventTableMissing base current schema
+        when (current < codeBase) $ do
+            eventCount <- countRows conn (eventTableNameFor base current)
+            throwM $ DatabaseBehindCodeBase base current codeBase eventCount
+  where
+    (base, codeBase) = eventTableBase et
+    final = eventTableVersion et
+    codeTags = [(v, t) | (v, t, _) <- eventTableSteps et]
+    recordedTags = M.fromList [(v, (t, o)) | MigrationRow v (Just t) o <- st ^. #recorded]
+    recordedVersionOfTag = M.fromList [(t, v) | MigrationRow v (Just t) _ <- st ^. #recorded]
+    disagreements =
+        [ TagDisagreement
+            { version = v
+            , codeTag = t
+            , recordedTag = fst <$> recordedHere
+            , recordedOrigin = snd <$> recordedHere
+            , codeTagRecordedAt = recordedElsewhere
+            }
+        | (v, t) <- codeTags
+        , let recordedHere = M.lookup v recordedTags
+              recordedElsewhere = case M.lookup t recordedVersionOfTag of
+                Just w | w /= v -> Just w
+                _ -> Nothing
+        , (fst <$> recordedHere) /= Just t
+        , isJust recordedHere || isJust recordedElsewhere
+        ]
+
+-- | The offset (if any, smallest magnitude first) at which the code's tag sequence lines
+-- up with the recorded history: at that offset no code tag contradicts a recorded tag
+-- and at least one matches. A non-zero result means the 'TableName' version is
+-- probably off by that much.
+findTagShift
+    :: [(EventTableVersion, MigrationTag)]
+    -> M.Map EventTableVersion (MigrationTag, MigrationOrigin)
+    -> Maybe Int
+findTagShift codeTags recordedTags = listToMaybe . sortOn abs $ filter alignsAt candidates
+  where
+    recordedTag v = fst <$> M.lookup v recordedTags
+    codeVersions = map fst codeTags
+    recordedVersions = M.keys recordedTags
+    candidates
+        | null codeVersions || null recordedVersions = []
+        | otherwise =
+            filter
+                (/= 0)
+                [ minimum recordedVersions - maximum codeVersions
+                .. maximum recordedVersions - minimum codeVersions
+                ]
+    alignsAt n =
+        all (\(v, t) -> maybe True (== t) (recordedTag (v + n))) codeTags
+            && any (\(v, t) -> recordedTag (v + n) == Just t) codeTags
 
 createPostgresPersistance
     :: forall event index model
@@ -303,6 +715,20 @@ createPostgresPersistance pool eventTable app' seed' = do
                 e@(EventTableLockDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
                 EventTableMigrationDuration dt etName -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
                 e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                WaitingForMigrationLock base ->
+                    putStrLn $ "[DomainDriven] waiting for migration lock on " <> base
+                EventTableBootstrapped etName skipped ->
+                    putStrLn $
+                        "[DomainDriven] created event table "
+                            <> etName
+                            <> " on a fresh database; "
+                            <> show skipped
+                            <> " migration(s) recorded as applied without running"
+                EventTableAdopted etName ->
+                    putStrLn $
+                        "[DomainDriven] adopted existing event table "
+                            <> etName
+                            <> ", which was not recorded in domaindriven_migrations (tag unknown)"
             }
 
 -- | Default number of events fetched per Postgres cursor batch. Also sets the
@@ -728,16 +1154,19 @@ refreshModel pgt index = withExclusiveLock pgt index $ do
     pure (newModel, lastNewEventNo)
 
 exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
-exclusiveLock (OngoingTransaction connR _ _) etName index = do
+exclusiveLock (OngoingTransaction connR _ _) etName index =
     -- We use advisory locks in favor of row level locks as we would not have the ability
     -- to lock an index before the first event is written with row level locks.
-    void $
-        ( query
-            (Pool.resource connR)
-            "SELECT pg_advisory_xact_lock(?)"
-            (Only (fromIntegral (hash (etName, index)) :: Int64))
-            :: IO [Only ()]
-        )
+    advisoryXactLock (Pool.resource connR) (writerLockKey etName index)
+
+-- | Key of the advisory lock serialising writers of one index of one event table.
+writerLockKey :: IsPgIndex i => EventTableName -> i -> Int64
+writerLockKey etName index = fromIntegral $ hash (etName, index)
+
+-- | Take a transaction-scoped advisory lock, blocking until it is available.
+advisoryXactLock :: Connection -> Int64 -> IO ()
+advisoryXactLock conn key =
+    void (query conn "SELECT pg_advisory_xact_lock(?)" (Only key) :: IO [Only ()])
 
 withExclusiveLock
     :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a

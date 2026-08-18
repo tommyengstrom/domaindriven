@@ -20,7 +20,7 @@ curl localhost:7878/events        # list stored events
 ### 2. PostgreSQL + Event Migration (`postgres/`)
 Counter with PostgreSQL persistence and event schema evolution.
 
-Features: `simplePool` connection pooling, `postgresWriteModel`, event migration from V1 (unit events) to V2 (events with Int payload) via `ShapeCoercible` and `MigrateUsing`.
+Features: `simplePool` connection pooling, `postgresWriteModel`, event migration from V1 (unit events) to V2 (events with Int payload) via `ShapeCoercible` and a tagged `MigrateWith` chain.
 
 Requires a running PostgreSQL instance:
 ```bash

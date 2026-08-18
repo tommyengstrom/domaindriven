@@ -5,12 +5,14 @@ where
 
 import DomainDriven.Persistance.Postgres.Internal as X
     ( PostgresEvent (..)
+    , dropEventTables
     , postgresWriteModel
     , postgresWriteModelNoMigration
     , simplePool
     , simplePool'
     , simplePoolWith
     , simplePoolWith'
+    , validateEventTable
     )
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
@@ -18,7 +20,12 @@ import DomainDriven.Persistance.Postgres.Types as X
     , EventTable (..)
     , EventTableBaseName
     , EventTableName
+    , EventTableVersion
     , IsPgIndex (..)
+    , MigrationError (..)
+    , MigrationOrigin (..)
+    , MigrationTag
     , ParseConcurrency
     , PreviousEventTableName
+    , TagDisagreement (..)
     )

@@ -290,11 +290,13 @@ instance ShapeCoercible V1.CounterEvent V2.CounterEvent where
 
 ```haskell
 eventTable :: EventTable
-eventTable = MigrateUsing myMigration $ InitialVersion "my_events"
+eventTable = MigrateWith "add-payload" myMigration $ TableName "my_events" 1
 
 myMigration :: EventMigration
 myMigration prev next conn = migrate1to1 @NoIndex conn prev next shapeCoerce
 ```
+
+The tag (`"add-payload"`) is recorded in the `domaindriven_migrations` table when the migration runs; startup verifies that the tags in code match the recorded history. `TableName` names the oldest version the code still knows about; the current table here is `my_events_v2`.
 
 For multi-package project setup with compile-time migration safety, see [project-setup.md](project-setup.md).
 

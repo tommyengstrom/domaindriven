@@ -91,15 +91,19 @@ The compiler guides you: try `shapeCoerce` first. If old and new types are struc
 eventTable :: EventTable
 eventTable =
     ensureMigrationIsUpToDate
-        $ MigrateUsing migrationV50
-        $ MigrateUsing migrationV49
-        $ MigrateUsing discardedMigration
-        $ MigrateUsing discardedMigration
-        -- ... older discarded versions ...
-        $ InitialVersion "events"
+        $ MigrateWith "v50-split-name" migrationV50
+        $ MigrateWith "v49-add-email" migrationV49
+        $ TableName "events" 48
 ```
 
-Each `MigrateUsing` wraps one migration step. The chain reads newest-first, oldest-last, with `InitialVersion` at the bottom.
+Each `MigrateWith` wraps one migration step and carries a **tag**: a non-empty string that is unique within the chain and identifies the migration in the `domaindriven_migrations` metadata table. The chain reads newest-first, oldest-last, with `TableName` at the bottom naming the **oldest version this code still knows about** (not necessarily 1). The current table is `<base>_v<TableName version + number of MigrateWith wrappers>` — `events_v50` above.
+
+At startup `postgresWriteModel` verifies the chain against the database before anything runs:
+- a fresh database gets only the current table (`events_v50`) plus metadata rows for the whole chain — the migration functions do **not** run
+- an existing database is migrated forward one step at a time, recording each step's tag
+- tags in code that disagree with the recorded tags, a database ahead of the code, or a database below the `TableName` version fail fast with a `MigrationError` whose message says what to do (an off-by-one `TableName` version is diagnosed explicitly)
+
+Because verification is by tag, never rename a tag once it has been deployed (or update `domaindriven_migrations` by hand at the same time).
 
 ## `ensureMigrationIsUpToDate`
 
@@ -122,19 +126,20 @@ The `Latest` import aliases the newest snapshot:
 import EventN.Event qualified as Latest
 ```
 
-## `discardedMigration`
+## Deleting Old Migrations
 
-Once all database instances have migrated past a version, replace its migration with `discardedMigration` to improve compile times:
+Once every database instance has migrated past a version, delete its migration from code to improve compile times: remove the `MigrateWith` wrapper and bump the `TableName` version by one.
 
 ```haskell
--- | A migration that is no longer kept.
--- Once all instances have migrated past this version, the migration code
--- can be discarded. This improves compile speed.
-discardedMigration :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-discardedMigration _ etName conn = void $ createEventTable' conn etName
+-- before: events_v50 = TableName 48 + 2 wrappers
+MigrateWith "v50-split-name" migrationV50 $ MigrateWith "v49-add-email" migrationV49 $ TableName "events" 48
+-- after:  events_v50 = TableName 49 + 1 wrapper
+MigrateWith "v50-split-name" migrationV50 $ TableName "events" 49
 ```
 
-You can also remove the corresponding `EventN.*` snapshot modules from the migrations package.
+The current table name does not change, and startup keeps verifying the remaining tags against the recorded history. A database that is still at a deleted version (here: live at `events_v48`) refuses to start with `DatabaseBehindCodeBase` instead of silently coming up empty — deploy a build that still contains the missing migrations first.
+
+You can also remove the corresponding `EventN.*` snapshot modules from the migrations package. There is no need for placeholder migrations: a `MigrateWith` that does nothing would run against real data if a database were still at that version.
 
 ## Event Snapshot Script
 
@@ -166,7 +171,7 @@ Run from the `<project>-migrations` directory.
 1. **Change events** in `<project>-events`
 2. **Snapshot**: copy modules into `<project>-migrations` as `EventN.*`
 3. **Write migration**: create `Migration.VN` importing old as `Old`, new as `New`
-4. **Chain**: add `MigrateUsing migrationVN $` to the top of the chain in Runner.hs
+4. **Chain**: add `MigrateWith "<unique-tag>" migrationVN $` to the top of the chain in Runner.hs
 5. **Update Latest**: change the `Latest` import to `EventN`
 6. **Compile**: `ensureMigrationIsUpToDate` verifies everything is consistent
-7. **Over time**: replace old migrations with `discardedMigration` and remove their snapshots
+7. **Over time**: delete old migrations (remove the `MigrateWith`, bump the `TableName` version) and remove their snapshots
