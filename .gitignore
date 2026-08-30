@@ -10,3 +10,4 @@ ai_docs
 .claude/settings.local.json
 .pc-logs
 ghcid.log
+.pc-postgres/

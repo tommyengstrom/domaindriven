@@ -30,6 +30,7 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
+import Data.Functor ((<&>))
 import Data.HashMap.Strict qualified as HM
 import Data.IORef (newIORef, readIORef)
 import Data.Int (Int64)
@@ -65,6 +66,7 @@ import DomainDriven.Persistance.Postgres.Types
     )
 import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
+import System.Environment (lookupEnv)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO
@@ -228,15 +230,15 @@ setupTableScopedLocks test =
             [lockEventTable1, lockEventTable2]
 
 mkTestConn :: IO Connection
-mkTestConn =
-    connect $
-        ConnectInfo
-            { connectHost = "localhost"
-            , connectPort = 5432
-            , connectUser = "postgres"
-            , connectPassword = "postgres"
-            , connectDatabase = "domaindriven"
-            }
+mkTestConn = connectPostgreSQL =<< testConnectionString
+
+-- An empty connection string makes libpq use PGHOST/PGPORT/PGUSER/PGPASSWORD/
+-- PGDATABASE, which is how process-compose points at its per-worktree server.
+testConnectionString :: IO ByteString
+testConnectionString =
+    lookupEnv "PGHOST" <&> \case
+        Just _ -> ""
+        Nothing -> "host=localhost port=5432 user=postgres password=postgres dbname=domaindriven"
 
 dropEventTables :: Connection -> IO ()
 dropEventTables conn = do

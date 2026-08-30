@@ -31,6 +31,7 @@
             pkgs.pkg-config
             pkgs.libpq.pg_config
             pkgs.process-compose
+            pkgs.postgresql_17
             haskellPackages.ghcid
             # HLS is intentionally omitted: its GHC 9.12.4 profiling build
             # currently triggers an upstream compiler panic.

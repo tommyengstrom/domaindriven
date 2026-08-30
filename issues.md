@@ -7,15 +7,15 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 
 ## Phase 0 — dedicated Postgres and connection config
 
-- [ ] `flake.nix`: add `pkgs.postgresql_17` to the dev shell.
-- [ ] `process-compose.yaml`: `0-postgres` process (per-worktree data dir
+- [x] `flake.nix`: add `pkgs.postgresql_17` to the dev shell.
+- [x] `process-compose.yaml`: `0-postgres` process (per-worktree data dir
       `.pc-postgres/data`, unix socket only → no port clashes between
       worktrees, `fsync=off`), `1-postgres-db` one-shot `createdb`; tests and
       benchmarks depend on it and get `PGHOST`/`PGUSER`/`PGDATABASE`.
-- [ ] `.gitignore`: `.pc-postgres/`.
-- [ ] Tests connect with `connectPostgreSQL` honouring libpq `PG*` env vars,
+- [x] `.gitignore`: `.pc-postgres/`.
+- [x] Tests connect with `connectPostgreSQL` honouring libpq `PG*` env vars,
       falling back to `localhost:5432/postgres/postgres/domaindriven` (CI).
-- [ ] CI: pin `postgres:17`, set `PG*` env, build with `--enable-benchmarks`.
+- [x] CI: pin `postgres:17`, set `PG*` env, build with `--enable-benchmarks`.
 
 ## Phase A — domaindriven-core fixes
 
@@ -124,8 +124,8 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 - [ ] In-memory benchmark: `ForgetfulInMemory` `runCmd` throughput.
 - [ ] `servant-reqbody-field` benchmark baseline: hoist `fieldKeys` per `n`
       into a CAF (the `ReqBody` arm currently recomputes keys per parse).
-- [ ] Harness: benchmarks run after tests (not concurrently), `-O1
-      --builddir dist-bench`, criterion `--time-limit 2`.
+- [ ] Harness: `-O1 --builddir dist-bench` benchmark builds, criterion
+      `--time-limit 2` (benchmarks already run after tests since Phase 0).
 
 ## Phase D — code and docs cleanup
 
