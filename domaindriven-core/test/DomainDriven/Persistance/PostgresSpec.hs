@@ -6,7 +6,16 @@ module DomainDriven.Persistance.PostgresSpec where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.DeepSeq (NFData (rnf))
-import Control.Exception (SomeException, bracket, bracket_, displayException)
+import Control.Exception
+    ( AsyncException (ThreadKilled)
+    , SomeAsyncException
+    , SomeException
+    , bracket
+    , bracket_
+    , displayException
+    , throwIO
+    )
+import Control.Exception qualified as Exception
 import Control.Monad
 import Data.Aeson
     ( FromJSON (parseJSON)
@@ -21,6 +30,9 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
+import Data.HashMap.Strict qualified as HM
+import Data.IORef (newIORef, readIORef)
+import Data.Int (Int64)
 import Data.List qualified as L
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -35,8 +47,11 @@ import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
     ( LogEntry (..)
+    , getCurrentState
     , getEventTableName
     , parseEventRows
+    , publishNumberedModel
+    , queryHasEventsAfter
     , queryEvents
     , writeEvents
     )
@@ -44,6 +59,7 @@ import DomainDriven.Persistance.Postgres.Migration
 import DomainDriven.Persistance.Postgres.Types
     ( EventNumber (..)
     , EventRowOut (..)
+    , NumberedModel (..)
     , PersistanceError (..)
     , quoteIdent
     )
@@ -107,9 +123,11 @@ spec = do
      in around (setupPersistance postHook) (postHookSpec hookDone processedEvents)
 
     around (setupPersistance noHook) migrationConcurrencySpec
+    around (setupPersistance noHook) transactionSpec
     around (setupPersistance noHook) loggingSpec
     around setupPersistanceIndexed indexedSpec
     around setupTableScopedLocks tableScopedLockSpec
+    cacheSpec
 
 type TestModel = Int
 
@@ -276,6 +294,43 @@ writeEventsSpec = describe "queryEvents" $ do
         evs' <- getEventList p NoIndex
         drop (length evs' - 2) (fmap storedEvent evs') `shouldBe` evs
 
+    it "returns the watermark from the inserted batch" $ \(_p, pool) ->
+        withResource pool $ \conn -> do
+            unrelatedId <- mkId
+            batchId <- mkId
+            let timestamp = UTCTime (fromGregorian 2020 10 15) 10
+                unrelatedEventNumber = 1000000000000 :: Int64
+            void $
+                execute
+                    conn
+                    ( "insert into "
+                        <> quoteIdent (getEventTableName eventTable)
+                        <> " (id, index, event_number, timestamp, event) \
+                           \overriding system value values (?, ?, ?, ?, ?)"
+                    )
+                    ( unrelatedId
+                    , toPgIndex NoIndex
+                    , unrelatedEventNumber
+                    , timestamp
+                    , encode AddOne
+                    )
+            watermark <-
+                writeEvents
+                    conn
+                    (getEventTableName eventTable)
+                    NoIndex
+                    [Stored AddOne timestamp batchId]
+            [Only batchEventNumber] <-
+                query
+                    conn
+                    ( "select event_number from "
+                        <> quoteIdent (getEventTableName eventTable)
+                        <> " where id = ?"
+                    )
+                    (Only batchId)
+            watermark `shouldBe` EventNumber batchEventNumber
+            batchEventNumber `shouldSatisfy` (< unrelatedEventNumber)
+
 parallelParsingSpec :: Spec
 parallelParsingSpec = describe "parseEventRows" $ do
     -- A small chunk size so that, with > parseTaskSize rows, the input is split
@@ -364,6 +419,80 @@ indexedSpec = describe "Indexed models" $ do
         m1 `shouldBe` 1
         m2 `shouldBe` 3
 
+    it "does not refresh one index after another index changes" $ \(p, pool) -> do
+        let indexA = Indexed "a"
+            indexB = Indexed "b"
+            stored event = Stored event (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId
+        eventA <- stored AddOne
+        withResource pool $ \conn ->
+            void $ writeEvents conn (getEventTableName eventTable) indexA [eventA]
+        getModel p indexA `shouldReturn` 1
+
+        logVar <- newTVarIO []
+        let logged = p{logger = \entry -> atomically $ modifyTVar logVar (entry :)}
+        eventB <- stored AddOne
+        withResource pool $ \conn ->
+            void $ writeEvents conn (getEventTableName eventTable) indexB [eventB]
+        getModel logged indexA `shouldReturn` 1
+        logsAfterIndexB <- readTVarIO logVar
+        logsAfterIndexB `shouldSatisfy` all \case
+            EventTableLockDuration{} -> False
+            DbTransactionDuration{} -> True
+            EventTableMigrationDuration{} -> True
+            WaitForConnectionDuration{} -> True
+
+        nextEventA <- stored AddOne
+        withResource pool $ \conn ->
+            void $ writeEvents conn (getEventTableName eventTable) indexA [nextEventA]
+        getModel logged indexA `shouldReturn` 2
+        logs <- readTVarIO logVar
+        logs `shouldSatisfy` any \case
+            EventTableLockDuration{} -> True
+            DbTransactionDuration{} -> False
+            EventTableMigrationDuration{} -> False
+            WaitForConnectionDuration{} -> False
+
+    it "retains the zero watermark for an empty transaction" $ \(p, pool) -> do
+        let index = Indexed "empty"
+        runCmd p index (\_ -> pure (id, [])) `shouldReturn` 0
+        NumberedModel _ cachedEventNumber <- getCurrentState p index
+        cachedEventNumber `shouldBe` 0
+
+        writer <- postgresWriteModel pool eventTable applyTestEvent 0
+        runCmd writer index (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        getModel p index `shouldReturn` 1
+
+    it "uses the compound index for freshness checks" $ \(_p, pool) ->
+        withResource pool $ \conn -> do
+            let tableName = getEventTableName eventTable
+                targetIndex = Indexed "target"
+            void $
+                execute_ conn $
+                    "insert into "
+                        <> quoteIdent tableName
+                        <> " (id, index, timestamp, event) \
+                           \select md5(i::text)::uuid, 'bulk', now(), '\"AddOne\"'::jsonb \
+                           \from generate_series(1, 500000) as i"
+            targetEvent <-
+                Stored AddOne (UTCTime (fromGregorian 2020 10 15) 10) <$> mkId
+            void $ writeEvents conn tableName targetIndex [targetEvent]
+            void $ execute_ conn $ "analyze " <> quoteIdent tableName
+            planRows <-
+                query
+                    conn
+                    ( "explain (analyze, buffers) select exists (select 1 from "
+                        <> quoteIdent tableName
+                        <> " where index = ? and event_number > ?)"
+                    )
+                    (toPgIndex targetIndex, 0 :: Int64)
+            let plan = unlines (fmap fromOnly planRows)
+            plan `shouldSatisfy` \queryPlan ->
+                "Index Only Scan" `L.isInfixOf` queryPlan
+                    || "Index Scan" `L.isInfixOf` queryPlan
+            plan `shouldNotContain` "Seq Scan"
+            plan `shouldNotContain` "Aggregate"
+            queryHasEventsAfter conn tableName targetIndex 0 `shouldReturn` True
+
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
             testCmd i _ = do
@@ -398,6 +527,20 @@ indexedSpec = describe "Indexed models" $ do
         models `shouldSatisfy` (== [2, 4 .. 40]) . L.sort
         print $ diffUTCTime t1 t0
         diffUTCTime t1 t0 `shouldSatisfy` (> 20 * 0.1)
+
+cacheSpec :: Spec
+cacheSpec = describe "Postgres model cache" $
+    it "does not replace a newer model with an older publication" $ do
+        ref <- newIORef HM.empty
+        let index = Indexed "monotonic"
+        publishNumberedModel ref index (NumberedModel 2 2)
+        publishNumberedModel ref index (NumberedModel 1 1)
+        cached <- HM.lookup index <$> readIORef ref
+        case cached of
+            Just (NumberedModel cachedModel cachedEventNumber) -> do
+                cachedModel `shouldBe` (2 :: Int)
+                cachedEventNumber `shouldBe` 2
+            Nothing -> expectationFailure "Expected a cached model"
 
 tableScopedLockSpec
     :: SpecWith
@@ -702,6 +845,61 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
         -- putStrLn "Migrating slowly..."
         threadDelay 250000
         pure a
+
+transactionSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
+transactionSpec = describe "Postgres transactions" $ do
+    it "rolls back when a logger receives asynchronous cancellation" $ \(p, pool) -> do
+        let cancellingLogger = \case
+                EventTableLockDuration{} -> throwIO ThreadKilled
+                DbTransactionDuration{} -> pure ()
+                EventTableMigrationDuration{} -> pure ()
+                WaitForConnectionDuration{} -> pure ()
+            backendWithCancellingLogger = p{logger = cancellingLogger}
+        result <-
+            Exception.try @SomeAsyncException $
+                runCmd backendWithCancellingLogger NoIndex $ \_ ->
+                    pure (id, [AddOne])
+        case result of
+            Left cancellation -> displayException cancellation `shouldBe` "thread killed"
+            Right model -> expectationFailure $ "Expected cancellation, got model " <> show model
+        withResource pool $ \conn -> do
+            [Only durableEventCount] <-
+                query_ conn $
+                    "select count(*) from " <> quoteIdent (getEventTableName eventTable)
+            durableEventCount `shouldBe` (0 :: Int64)
+        getModel p NoIndex `shouldReturn` 0
+
+    it "propagates deferred commit failures without publishing uncommitted state" $ \(p, pool) -> do
+        let tableName = getEventTableName eventTable
+            constraintName = tableName <> "_event_unique"
+        withResource pool $ \conn ->
+            void $
+                execute_ conn $
+                    "alter table "
+                        <> quoteIdent tableName
+                        <> " add constraint "
+                        <> quoteIdent constraintName
+                        <> " unique (event) deferrable initially deferred"
+
+        let failingLogger _ = fail "logger failure"
+            backendWithFailingLogger = p{logger = failingLogger}
+        result <-
+            try @IO @SqlError $
+                runCmd backendWithFailingLogger NoIndex $ \_ ->
+                    pure (id, [AddOne, AddOne])
+        case result of
+            Left commitError -> sqlState commitError `shouldBe` "23505"
+            Right model -> expectationFailure $ "Expected commit failure, got model " <> show model
+
+        withResource pool $ \conn -> do
+            [Only durableEventCount] <-
+                query_ conn $
+                    "select count(*) from " <> quoteIdent tableName
+            durableEventCount `shouldBe` (0 :: Int64)
+
+        getModel backendWithFailingLogger NoIndex `shouldReturn` 0
+        freshBackend <- postgresWriteModel pool eventTable applyTestEvent 0
+        getModel freshBackend NoIndex `shouldReturn` 0
 
 loggingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 loggingSpec = describe "Callstacks" $ do

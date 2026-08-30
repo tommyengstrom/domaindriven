@@ -132,6 +132,7 @@ test-suite domaindriven-core-test
     , time
     , unliftio
     , unliftio-pool
+    , unordered-containers
     , uuid
 
 benchmark parallel-event-parsing

@@ -8,6 +8,15 @@
   well as the aggregate index, so equal indices in unrelated tables no longer
   block each other. Because this changes the lock-key protocol, all writers
   sharing a database should be upgraded together.
+- PostgreSQL indexed-model freshness checks now use a parameterized `EXISTS`
+  query over `(index, event_number)`, and writes derive their watermark from
+  `INSERT ... RETURNING` instead of scanning the whole event table. Commit
+  failures are propagated and model caches are updated strictly, monotonically,
+  and only after a successful write commit.
+- Existing PostgreSQL deployments should verify that every active event table
+  has an index on `(index, event_number)`. For large tables, consumers should
+  create a missing index with `CREATE INDEX CONCURRENTLY`; startup migrations
+  intentionally continue to avoid blocking index replacement.
 
 ## 0.6.0
 
