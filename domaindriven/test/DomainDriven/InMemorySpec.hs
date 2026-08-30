@@ -12,6 +12,7 @@ import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
+import System.Timeout (timeout)
 import Prelude
 
 type TestModel = Int
@@ -102,6 +103,17 @@ spec = do
             mb <- runIndexedTest backend (getModelI @IndexedTestDomain (Indexed "b"))
             ma `shouldBe` 1
             mb `shouldBe` 2
+
+        it "allows a transaction on another index inside a transaction" $ do
+            backend <- createForgetful applyTestEvent (0 :: TestModel)
+            result <- timeout 2000000 $ runIndexedTest backend $
+                runTransactionI @IndexedTestDomain (Indexed "outer") $ \_ -> do
+                    inner <- runTransactionI @IndexedTestDomain (Indexed "inner") $ \_ ->
+                        pure (id, [AddOne, AddOne])
+                    pure (const inner, [AddOne])
+            result `shouldBe` Just 2
+            outer <- runIndexedTest backend (getModelI @IndexedTestDomain (Indexed "outer"))
+            outer `shouldBe` 1
 
     describe "PostUpdateHook" $ do
         it "hook receives correct model and events" $ do

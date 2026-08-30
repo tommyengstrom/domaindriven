@@ -4,6 +4,7 @@
 module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception
@@ -437,9 +438,10 @@ indexedSpec = describe "Indexed models" $ do
             void $ writeEvents conn (getEventTableName eventTable) indexB [eventB]
         getModel logged indexA `shouldReturn` 1
         logsAfterIndexB <- readTVarIO logVar
+        logsAfterIndexB `shouldSatisfy` (not . null)
         logsAfterIndexB `shouldSatisfy` all \case
             EventTableLockDuration{} -> False
-            DbTransactionDuration{} -> True
+            DbTransactionDuration{} -> False
             EventTableMigrationDuration{} -> True
             WaitForConnectionDuration{} -> True
 
@@ -494,6 +496,88 @@ indexedSpec = describe "Indexed models" $ do
             plan `shouldNotContain` "Seq Scan"
             plan `shouldNotContain` "Aggregate"
             queryHasEventsAfter conn tableName targetIndex 0 `shouldReturn` True
+
+    it "round-trips indices containing SQL syntax through every read path" $ \(p, pool) -> do
+        let tableName = getEventTableName eventTable
+            indices =
+                [ Indexed "it's"
+                , Indexed "x' or '1'='1"
+                , Indexed ("x'; drop table " <> T.pack (show tableName) <> "; --")
+                , Indexed "\"double\" \\ backslash"
+                , Indexed "ünïcödé ✓"
+                ]
+        for_ indices $ \index ->
+            runCmd p index (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        -- A fresh instance has an empty cache, so every read goes to the database.
+        reader <- postgresWriteModel pool eventTable applyTestEvent 0
+        for_ indices $ \index -> do
+            getModel reader index `shouldReturn` 1
+            fmap storedEvent <$> getEventList reader index `shouldReturn` [AddOne]
+            fmap storedEvent <$> Stream.toList (getEventStream reader index) `shouldReturn` [AddOne]
+        getModel reader (Indexed "x") `shouldReturn` 0
+        withResource pool $ \conn -> do
+            [Only indexCount] <- query_ conn $ "select count(distinct index) from " <> quoteIdent tableName
+            indexCount `shouldBe` (fromIntegral (length indices) :: Int64)
+
+    it "creates the event table and its index idempotently" $ \(_p, pool) -> do
+        let tableName = getEventTableName eventTable
+        replicateM_ 2 $
+            void
+                ( postgresWriteModelNoMigration pool tableName applyTestEvent 0
+                    :: IO (PostgresEvent Indexed TestModel TestEvent)
+                )
+        withResource pool $ \conn -> do
+            [Only indexCount] <-
+                query conn "select count(*) from pg_indexes where tablename = ?" (Only tableName)
+            indexCount `shouldBe` (2 :: Int64)
+
+    it "hands applyEvent, the hook and readers the same stored events" $ \(p, pool) -> do
+        let index = Indexed "timestamps"
+        hookEvents <- newEmptyMVar
+        let observed = p{updateHook = \_ _ _ evs -> putMVar hookEvents evs}
+        (_, committed, _) <-
+            transactionalUpdate observed index (\_ -> pure (id, [AddOne, SubtractOne, AddOne]))
+        _ <- runCmd observed index (\_ -> pure (id, []))
+        reader <- postgresWriteModel pool eventTable applyTestEvent 0
+        getEventList reader index `shouldReturn` committed
+        getEventList p index `shouldReturn` committed
+        takeMVar hookEvents `shouldReturn` []
+
+    it "blocks indexed writers while their table is migrated" $ \(p, pool) -> do
+        runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        let migrated :: EventTable
+            migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next slowId) eventTable
+        (writer, _) <-
+            concurrently
+                ( do
+                    threadDelay 100000
+                    try @IO @SqlError $ runCmd p (Indexed "b") (\_ -> pure (id, [AddOne]))
+                )
+                ( void
+                    ( postgresWriteModel pool migrated applyTestEvent 0
+                        :: IO (PostgresEvent Indexed TestModel TestEvent)
+                    )
+                )
+        writer `shouldSatisfy` \case
+            Left err -> sqlErrorMsg err == "Event table has been retired."
+            Right _ -> False
+        withResource pool $ \conn -> do
+            [Only oldCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName eventTable)
+            [Only newCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
+            (oldCount :: Int64, newCount :: Int64) `shouldBe` (1, 1)
+
+    it "runs a migration once when two instances start concurrently" $ \(p, pool) -> do
+        runCmd p (Indexed "a") (\_ -> pure (id, [AddOne, AddOne])) `shouldReturn` 2
+        let migrated :: EventTable
+            migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+            start :: IO (PostgresEvent Indexed TestModel TestEvent)
+            start = postgresWriteModel pool migrated applyTestEvent 0
+        (p1, p2) <- concurrently start start
+        getModel p1 (Indexed "a") `shouldReturn` 2
+        getModel p2 (Indexed "a") `shouldReturn` 2
+        withResource pool $ \conn -> do
+            [Only newCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
+            newCount `shouldBe` (2 :: Int64)
 
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
@@ -842,12 +926,6 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
             ()
         putStrLn "mig1toManyState is done"
 
-    slowId :: a -> a
-    slowId a = unsafePerformIO $ do
-        -- putStrLn "Migrating slowly..."
-        threadDelay 250000
-        pure a
-
 transactionSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 transactionSpec = describe "Postgres transactions" $ do
     it "rolls back when a logger receives asynchronous cancellation" $ \(p, pool) -> do
@@ -903,6 +981,11 @@ transactionSpec = describe "Postgres transactions" $ do
         freshBackend <- postgresWriteModel pool eventTable applyTestEvent 0
         getModel freshBackend NoIndex `shouldReturn` 0
 
+slowId :: a -> a
+slowId a = unsafePerformIO $ do
+    threadDelay 250000
+    pure a
+
 loggingSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 loggingSpec = describe "Callstacks" $ do
     it "Callstack for runCmd reference this file" $ \(p', _) -> do
@@ -925,6 +1008,7 @@ loggingSpec = describe "Callstacks" $ do
     referencesThisFile :: [LogEntry] -> IO ()
     referencesThisFile logs = do
         let thisFile = "DomainDriven/Persistance/PostgresSpec.hs"
+        logs `shouldSatisfy` (not . null)
         logs `shouldSatisfy` all ((thisFile `L.isInfixOf`) . show)
     withStmLogger
         :: PostgresEvent NoIndex TestModel TestEvent

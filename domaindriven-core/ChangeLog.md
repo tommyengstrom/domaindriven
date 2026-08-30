@@ -1,5 +1,41 @@
 # Changelog for domaindriven
 
+## 0.7.0
+
+- **Breaking:** `IsPgIndex` no longer has a `toQuery` method. Index values were
+  interpolated unescaped into the read queries; they are now passed as query
+  parameters everywhere, so indices containing quotes round-trip and cannot
+  inject SQL.
+- **Breaking:** the advisory lock key is now computed by PostgreSQL
+  (`pg_advisory_xact_lock(hashtext(table), hashtext(index))`) instead of by
+  `hashable`, so it no longer depends on the dependency versions of each
+  writer. This changes the lock-key protocol again: upgrade all writers sharing
+  a database together.
+- **Breaking:** `ForgetfulInMemory` serializes commands per index, like the
+  Postgres backend, instead of through one global lock, and keeps event history
+  in a `Seq`. The `lock` field is replaced by `indexLocks` and `events` changed
+  type; `createForgetful` is unaffected.
+- `getModel` on the Postgres backend no longer opens a transaction when the
+  cached model is current: it runs one `EXISTS` statement on a pooled
+  connection and only starts a transaction to refresh.
+- `createEventTable'` creates the `(index, event_number)` index with
+  `IF NOT EXISTS` under the name PostgreSQL generated before, so calling
+  `postgresWriteModelNoMigration` on every start no longer accumulates
+  duplicate indexes. Deployments that restarted often should drop their extra
+  `<table>_index_event_number_idx<N>` indexes.
+- Migrations lock the previous table in `EXCLUSIVE` mode while copying, which
+  blocks writers of indexed tables too (the previous advisory lock only covered
+  `NoIndex`), and take an advisory lock on the target table name before checking
+  whether it exists, so concurrent first starts no longer race. Migrated events
+  are parsed with the same parallelism as reads.
+- `toStored` truncates timestamps to microseconds, matching what PostgreSQL
+  stores, so the events handed to `applyEvent` and the update hook are equal to
+  the replayed ones.
+- `writeEvents` returns 0 for an empty batch (previously the table's maximum
+  event number).
+- `getEventList` carries a `HasCallStack` constraint so its connection wait is
+  logged with the caller's location, like the other read paths.
+
 ## 0.6.1
 
 - Switched the build from Stackage LTS 24.31 to Nightly 2026-08-10 with GHC

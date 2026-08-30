@@ -37,7 +37,7 @@ class NFData (Event p) => ReadModel p where
     type Index p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: MonadIO m => HasCallStack => p -> Index p -> m (Model p)
-    getEventList :: p -> Index p -> IO [Stored (Event p)]
+    getEventList :: HasCallStack => p -> Index p -> IO [Stored (Event p)]
     getEventStream :: HasCallStack => p -> Index p -> Stream IO (Stored (Event p))
 
 class ReadModel p => WriteModel p where
@@ -52,6 +52,12 @@ class ReadModel p => WriteModel p where
         -> [Stored (Event p)]
         -> m ()
 
+    -- | Run a command against the current model and persist the events it emits.
+    -- Backends serialize commands per index. The returned model is the committed
+    -- one: if the commit fails the error propagates and nothing is published to
+    -- the in-memory model. An asynchronous exception delivered while the commit
+    -- is in flight also surfaces as an error even though the server may have
+    -- committed; the next read reconciles with the database.
     transactionalUpdate
         :: HasCallStack
         => forall m a
@@ -144,4 +150,11 @@ mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO
 
 toStored :: MonadIO m => e -> m (Stored e)
-toStored e = Stored e <$> liftIO getCurrentTime <*> mkId
+toStored e = Stored e <$> liftIO (truncateToMicroseconds <$> getCurrentTime) <*> mkId
+
+-- | Postgres stores timestamps with microsecond precision. Truncating up front
+-- keeps the events handed to 'applyEvent' and the hooks identical to the ones
+-- replayed from the database.
+truncateToMicroseconds :: UTCTime -> UTCTime
+truncateToMicroseconds (UTCTime day time) =
+    UTCTime day (picosecondsToDiffTime (diffTimeToPicoseconds time `div` 1000000 * 1000000))
