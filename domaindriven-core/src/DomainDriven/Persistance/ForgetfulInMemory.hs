@@ -7,6 +7,8 @@ import Data.Foldable (toList)
 import Data.Generics.Labels ()
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
@@ -25,18 +27,17 @@ createForgetful
     -> m (ForgetfulInMemory model index event)
 createForgetful appEvent m0 = do
     state <- newIORef HM.empty
-    evs <- newIORef HM.empty
-    locks <- newMVar HM.empty
-    pure $ ForgetfulInMemory state appEvent m0 evs locks (\_ _ _ -> pure ())
+    busy <- newTVarIO HS.empty
+    pure $ ForgetfulInMemory state appEvent m0 busy (\_ _ _ -> pure ())
 
 -- | In-memory state without event persistance. Commands on the same index are
--- serialized, mirroring the per-index locking of the Postgres backend.
+-- serialized, mirroring the per-index locking of the Postgres backend, so a
+-- command must not run another command on its own index.
 data ForgetfulInMemory model index event = ForgetfulInMemory
-    { stateRef :: IORef (HashMap index model)
+    { stateRef :: IORef (HashMap index (model, Seq (Stored event)))
     , apply :: model -> Stored event -> model
     , seed :: model
-    , events :: IORef (HashMap index (Seq (Stored event)))
-    , indexLocks :: MVar (HashMap index (MVar ()))
+    , busyIndices :: TVar (HashSet index)
     , updateHook :: index -> model -> [Stored event] -> IO ()
     }
     deriving (Generic)
@@ -51,8 +52,8 @@ instance (Hashable index, NFData event) => ReadModel (ForgetfulInMemory model in
         => ForgetfulInMemory model index event
         -> index
         -> m model
-    getModel ff index = HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
-    getEventList ff index = maybe [] toList . HM.lookup index <$> readIORef (events ff)
+    getModel ff index = maybe (seed ff) fst . HM.lookup index <$> readIORef (stateRef ff)
+    getEventList ff index = maybe [] (toList . snd) . HM.lookup index <$> readIORef (stateRef ff)
     getEventStream ff index =
         Stream.bracketIO
             (getEventList ff index)
@@ -62,12 +63,14 @@ instance (Hashable index, NFData event) => ReadModel (ForgetfulInMemory model in
 instance (Hashable index, NFData event) => WriteModel (ForgetfulInMemory model index event) where
     postUpdateHook p index model events = liftIO $ updateHook p index model events
     transactionalUpdate ff index evalCmd = withIndexLock ff index $ do
-        model <- HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
+        model <- getModel ff index
         (returnFun, evs) <- evalCmd model
         storedEvs <- traverse toStored evs
         let newModel = foldl' (apply ff) model storedEvs
-        modifyIORef' (events ff) $ HM.insertWith (flip (<>)) index (Seq.fromList storedEvs)
-        modifyIORef' (stateRef ff) $ HM.insert index newModel
+            appendHistory :: (model, Seq (Stored event)) -> (model, Seq (Stored event)) -> (model, Seq (Stored event))
+            appendHistory (_, new) (_, old) = (newModel, old <> new)
+        atomicModifyIORef' (stateRef ff) $ \states ->
+            (HM.insertWith appendHistory index (newModel, Seq.fromList storedEvs) states, ())
         pure (newModel, storedEvs, returnFun)
 
 withIndexLock
@@ -76,10 +79,13 @@ withIndexLock
     -> index
     -> m a
     -> m a
-withIndexLock ff index action = do
-    lock <- modifyMVar (indexLocks ff) $ \locks -> case HM.lookup index locks of
-        Just lock -> pure (locks, lock)
-        Nothing -> do
-            lock <- newMVar ()
-            pure (HM.insert index lock locks, lock)
-    withMVar lock (const action)
+withIndexLock ff index = bracket_ (atomically acquire) (atomically release)
+  where
+    acquire :: STM ()
+    acquire = do
+        busy <- readTVar (busyIndices ff)
+        checkSTM (not (HS.member index busy))
+        writeTVar (busyIndices ff) (HS.insert index busy)
+
+    release :: STM ()
+    release = modifyTVar' (busyIndices ff) (HS.delete index)

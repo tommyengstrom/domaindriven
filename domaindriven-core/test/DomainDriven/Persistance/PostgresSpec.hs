@@ -31,7 +31,7 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
-import Data.Functor ((<&>))
+import Data.Maybe (fromMaybe)
 import Data.HashMap.Strict qualified as HM
 import Data.IORef (newIORef, readIORef)
 import Data.Int (Int64)
@@ -196,11 +196,9 @@ setupPersistanceIndexed
     -> IO ()
 setupPersistanceIndexed test = do
     dropEventTables =<< mkTestConn
-    let stripesAndResources = 5
-    poolCfg <-
-        setNumStripes (Just stripesAndResources)
-            <$> mkDefaultPoolConfig mkTestConn close 1 stripesAndResources
-    pool <- newPool poolCfg
+    -- One stripe: concurrent tests must share the pool instead of queueing per
+    -- capability.
+    pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2, parseConcurrency = 2}, pool)
 
@@ -231,15 +229,20 @@ setupTableScopedLocks test =
             [lockEventTable1, lockEventTable2]
 
 mkTestConn :: IO Connection
-mkTestConn = connectPostgreSQL =<< testConnectionString
+mkTestConn = connect =<< testConnectInfo
 
--- An empty connection string makes libpq use PGHOST/PGPORT/PGUSER/PGPASSWORD/
--- PGDATABASE, which is how process-compose points at its per-worktree server.
-testConnectionString :: IO ByteString
-testConnectionString =
-    lookupEnv "PGHOST" <&> \case
-        Just _ -> ""
-        Nothing -> "host=localhost port=5432 user=postgres password=postgres dbname=domaindriven"
+-- The standard libpq variables select the server (process-compose sets them for
+-- its per-worktree instance); every unset one falls back to the CI defaults.
+testConnectInfo :: IO ConnectInfo
+testConnectInfo = do
+    let setting :: String -> String -> IO String
+        setting name fallback = fromMaybe fallback <$> lookupEnv name
+    ConnectInfo
+        <$> setting "PGHOST" "localhost"
+        <*> (maybe 5432 read <$> lookupEnv "PGPORT")
+        <*> setting "PGUSER" "postgres"
+        <*> setting "PGPASSWORD" "postgres"
+        <*> setting "PGDATABASE" "domaindriven"
 
 dropEventTables :: Connection -> IO ()
 dropEventTables conn = do
@@ -505,6 +508,7 @@ indexedSpec = describe "Indexed models" $ do
                 , Indexed ("x'; drop table " <> T.pack (show tableName) <> "; --")
                 , Indexed "\"double\" \\ backslash"
                 , Indexed "ünïcödé ✓"
+                , Indexed "a?b"
                 ]
         for_ indices $ \index ->
             runCmd p index (\_ -> pure (id, [AddOne])) `shouldReturn` 1
@@ -515,12 +519,30 @@ indexedSpec = describe "Indexed models" $ do
             fmap storedEvent <$> getEventList reader index `shouldReturn` [AddOne]
             fmap storedEvent <$> Stream.toList (getEventStream reader index) `shouldReturn` [AddOne]
         getModel reader (Indexed "x") `shouldReturn` 0
+        let rejectsNul :: PersistanceError -> Bool
+            rejectsNul = \case
+                ValueError _ -> True
+                EncodingError _ -> False
+        runCmd p (Indexed "a\0b") (\_ -> pure (id, [AddOne])) `shouldThrow` rejectsNul
+        getModel reader (Indexed "a\0b") `shouldThrow` rejectsNul
         withResource pool $ \conn -> do
             [Only indexCount] <- query_ conn $ "select count(distinct index) from " <> quoteIdent tableName
             indexCount `shouldBe` (fromIntegral (length indices) :: Int64)
 
-    it "creates the event table and its index idempotently" $ \(_p, pool) -> do
-        let tableName = getEventTableName eventTable
+    it "creates the event table and its index idempotently, also for long names" $ \(_p, pool) -> do
+        -- 44 characters: Postgres truncates the auto-generated index name of tables
+        -- longer than 40 characters, and 0.6 relied on that name.
+        let tableName = "test_events_v1_with_a_rather_long_table_name"
+        withResource pool $ \conn -> do
+            void . execute_ conn $ "drop table if exists " <> quoteIdent tableName
+            void . execute_ conn $
+                "create table "
+                    <> quoteIdent tableName
+                    <> " (id uuid primary key, index varchar not null, \
+                       \event_number bigint not null generated always as identity, \
+                       \timestamp timestamptz not null default now(), event jsonb not null)"
+            void . execute_ conn $
+                "create index on " <> quoteIdent tableName <> " (index, event_number)"
         replicateM_ 2 $
             void
                 ( postgresWriteModelNoMigration pool tableName applyTestEvent 0
@@ -529,28 +551,36 @@ indexedSpec = describe "Indexed models" $ do
         withResource pool $ \conn -> do
             [Only indexCount] <-
                 query conn "select count(*) from pg_indexes where tablename = ?" (Only tableName)
+            -- the primary key and (index, event_number)
             indexCount `shouldBe` (2 :: Int64)
 
-    it "hands applyEvent, the hook and readers the same stored events" $ \(p, pool) -> do
+    it "hands the hook and readers the same stored events" $ \(p, pool) -> do
         let index = Indexed "timestamps"
         hookEvents <- newEmptyMVar
         let observed = p{updateHook = \_ _ _ evs -> putMVar hookEvents evs}
-        (_, committed, _) <-
-            transactionalUpdate observed index (\_ -> pure (id, [AddOne, SubtractOne, AddOne]))
-        _ <- runCmd observed index (\_ -> pure (id, []))
+        runCmd observed index (\_ -> pure (id, [AddOne, SubtractOne, AddOne])) `shouldReturn` 1
+        hooked <- takeMVar hookEvents
+        fmap storedEvent hooked `shouldBe` [AddOne, SubtractOne, AddOne]
         reader <- postgresWriteModel pool eventTable applyTestEvent 0
-        getEventList reader index `shouldReturn` committed
-        getEventList p index `shouldReturn` committed
-        takeMVar hookEvents `shouldReturn` []
+        getEventList reader index `shouldReturn` hooked
+        getEventList p index `shouldReturn` hooked
 
     it "blocks indexed writers while their table is migrated" $ \(p, pool) -> do
         runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        -- The migration callback runs once the previous table is locked.
+        copyStarted <- newEmptyMVar
         let migrated :: EventTable
-            migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next slowId) eventTable
+            migrated =
+                MigrateUsing
+                    ( \prev next conn -> do
+                        putMVar copyStarted ()
+                        migrate1to1 @Indexed @Value conn prev next slowId
+                    )
+                    eventTable
         (writer, _) <-
             concurrently
                 ( do
-                    threadDelay 100000
+                    takeMVar copyStarted
                     try @IO @SqlError $ runCmd p (Indexed "b") (\_ -> pure (id, [AddOne]))
                 )
                 ( void
@@ -843,7 +873,7 @@ migrationSpec = describe "migrate1to1" $ do
                 writeEvents
                     conn
                     (getEventTableName statefulTable)
-                    (Indexed "a")
+                    (Indexed "a'1")
                     aEvents
             void $
                 writeEvents
@@ -863,7 +893,7 @@ migrationSpec = describe "migrate1to1" $ do
         withResource pool $ \conn -> do
             aMigrated <-
                 fmap (storedEvent . fst)
-                    <$> queryEvents @Value conn (getEventTableName migratedTable) (Indexed "a")
+                    <$> queryEvents @Value conn (getEventTableName migratedTable) (Indexed "a'1")
             bMigrated <-
                 fmap (storedEvent . fst)
                     <$> queryEvents @Value conn (getEventTableName migratedTable) (Indexed "b")

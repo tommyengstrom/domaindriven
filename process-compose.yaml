@@ -1,11 +1,11 @@
-# Haskell graph:
-#   0-postgres -> 1-postgres-db ------------------> 3-cabal-test-all
-#   1-deps-cabal -> 2-cabal-build-all ------------> 3-cabal-test-all -> 3-cabal-benchmark-all
+# Process graph:
+#   0-postgres -> 1-postgres-db ------------------> 3-cabal-test-all -> 3-cabal-benchmark-all
+#   1-deps-cabal -> 2-cabal-build-all ------------> 3-cabal-test-all
 #                -> 2-ghcid              <- live feedback
 #
-# PostgreSQL: one instance per worktree, listening on a unix socket in
-# ./.pc-postgres (gitignored) so several worktrees can run tests at once
-# without port clashes. Unix socket paths are limited to ~100 characters, so
+# PostgreSQL: one disposable instance per worktree, listening on a unix socket in
+# ./.pc-postgres (gitignored, delete freely) so several worktrees can run tests at
+# once without port clashes. Unix socket paths are limited to ~100 characters, so
 # keep worktree paths short. Test and benchmark processes reach it through the
 # standard libpq PGHOST/PGUSER/PGDATABASE variables.
 version: "0.5"
@@ -22,8 +22,13 @@ processes:
     command: |
       set -eu
       PGDIR="$PWD/.pc-postgres"
+      major=$(postgres --version | sed -E 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/')
+      if [ -f "$PGDIR/data/PG_VERSION" ] && [ "$(cat "$PGDIR/data/PG_VERSION")" != "$major" ]; then
+        rm -rf "$PGDIR/data"
+      fi
       if [ ! -f "$PGDIR/data/PG_VERSION" ]; then
-        initdb --pgdata "$PGDIR/data" --username postgres --auth trust --no-instructions
+        initdb --pgdata "$PGDIR/data" --username postgres \
+          --auth-local trust --auth-host reject --no-instructions
       fi
       exec postgres -D "$PGDIR/data" -k "$PGDIR" \
         -c listen_addresses='' \
@@ -51,12 +56,12 @@ processes:
         condition: process_healthy
 
   1-deps-cabal:
-    command: "cabal update && cabal build all --only-dependencies --enable-tests --enable-benchmarks -O0"
+    command: "cabal update && cabal build all --only-dependencies -O0"
     availability:
       restart: "no"
 
   2-cabal-build-all:
-    command: "cabal build all --enable-tests --enable-benchmarks -O0"
+    command: "cabal build all -O0"
     availability:
       restart: "no"
     depends_on:
@@ -97,7 +102,8 @@ processes:
 
   3-cabal-benchmark-all:
     # Runs after the tests: benchmarks saturate every core, which makes the
-    # lock-timeout based Postgres tests flaky when they overlap.
+    # lock-timeout based Postgres tests flaky when they overlap. The PG*
+    # variables are for the Postgres benchmark planned in issues.md.
     command: |
       export PGHOST="$PWD/.pc-postgres" PGUSER=postgres PGDATABASE=domaindriven
       exec cabal bench all -O0
@@ -105,9 +111,5 @@ processes:
     availability:
       restart: "no"
     depends_on:
-      2-cabal-build-all:
-        condition: process_completed_successfully
       3-cabal-test-all:
         condition: process_completed
-      1-postgres-db:
-        condition: process_completed_successfully

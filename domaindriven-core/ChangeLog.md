@@ -3,36 +3,50 @@
 ## 0.7.0
 
 - **Breaking:** `IsPgIndex` no longer has a `toQuery` method. Index values were
-  interpolated unescaped into the read queries; they are now passed as query
-  parameters everywhere, so indices containing quotes round-trip and cannot
-  inject SQL.
+  interpolated unescaped into the read queries; every value now reaches SQL
+  escaped by libpq (`formatQuery`), so indices containing quotes round-trip and
+  cannot inject SQL. Index values containing a NUL byte are rejected with
+  `ValueError` (libpq would silently truncate them).
 - **Breaking:** the advisory lock key is now computed by PostgreSQL
-  (`pg_advisory_xact_lock(hashtext(table), hashtext(index))`) instead of by
-  `hashable`, so it no longer depends on the dependency versions of each
-  writer. This changes the lock-key protocol again: upgrade all writers sharing
-  a database together.
+  (`pg_advisory_xact_lock(hashtextextended(index, hashtextextended(table, 0)))`)
+  instead of by `hashable`, so it no longer depends on the dependency versions
+  of each writer. Writers on 0.6 and 0.7 do not exclude each other on the same
+  index: stop every writer sharing the database before starting the first 0.7
+  writer. A rolling upgrade would let two commands on one aggregate run at once.
+- **Breaking:** `mkEventQuery`, `mkEventsAfterQuery`, `EventQuery`,
+  `mkEventStream`, `queryEventsAfter` and `queryEventsAfterWithParseConcurrency`
+  are gone from `DomainDriven.Persistance.Postgres.Internal`;
+  `mkEventStreamWithParseConcurrency` now takes the table, index and the event
+  number to start after, and renders the cursor query itself.
 - **Breaking:** `ForgetfulInMemory` serializes commands per index, like the
-  Postgres backend, instead of through one global lock, and keeps event history
-  in a `Seq`. The `lock` field is replaced by `indexLocks` and `events` changed
-  type; `createForgetful` is unaffected.
+  Postgres backend, instead of through one global lock, and keeps model and
+  history together in `stateRef`; the `lock` and `events` fields are gone and
+  `busyIndices` added. `createForgetful` is unaffected.
 - `getModel` on the Postgres backend no longer opens a transaction when the
   cached model is current: it runs one `EXISTS` statement on a pooled
-  connection and only starts a transaction to refresh.
-- `createEventTable'` creates the `(index, event_number)` index with
-  `IF NOT EXISTS` under the name PostgreSQL generated before, so calling
-  `postgresWriteModelNoMigration` on every start no longer accumulates
-  duplicate indexes. Deployments that restarted often should drop their extra
-  `<table>_index_event_number_idx<N>` indexes.
+  connection and only starts a transaction to refresh. Cache hits therefore no
+  longer produce `DbTransactionDuration` log entries.
+- `createEventTable'` only creates the `(index, event_number)` index when the
+  table has none, so calling `postgresWriteModelNoMigration` on every start no
+  longer accumulates duplicate indexes. Deployments that restarted often can
+  drop their extra ones:
+  `select 'drop index concurrently ' || quote_ident(schemaname) || '.' || quote_ident(indexname) || ';' from pg_indexes where indexname ~ '_index_event_number_idx[0-9]+$';`
+- Event table names are limited to 63 characters, the PostgreSQL identifier
+  limit; longer names were silently truncated by the server.
 - Migrations lock the previous table in `EXCLUSIVE` mode while copying, which
   blocks writers of indexed tables too (the previous advisory lock only covered
   `NoIndex`), and take an advisory lock on the target table name before checking
   whether it exists, so concurrent first starts no longer race. Migrated events
-  are parsed with the same parallelism as reads.
+  are parsed in parallel across all capabilities (previously single-threaded),
+  and the migration chunk size is now the read chunk size (2048, was 100).
 - `toStored` truncates timestamps to microseconds, matching what PostgreSQL
   stores, so the events handed to `applyEvent` and the update hook are equal to
-  the replayed ones.
-- `writeEvents` returns 0 for an empty batch (previously the table's maximum
-  event number).
+  the replayed ones. Compare stored timestamps against reference times that
+  went through `truncateToMicroseconds` as well.
+- `writeEvents` documents its precondition: callers must hold the
+  `(table, index)` advisory lock from before reading the model until commit,
+  and the identity sequence must keep `CACHE 1`; otherwise a cached model can
+  miss an event forever.
 - `getEventList` carries a `HasCallStack` constraint so its connection wait is
   logged with the caller's location, like the other read paths.
 

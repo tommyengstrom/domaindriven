@@ -19,12 +19,12 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 
 ## Phase A — domaindriven-core fixes
 
-- [x] **A1 (C1, security)** `toQuery` interpolates `Indexed` text unescaped into
-      `mkEventQuery`, `mkEventsAfterQuery`, `queryEventsWithParseConcurrency`
-      (`Postgres/Internal.hs`); `query_` uses the simple protocol so
-      `Indexed "x'; drop table …; --"` executes, and an index containing `'`
-      can be written (parameterized) but never read back. Parameterize
-      (`formatQuery` for cursor queries) and remove `toQuery`.
+- [x] **A1 (C1, security)** `toQuery` interpolated `Indexed` text unescaped into
+      the read queries; `query_` uses the simple protocol so
+      `Indexed "x'; drop table …; --"` executed, and an index containing `'`
+      could be written (parameterized) but never read back. Every value now
+      goes through libpq escaping (`formatQuery` for the cursor query), NUL
+      bytes are rejected, and `toQuery` is gone.
 - [x] **A2 (P1)** `queryHasEventsAfter` was table-global and `count(*) > 0`:
       every indexed `getModel` after any write to another index took the
       exclusive lock and re-streamed, forever. → `48b8985`.
@@ -33,41 +33,43 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 - [x] **A4 (C2)** Commit failures were swallowed and the cache was published
       before COMMIT: `runCmd` reported success with unpersisted events and the
       cache stayed poisoned until restart. → `48b8985`.
-- [x] **A5 (P4)** Cache-hit `getModel` costs pool checkout + BEGIN + `exists`
-      + COMMIT. Fast path: one autocommit `exists`; open a transaction only to
-      refresh. Return the pooled connection before `withIOTrans` (pool of 1).
-- [x] **A6 (P3)** `createEventTable'` runs an unnamed `create index on …`, so
-      every `postgresWriteModelNoMigration` call (each process start) adds a
-      duplicate index. Use `create index if not exists
-      "<table>_index_event_number_idx"` (matches the auto-generated name).
-- [x] **A7 (C5)** Advisory-lock key is `hashable`'s `hash (table, index)`:
-      mixed `hashable` versions across writers silently lose mutual exclusion.
-      Use `pg_advisory_xact_lock(hashtext(?), hashtext(?))` so the DB computes
-      the key. Lock-protocol change → upgrade all writers together.
-- [x] **A8 (C4)** `toStored` uses a ns clock; Postgres rounds to µs, so the
-      `Stored` given to `applyEvent`/`postUpdateHook` in-process differs from
-      the replayed one. Truncate to µs in `toStored`.
-- [x] **A9 (C3, C6c, P6)** Migrations: lock the previous table with `lock
-      table … in exclusive mode` (the `NoIndex` advisory key does not block
-      `Indexed` writers → events committed during the copy were lost); take an
-      advisory lock on the new table name before the existence check
-      (concurrent first starts); parse migrated events with the configured
-      parallelism.
+- [x] **A5 (P4)** Cache-hit `getModel` cost pool checkout + BEGIN + `exists`
+      + COMMIT; now one autocommit `exists`, a transaction only to refresh.
+- [x] **A6 (P3)** `createEventTable'` ran an unnamed `create index on …`, so
+      every `postgresWriteModelNoMigration` call (each process start) added a
+      duplicate index. Now checks `pg_indexes` for an `(index, event_number)`
+      index first (name-independent, so Postgres's truncation of long
+      auto-generated names does not matter); table names capped at 63 chars.
+- [x] **A7 (C5)** Advisory-lock key was `hashable`'s `hash (table, index)`:
+      mixed `hashable` versions across writers silently lost mutual exclusion.
+      Now `pg_advisory_xact_lock(hashtextextended(index, hashtextextended(table, 0)))`
+      (64-bit, computed by the DB). Lock-protocol change → stop all writers
+      before upgrading (documented in haddock + ChangeLog).
+- [x] **A8 (C4)** `toStored` used a ns clock; Postgres rounds to µs, so the
+      `Stored` given to `applyEvent`/`postUpdateHook` in-process differed from
+      the replayed one. Now truncated to µs in `toStored`.
+- [x] **A9 (C3, C6c, P6)** Migrations: the previous table is locked with `lock
+      table … in exclusive mode` (the `NoIndex` advisory key did not block
+      `Indexed` writers → events committed during the copy were lost); an
+      advisory lock on the new table name precedes the existence check
+      (concurrent first starts); migrated events are parsed across all
+      capabilities with a 2048-row chunk (was 100).
 - [ ] **A9b (P6, optional)** Migrate with one cursor ordered by
       `(index, event_number)` instead of one cursor per index (needs the index
       column in the streamed row type).
 - [x] **A10 (C6a, P5)** `ForgetfulInMemory`: one global `QSem` (nested `runCmd`
-      on another index deadlocks in-memory but works on Postgres) → per-index
-      locks; `[Stored e] <> new` is O(n²) → `Seq`; lazy `modifyIORef` → strict.
+      on another index deadlocked in-memory but worked on Postgres) → per-index
+      STM busy set; `[Stored e] <> new` was O(n²) → `Seq`; model and history
+      updated together with one `atomicModifyIORef'`.
 - [x] Document on `WriteModel`/`writeEvents`: all writers must hold the
       `(table, index)` advisory lock from read to COMMIT (a raw `writeEvents`
       in an open transaction concurrent with `runCmd` yields an event below the
       watermark that is never applied); the identity sequence must keep
       `CACHE 1`; an async exception during COMMIT surfaces as an error although
       the server may have committed (next read self-heals).
-- [x] ChangeLog: `toQuery` removal, lock key, watermark semantics, empty-batch
-      `writeEvents` returns 0, timestamp truncation, `ForgetfulInMemory`
-      record changes; bump to 0.7.0 (breaking).
+- [x] ChangeLog: `toQuery` removal, lock key + upgrade procedure, watermark
+      precondition, timestamp truncation, `ForgetfulInMemory` record changes,
+      removed `Internal` helpers; bump to 0.7.0 (breaking).
 
 ## Phase B — tests
 
@@ -76,10 +78,7 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 - [ ] Backend-parametric spec (`WriteModelSpec`) over `AnyWriteModel`, run
       against `ForgetfulInMemory` and `PostgresEvent`: result/model/list/stream
       agreement; per-index isolation; failing command persists nothing and
-      releases lock/pool; hook receives a `Stored` list equal to
-      `getEventList` (C4); nested `runCmd` on another index (C6a); `Indexed`
-      values with `'`, `"`, `;`, `--`, unicode round-trip and never match other
-      indices (C1).
+      releases lock/pool.
 - [ ] Two `PostgresEvent` instances over one table converge (multi-process
       model), sequential and concurrent (`sort results == [2..21]`).
 - [ ] Connection killed mid-command (`pg_terminate_backend` from the callback):
@@ -153,3 +152,12 @@ commit-failure/cache-poisoning bug; those items are checked off below.
 
 - [ ] Lock-free refresh (readers never wait for in-flight commands) with a
       per-index in-process single-flight to avoid thundering-herd refreshes.
+- [ ] `refreshModel`: re-check `EXISTS` after taking the lock (a burst of
+      readers each declares an empty cursor today) and use a plain query
+      instead of a cursor for small deltas (4 round trips → 1).
+- [ ] `withIOTrans` could be built on `withPooledConnection` (rollback inside
+      the bracket, ~50 fewer lines).
+- [ ] `runMigrations`: `to_regclass` instead of the `information_schema` join
+      for the existence check.
+- [ ] Optional transitional dual lock (legacy `hashable` key + new key) if a
+      rolling 0.6 → 0.7 upgrade is ever required.
