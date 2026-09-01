@@ -68,6 +68,7 @@ import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
 import GHC.IO.Unsafe (unsafePerformIO)
 import System.Environment (lookupEnv)
+import System.Timeout (timeout)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO
@@ -567,34 +568,54 @@ indexedSpec = describe "Indexed models" $ do
 
     it "blocks indexed writers while their table is migrated" $ \(p, pool) -> do
         runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
-        -- The migration callback runs once the previous table is locked.
         copyStarted <- newEmptyMVar
-        let migrated :: EventTable
+        let waitForBlockedWriter :: Connection -> EventTableName -> IO ()
+            waitForBlockedWriter conn tableName = do
+                result <-
+                    query
+                        conn
+                        "select exists (\
+                        \select 1 from pg_locks as lock \
+                        \join pg_class as relation on relation.oid = lock.relation \
+                        \where relation.relname = ? \
+                        \and lock.mode = 'RowExclusiveLock' and not lock.granted)"
+                        (Only tableName)
+                case result of
+                    [Only True] -> pure ()
+                    [Only False] -> waitForBlockedWriter conn tableName
+                    unexpected -> expectationFailure $ "Unexpected lock query result: " <> show unexpected
+
+            migrated :: EventTable
             migrated =
                 MigrateUsing
                     ( \prev next conn -> do
                         putMVar copyStarted ()
-                        migrate1to1 @Indexed @Value conn prev next slowId
+                        waitForBlockedWriter conn prev
+                        migrate1to1 @Indexed @Value conn prev next id
                     )
                     eventTable
-        (writer, _) <-
-            concurrently
-                ( do
-                    takeMVar copyStarted
-                    try @IO @SqlError $ runCmd p (Indexed "b") (\_ -> pure (id, [AddOne]))
-                )
-                ( void
-                    ( postgresWriteModel pool migrated applyTestEvent 0
-                        :: IO (PostgresEvent Indexed TestModel TestEvent)
+        outcome <-
+            timeout 5000000 $
+                concurrently
+                    ( do
+                        takeMVar copyStarted
+                        try @IO @SqlError $ runCmd p (Indexed "b") (\_ -> pure (id, [AddOne]))
                     )
-                )
-        writer `shouldSatisfy` \case
-            Left err -> sqlErrorMsg err == "Event table has been retired."
-            Right _ -> False
-        withResource pool $ \conn -> do
-            [Only oldCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName eventTable)
-            [Only newCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
-            (oldCount :: Int64, newCount :: Int64) `shouldBe` (1, 1)
+                    ( void
+                        ( postgresWriteModel pool migrated applyTestEvent 0
+                            :: IO (PostgresEvent Indexed TestModel TestEvent)
+                        )
+                    )
+        case outcome of
+            Nothing -> expectationFailure "Timed out waiting for the writer to block during migration"
+            Just (writer, _) -> do
+                writer `shouldSatisfy` \case
+                    Left err -> sqlErrorMsg err == "Event table has been retired."
+                    Right _ -> False
+                withResource pool $ \conn -> do
+                    [Only oldCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName eventTable)
+                    [Only newCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
+                    (oldCount :: Int64, newCount :: Int64) `shouldBe` (1, 1)
 
     it "runs a migration once when two instances start concurrently" $ \(p, pool) -> do
         runCmd p (Indexed "a") (\_ -> pure (id, [AddOne, AddOne])) `shouldReturn` 2

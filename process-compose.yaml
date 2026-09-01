@@ -106,7 +106,7 @@ processes:
     # variables are for the Postgres benchmark planned in issues.md.
     command: |
       export PGHOST="$PWD/.pc-postgres" PGUSER=postgres PGDATABASE=domaindriven
-      exec cabal bench all -O0
+      exec cabal bench all -O0 -j1
     is_tty: true
     availability:
       restart: "no"
