@@ -3,11 +3,8 @@
 #   1-deps-cabal -> 2-cabal-build-all ------------> 3-cabal-test-all
 #                -> 2-ghcid              <- live feedback
 #
-# PostgreSQL: one disposable instance per worktree, listening on a unix socket in
-# ./.pc-postgres (gitignored, delete freely) so several worktrees can run tests at
-# once without port clashes. Unix socket paths are limited to ~100 characters, so
-# keep worktree paths short. Test and benchmark processes reach it through the
-# standard libpq PGHOST/PGUSER/PGDATABASE variables.
+# PostgreSQL runs per worktree through libpq PG* variables. Its Unix socket path
+# is limited to roughly 100 characters.
 version: "0.5"
 log_location: ./.pc-logs
 processes:
@@ -101,9 +98,7 @@ processes:
         condition: process_completed_successfully
 
   3-cabal-benchmark-all:
-    # Runs after the tests: benchmarks saturate every core, which makes the
-    # lock-timeout based Postgres tests flaky when they overlap. The PG*
-    # variables are for the Postgres benchmark planned in issues.md.
+    # Run after tests to avoid lock-timeout flakes under CPU contention.
     command: |
       export PGHOST="$PWD/.pc-postgres" PGUSER=postgres PGDATABASE=domaindriven
       exec cabal bench all -O0 -j1

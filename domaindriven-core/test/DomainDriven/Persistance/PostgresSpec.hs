@@ -197,8 +197,7 @@ setupPersistanceIndexed
     -> IO ()
 setupPersistanceIndexed test = do
     dropEventTables =<< mkTestConn
-    -- One stripe: concurrent tests must share the pool instead of queueing per
-    -- capability.
+    -- One stripe makes concurrent tests contend for the same pool.
     pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test (p{chunkSize = 2, parseConcurrency = 2}, pool)
@@ -232,8 +231,7 @@ setupTableScopedLocks test =
 mkTestConn :: IO Connection
 mkTestConn = connect =<< testConnectInfo
 
--- The standard libpq variables select the server (process-compose sets them for
--- its per-worktree instance); every unset one falls back to the CI defaults.
+-- Use libpq environment settings with CI-compatible defaults.
 testConnectInfo :: IO ConnectInfo
 testConnectInfo = do
     let setting :: String -> String -> IO String
@@ -513,7 +511,6 @@ indexedSpec = describe "Indexed models" $ do
                 ]
         for_ indices $ \index ->
             runCmd p index (\_ -> pure (id, [AddOne])) `shouldReturn` 1
-        -- A fresh instance has an empty cache, so every read goes to the database.
         reader <- postgresWriteModel pool eventTable applyTestEvent 0
         for_ indices $ \index -> do
             getModel reader index `shouldReturn` 1
@@ -531,8 +528,7 @@ indexedSpec = describe "Indexed models" $ do
             indexCount `shouldBe` (fromIntegral (length indices) :: Int64)
 
     it "creates the event table and its index idempotently, also for long names" $ \(_p, pool) -> do
-        -- 44 characters: Postgres truncates the auto-generated index name of tables
-        -- longer than 40 characters, and 0.6 relied on that name.
+        -- Long enough for Postgres to truncate the generated index name.
         let tableName = "test_events_v1_with_a_rather_long_table_name"
         withResource pool $ \conn -> do
             void . execute_ conn $ "drop table if exists " <> quoteIdent tableName
@@ -552,7 +548,7 @@ indexedSpec = describe "Indexed models" $ do
         withResource pool $ \conn -> do
             [Only indexCount] <-
                 query conn "select count(*) from pg_indexes where tablename = ?" (Only tableName)
-            -- the primary key and (index, event_number)
+            -- Primary key plus (index, event_number).
             indexCount `shouldBe` (2 :: Int64)
 
     it "hands the hook and readers the same stored events" $ \(p, pool) -> do

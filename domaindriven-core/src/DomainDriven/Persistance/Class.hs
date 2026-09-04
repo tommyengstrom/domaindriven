@@ -52,13 +52,9 @@ class ReadModel p => WriteModel p where
         -> [Stored (Event p)]
         -> m ()
 
-    -- | Run a command against the current model and persist the events it emits.
-    -- Backends serialize commands per index; a command must not run another
-    -- command on its own index. The returned model is the persisted one: if
-    -- persisting fails the error propagates and the backend's cached model is
-    -- left untouched. With Postgres, an asynchronous exception delivered while
-    -- the commit is in flight also surfaces as an error even though the server
-    -- may have committed; the next read reconciles with the database.
+    -- | Apply a command and persist its events.
+    -- Commands cannot recurse on the same index; failed writes leave the cache
+    -- unchanged.
     transactionalUpdate
         :: HasCallStack
         => forall m a
@@ -153,9 +149,7 @@ mkId = liftIO randomIO
 toStored :: MonadIO m => e -> m (Stored e)
 toStored e = Stored e <$> liftIO (truncateToMicroseconds <$> getCurrentTime) <*> mkId
 
--- | Postgres stores timestamps with microsecond precision. Truncating up front
--- keeps the events handed to 'applyEvent' and the hooks identical to the ones
--- replayed from the database.
+-- | Truncate to Postgres microsecond precision.
 truncateToMicroseconds :: UTCTime -> UTCTime
 truncateToMicroseconds (UTCTime day time) =
     UTCTime day (picosecondsToDiffTime (diffTimeToPicoseconds time `div` 1000000 * 1000000))

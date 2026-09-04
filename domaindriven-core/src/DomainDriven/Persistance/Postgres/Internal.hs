@@ -112,8 +112,7 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
     applyEvent pg = pg ^. field @"app"
     getModel pg index = liftIO $ do
         NumberedModel cached lastEventNo <- getCurrentState pg index
-        -- The pooled connection is returned before withIOTrans takes one, so a
-        -- pool of size one cannot deadlock here.
+        -- Release this connection before refreshing; the pool may contain one.
         hasNewEvents <- withPooledConnection pg $ \conn ->
             queryHasEventsAfter conn (pg ^. field @"eventTableName") index lastEventNo
         if hasNewEvents
@@ -167,8 +166,7 @@ createEventTable' conn eventTable = do
                \, timestamp timestamptz not null default now()\
                \, event jsonb not null\
                \);"
-    -- Looked up by definition rather than by name: Postgres truncates long
-    -- auto-generated index names in its own way.
+    -- Postgres may truncate generated names, so match the index definition.
     hasIndex <-
         query
             conn
@@ -229,9 +227,7 @@ simplePoolWith' modifyConfig connInfo = simplePoolWith modifyConfig (PG.connect 
 
 -- | Setup the persistance model and verify that the tables exist.
 --
--- Every writer sharing a database must use the same lock-key protocol. Writers
--- built against domaindriven-core < 0.7 do not exclude 0.7 writers on the same
--- index, so stop all of them before starting the first 0.7 writer.
+-- Stop pre-0.7 writers first; they use a different lock-key protocol.
 postgresWriteModelNoMigration
     :: HasCallStack
     => Pool Connection
@@ -246,9 +242,7 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 
 -- | Setup the persistance model and verify that the tables exist.
 --
--- Every writer sharing a database must use the same lock-key protocol. Writers
--- built against domaindriven-core < 0.7 do not exclude 0.7 writers on the same
--- index, so stop all of them before starting the first 0.7 writer.
+-- Stop pre-0.7 writers first; they use a different lock-key protocol.
 postgresWriteModel
     :: HasCallStack
     => Pool Connection
@@ -263,7 +257,7 @@ postgresWriteModel pool eventTable app' seed' = do
 
 runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
 runMigrations logger trans et = do
-    -- Serializes concurrent first starts: the loser waits here and then finds the table.
+    -- Serialize concurrent initial migrations.
     void
         ( query
             conn
@@ -284,8 +278,7 @@ runMigrations logger trans et = do
         (MigrateUsing mig prevEt, [Only False]) -> do
             -- Ensure migrations are done up until the previous table
             runMigrations logger trans prevEt
-            -- Blocks every writer on the previous table, whatever its index, until this
-            -- transaction has retired it. Readers are unaffected.
+            -- Block writers until the old table is retired.
             void . execute_ conn $
                 "lock table " <> quoteIdent (getEventTableName prevEt) <> " in exclusive mode"
             t0 <- getCurrentTime
@@ -362,15 +355,13 @@ queryEventsWithParseConcurrency workers chunkSize conn eventTable index = do
     parseEventRows workers chunkSize
         =<< query conn (eventsQuery eventTable) (indexText, 0 :: Int64)
 
--- | The events of one index after the given event number, oldest first.
 eventsQuery :: EventTableName -> PG.Query
 eventsQuery eventTable =
     "select id, event_number, timestamp, event::text from "
         <> quoteIdent eventTable
         <> " where index = ? and event_number > ? order by event_number"
 
--- | libpq escapes text only up to the first NUL byte, so an index containing one
--- would silently alias its prefix.
+-- | Reject NULs, which libpq would truncate.
 indexParam :: IsPgIndex index => index -> IO Text
 indexParam index
     | T.any (== '\0') indexText = throwM (ValueError "Index values must not contain NUL bytes")
@@ -400,15 +391,10 @@ queryHasEventsAfter conn eventTable index (EventNumber lastEvent) = do
         [Only hasEvents] -> pure hasEvents
         unexpected -> fail $ "Unexpected freshness query result: " <> show unexpected
 
--- | Insert the events of one index and return the highest event number written
--- (0 for an empty batch).
+-- | Insert events and return the highest event number, or 0 for none.
 --
--- Callers must hold the @(table, index)@ advisory lock (see 'exclusiveLock')
--- from before they read the model until the transaction commits, as
--- 'transactionalUpdate' does. Otherwise an event can commit with a number below
--- a watermark another writer has already published, and that event is never
--- applied to that process's cached model. For the same reason the identity
--- sequence of the event table must keep its default @CACHE 1@.
+-- Hold the @(table, index)@ advisory lock from model read through commit and
+-- keep the event sequence at @CACHE 1@; otherwise caches can miss events.
 writeEvents
     :: forall a index
      . ( ToJSON a
@@ -609,7 +595,7 @@ mkEventStreamWithParseConcurrency
     -> EventTableName
     -> index
     -> EventNumber
-    -- ^ Stream the events after this event number
+    -- ^ Start after this event number
     -> Stream IO (Stored event, EventNumber)
 mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn eventTable index (EventNumber after) = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
@@ -620,8 +606,7 @@ mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn eventTable ind
                 Left a -> pure $ Just (a, cursor)
                 Right a -> pure $ Just (a, cursor)
 
-        -- Cursor declarations take no parameters, so the query is rendered with
-        -- them escaped by libpq first.
+        -- Cursors cannot bind parameters; render them with libpq.
         declare :: IO Cursor.Cursor
         declare = do
             indexText <- indexParam index
@@ -757,10 +742,7 @@ publishNumberedModel ref index candidate@(NumberedModel _ candidateEventNumber) 
 
 exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
 exclusiveLock (OngoingTransaction connR _ _) etName index = do
-    -- We use advisory locks in favor of row level locks as we would not have the ability
-    -- to lock an index before the first event is written with row level locks.
-    -- Postgres computes the 64-bit key so that it does not depend on the hashable
-    -- version of each writer: everything sharing a table must derive the same key.
+    -- Advisory locks cover empty indices; Postgres derives stable keys.
     indexText <- indexParam index
     void
         ( query

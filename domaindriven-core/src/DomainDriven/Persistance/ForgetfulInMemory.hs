@@ -30,9 +30,7 @@ createForgetful appEvent m0 = do
     busy <- newTVarIO HS.empty
     pure $ ForgetfulInMemory state appEvent m0 busy (\_ _ _ -> pure ())
 
--- | In-memory state without event persistance. Commands on the same index are
--- serialized, mirroring the per-index locking of the Postgres backend, so a
--- command must not run another command on its own index.
+-- | In-memory state with per-index command serialization.
 data ForgetfulInMemory model index event = ForgetfulInMemory
     { stateRef :: IORef (HashMap index (model, Seq (Stored event)))
     , apply :: model -> Stored event -> model
