@@ -61,6 +61,11 @@ commit-failure/cache-poisoning bug; those items are checked off below.
       on another index deadlocked in-memory but worked on Postgres) → per-index
       STM busy set; `[Stored e] <> new` was O(n²) → `Seq`; model and history
       updated together with one `atomicModifyIORef'`.
+- [x] **A11** Whole-table lock unified into the advisory protocol: commands
+      take the table key shared + their index key exclusive; migrations take
+      the table key exclusive instead of `LOCK TABLE`; the startup existence
+      check is lock-free double-checked. In-flight commands drain into the
+      migration copy instead of dying on the retire trigger.
 - [x] Document on `WriteModel`/`writeEvents`: all writers must hold the
       `(table, index)` advisory lock from read to COMMIT (a raw `writeEvents`
       in an open transaction concurrent with `runCmd` yields an event below the

@@ -227,7 +227,7 @@ simplePoolWith' modifyConfig connInfo = simplePoolWith modifyConfig (PG.connect 
 
 -- | Setup the persistance model and verify that the tables exist.
 --
--- Stop pre-0.7 writers first; they use a different lock-key protocol.
+-- Writers sharing the database must all run the same domaindriven-core version.
 postgresWriteModelNoMigration
     :: HasCallStack
     => Pool Connection
@@ -242,7 +242,7 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
 
 -- | Setup the persistance model and verify that the tables exist.
 --
--- Stop pre-0.7 writers first; they use a different lock-key protocol.
+-- Writers sharing the database must all run the same domaindriven-core version.
 postgresWriteModel
     :: HasCallStack
     => Pool Connection
@@ -257,40 +257,43 @@ postgresWriteModel pool eventTable app' seed' = do
 
 runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
 runMigrations logger trans et = do
-    -- Serialize concurrent initial migrations.
-    void
-        ( query
-            conn
-            "select pg_advisory_xact_lock(hashtextextended(?, 0))"
-            (Only (getEventTableName et))
-            :: IO [Only ()]
-        )
-    tableExistQuery <-
+    exists <- tableExists
+    -- Existence is monotone (tables are retired, never dropped), so the
+    -- steady-state check takes no lock; the exclusive key below both
+    -- serializes concurrent first migrations and drains the table's writers.
+    unless exists $ do
+        exclusiveTableLock conn (getEventTableName et)
+        stillMissing <- not <$> tableExists
+        when stillMissing migrate
+  where
+    conn :: Connection
+    conn = trans ^. field @"connectionResource" . field @"resource"
+
+    tableExists :: IO Bool
+    tableExists =
         query
             conn
             "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
             (Only $ getEventTableName et)
+            >>= \case
+                [Only found] -> pure found
+                unexpected -> fail $ "Unexpected table query result: " <> show unexpected
 
-    case (et, tableExistQuery) of
-        (InitialVersion _, [Only True]) -> pure ()
-        (MigrateUsing{}, [Only True]) -> pure ()
-        (InitialVersion _, [Only False]) -> createTable
-        (MigrateUsing mig prevEt, [Only False]) -> do
+    migrate :: IO ()
+    migrate = case et of
+        InitialVersion _ -> createTable
+        MigrateUsing mig prevEt -> do
             -- Ensure migrations are done up until the previous table
             runMigrations logger trans prevEt
-            -- Block writers until the old table is retired.
-            void . execute_ conn $
-                "lock table " <> quoteIdent (getEventTableName prevEt) <> " in exclusive mode"
+            -- Drain the previous table's writers, which hold this key shared,
+            -- and block new ones until the old table is retired.
+            exclusiveTableLock conn (getEventTableName prevEt)
             t0 <- getCurrentTime
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
             retireTable conn (getEventTableName prevEt)
             t1 <- getCurrentTime
             logSafely logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
-        (_, r) -> fail $ "Unexpected table query result: " <> show r
-  where
-    conn :: Connection
-    conn = trans ^. field @"connectionResource" . field @"resource"
 
     createTable :: IO ()
     createTable = do
@@ -393,8 +396,9 @@ queryHasEventsAfter conn eventTable index (EventNumber lastEvent) = do
 
 -- | Insert events and return the highest event number, or 0 for none.
 --
--- Hold the @(table, index)@ advisory lock from model read through commit and
--- keep the event sequence at @CACHE 1@; otherwise caches can miss events.
+-- Hold the shared table key and the exclusive index key ('writerLocks') from
+-- model read through commit and keep the event sequence at @CACHE 1@;
+-- otherwise caches can miss events and migrations can copy incompletely.
 writeEvents
     :: forall a index
      . ( ToJSON a
@@ -752,10 +756,40 @@ exclusiveLock (OngoingTransaction connR _ _) etName index = do
             :: IO [Only ()]
         )
 
-withExclusiveLock
-    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
-withExclusiveLock pgt index a = do
-    exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index
+-- | Command locks: the table key shared ('exclusiveTableLock' takes it
+-- exclusively to drain writers) plus the index key exclusive. Postgres leaves
+-- the evaluation order unspecified, but both orders are deadlock-free: the
+-- index key is a leaf and migrations never take index keys. A 2^-64 collision
+-- of the two keys would be a lock upgrade, which errors on a detected deadlock
+-- rather than hanging.
+writerLocks :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
+writerLocks (OngoingTransaction connR _ _) etName index = do
+    indexText <- indexParam index
+    void
+        ( query
+            (Pool.resource connR)
+            "select pg_advisory_xact_lock_shared(hashtextextended(?, 0)), \
+            \pg_advisory_xact_lock(hashtextextended(?, hashtextextended(?, 0)))"
+            (etName, indexText, etName)
+            :: IO [((), ())]
+        )
+
+-- | The whole-table lock: waits for every in-flight command on the table (they
+-- hold this key shared) and blocks new ones until the transaction ends.
+exclusiveTableLock :: Connection -> EventTableName -> IO ()
+exclusiveTableLock conn etName =
+    void
+        ( query
+            conn
+            "select pg_advisory_xact_lock(hashtextextended(?, 0))"
+            (Only etName)
+            :: IO [Only ()]
+        )
+
+withLockLogging
+    :: HasCallStack => PostgresEventTrans i m e -> IO () -> IO a -> IO a
+withLockLogging pgt takeLocks a = do
+    takeLocks
     t0 <- getCurrentTime
     r <- a
     t1 <- getCurrentTime
@@ -763,13 +797,27 @@ withExclusiveLock pgt index a = do
         EventTableLockDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
     pure r
 
+withExclusiveLock
+    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
+withExclusiveLock pgt index =
+    withLockLogging
+        pgt
+        (exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index)
+
+withWriterLocks
+    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
+withWriterLocks pgt index =
+    withLockLogging
+        pgt
+        (writerLocks (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index)
+
 instance (IsPgIndex i, ToJSON e, FromJSON e, NFData e) => WriteModel (PostgresEvent i m e) where
     postUpdateHook pg i m e = liftIO $ (pg ^. field @"updateHook") pg i m e
 
     transactionalUpdate pg index cmd = withRunInIO $ \runInIO -> do
         (newNumberedModel, storedEvs, returnFun) <-
             withIOTrans pg $ \pgt ->
-                withExclusiveLock pgt index $ do
+                withWriterLocks pgt index $ do
                     NumberedModel m previousEventNumber <- getNumberedModel' pgt index
                     (returnFun, evs) <- runInIO $ cmd m
                     storedEvs <- traverse toStored evs

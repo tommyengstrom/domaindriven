@@ -4,8 +4,14 @@
 
 - **Breaking:** parameterize PostgreSQL index values and remove
   `IsPgIndex.toQuery`; reject index values containing NUL bytes.
-- **Breaking:** derive advisory lock keys in PostgreSQL. Stop all writers before
-  upgrading because versions 0.6 and 0.7 use different lock keys.
+- **Breaking:** derive advisory lock keys in PostgreSQL: commands hold the
+  table key shared and their index key exclusive, and migrations take the table
+  key exclusively instead of `LOCK TABLE` (no table privilege needed).
+  In-flight commands complete and are copied when a migration starts; a command
+  nested on the same table can hang undetected if a migration queues in between
+  (bound it with `lock_timeout`). Writers sharing a database must all run the
+  same domaindriven-core version — 0.6 and 0.7 lock keys do not conflict with
+  each other.
 - **Breaking:** simplify the internal PostgreSQL event-query API.
 - **Breaking:** serialize `ForgetfulInMemory` commands per index and update its
   model and history atomically.

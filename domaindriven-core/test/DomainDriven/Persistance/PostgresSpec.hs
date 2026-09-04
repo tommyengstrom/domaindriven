@@ -73,6 +73,7 @@ import Streamly.Data.Stream.Prelude qualified as Stream
 import Test.Hspec
 import UnliftIO
     ( TVar
+    , async
     , atomically
     , concurrently
     , forConcurrently
@@ -80,6 +81,7 @@ import UnliftIO
     , newTVarIO
     , readTVarIO
     , try
+    , wait
     )
 import UnliftIO.Pool
 import Prelude
@@ -567,15 +569,14 @@ indexedSpec = describe "Indexed models" $ do
         copyStarted <- newEmptyMVar
         let waitForBlockedWriter :: Connection -> EventTableName -> IO ()
             waitForBlockedWriter conn tableName = do
+                -- The late writer queues on the shared table key, before INSERT.
                 result <-
-                    query
+                    query_
                         conn
                         "select exists (\
-                        \select 1 from pg_locks as lock \
-                        \join pg_class as relation on relation.oid = lock.relation \
-                        \where relation.relname = ? \
-                        \and lock.mode = 'RowExclusiveLock' and not lock.granted)"
-                        (Only tableName)
+                        \select 1 from pg_locks \
+                        \where locktype = 'advisory' \
+                        \and mode = 'ShareLock' and not granted)"
                 case result of
                     [Only True] -> pure ()
                     [Only False] -> waitForBlockedWriter conn tableName
@@ -625,6 +626,70 @@ indexedSpec = describe "Indexed models" $ do
         withResource pool $ \conn -> do
             [Only newCount] <- query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
             newCount `shouldBe` (2 :: Int64)
+
+    it "waits for in-flight commands and copies their events" $ \(p, pool) -> do
+        runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        commandStarted <- newEmptyMVar
+        releaseCommand <- newEmptyMVar
+        let waitForQueuedMigrator :: Connection -> IO ()
+            waitForQueuedMigrator conn = do
+                result <-
+                    query_
+                        conn
+                        "select exists (\
+                        \select 1 from pg_locks \
+                        \where locktype = 'advisory' \
+                        \and mode = 'ExclusiveLock' and not granted)"
+                case result of
+                    [Only True] -> pure ()
+                    [Only False] -> waitForQueuedMigrator conn
+                    unexpected -> expectationFailure $ "Unexpected lock query result: " <> show unexpected
+
+            migrated :: EventTable
+            migrated =
+                MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+
+            inFlightCommand :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
+            inFlightCommand _ = do
+                putMVar commandStarted ()
+                takeMVar releaseCommand
+                pure (id, [AddOne])
+        outcome <- timeout 10000000 $ do
+            (writer, _) <-
+                concurrently
+                    (runCmd p (Indexed "b") inFlightCommand)
+                    ( do
+                        takeMVar commandStarted
+                        migrator <-
+                            async
+                                ( void
+                                    ( postgresWriteModel pool migrated applyTestEvent 0
+                                        :: IO (PostgresEvent Indexed TestModel TestEvent)
+                                    )
+                                )
+                        withResource pool waitForQueuedMigrator
+                        putMVar releaseCommand ()
+                        wait migrator
+                    )
+            pure writer
+        case outcome of
+            Nothing ->
+                expectationFailure "Timed out waiting for the migration to drain the in-flight command"
+            Just writer -> writer `shouldBe` 1
+        withResource pool $ \conn -> do
+            [Only oldCount] <-
+                query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName eventTable)
+            [Only newCount] <-
+                query_ conn $ "select count(*) from " <> quoteIdent (getEventTableName migrated)
+            (oldCount :: Int64, newCount :: Int64) `shouldBe` (2, 2)
+
+    it "allows a nested command on another index of the same table" $ \(p, _pool) -> do
+        outcome <- timeout 5000000 $
+            runCmd p (Indexed "outer") $ \_ -> do
+                inner <- runCmd p (Indexed "inner") $ \_ -> pure (id, [AddOne, AddOne])
+                pure (const inner, [AddOne])
+        outcome `shouldBe` Just 2
+        getModel p (Indexed "outer") `shouldReturn` 1
 
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])

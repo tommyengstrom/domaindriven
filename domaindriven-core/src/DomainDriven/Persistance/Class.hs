@@ -54,7 +54,9 @@ class ReadModel p => WriteModel p where
 
     -- | Apply a command and persist its events.
     -- Commands cannot recurse on the same index; failed writes leave the cache
-    -- unchanged.
+    -- unchanged. A command nested on the same table can hang undetected when a
+    -- migration queues in between (bound it with @lock_timeout@), and a stalled
+    -- command delays a starting migration.
     transactionalUpdate
         :: HasCallStack
         => forall m a
