@@ -78,7 +78,8 @@ instance FF.FromField EventNumber where
 data NumberedModel m = NumberedModel
     { model :: !m
     , checkpoint :: !(Maybe EventCheckpoint)
-    , eventsSinceSnapshot :: !Int64
+    , eventCount :: !Int64
+    , snapshottedEventCount :: !Int64
     }
     deriving (Show, Generic)
 

@@ -9,6 +9,8 @@ import DomainDriven.Persistance.Postgres.Internal as X
     , postgresWriteModelWithSnapshots
     , postgresWriteModelNoMigration
     , postgresWriteModelNoMigrationWithSnapshots
+    , closeSnapshotWriter
+    , flushSnapshots
     , simplePool
     , simplePool'
     , simplePoolWith

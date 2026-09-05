@@ -81,6 +81,8 @@ library
       DomainDriven.Persistance.Postgres.Migration
       DomainDriven.Persistance.Postgres.Types
       DomainDriven.Persistance.Snapshot
+  other-modules:
+      DomainDriven.Persistance.Snapshot.Worker
   hs-source-dirs:
       src
   build-depends:
@@ -120,6 +122,8 @@ test-suite domaindriven-core-test
       DomainDriven.Persistance.PostgresSpec
       DomainDriven.Persistance.Postgres.TypesSpec
       DomainDriven.Persistance.PostgresSnapshotSpec
+      DomainDriven.Persistance.PostgresSnapshotIdentitySpec
+      DomainDriven.Persistance.PostgresSnapshotWriterSpec
       DomainDriven.Persistance.SnapshotSpec
   hs-source-dirs:
       test
@@ -131,6 +135,7 @@ test-suite domaindriven-core-test
     , deepseq
     , domaindriven-core
     , hspec
+    , QuickCheck
     , postgresql-simple
     , resource-pool
     , serialise

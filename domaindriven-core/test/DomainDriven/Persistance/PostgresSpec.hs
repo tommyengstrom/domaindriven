@@ -364,6 +364,32 @@ indexedSpec = describe "Indexed models" $ do
         m1 `shouldBe` 1
         m2 `shouldBe` 3
 
+    it "preserves Unicode and SQL punctuation in aggregate indices" $ \(p, pool) -> do
+        let index :: Indexed
+            index = Indexed "café'\\東京"
+
+            events :: [TestEvent]
+            events = [AddOne, AddOne, SubtractOne]
+
+        runCmd p index (\_ -> pure (id, events)) `shouldReturn` 1
+        getModel p index `shouldReturn` 1
+        fresh <- postgresWriteModel pool eventTable applyTestEvent 0
+        getModel fresh index `shouldReturn` 1
+        listed <- getEventList fresh index
+        fmap storedEvent listed `shouldBe` events
+        Stream.toList (getEventStream fresh index) `shouldReturn` listed
+
+        runCmd p index (\_ -> pure (id, [AddOne])) `shouldReturn` 2
+        result <- runCmd fresh index $ \current -> do
+            current `shouldBe` 2
+            pure (id, [AddOne])
+        result `shouldBe` 3
+        getModel p index `shouldReturn` 3
+        getModel fresh index `shouldReturn` 3
+        finalEvents <- getEventList fresh index
+        fmap storedEvent finalEvents `shouldBe` events <> [AddOne, AddOne]
+        Stream.toList (getEventStream fresh index) `shouldReturn` finalEvents
+
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])
             testCmd i _ = do
