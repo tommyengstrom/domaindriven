@@ -131,19 +131,23 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
 getEventTableName :: EventTable -> EventTableName
-getEventTableName = validate . go 0
+getEventTableName = validateEventTableName . go 0
   where
     go :: Int -> EventTable -> String
     go i = \case
         MigrateUsing _ u -> go (i + 1) u
         InitialVersion n -> n <> "_v" <> show (i + 1)
-    validate name
-        | all isValidChar name && not (null name) && length name <= 63 = name
-        | otherwise =
-            error $
-                "[DomainDriven] Invalid event table name: "
-                    <> show name
-                    <> ". Names must be 1-63 characters of [a-zA-Z0-9_]."
+
+validateEventTableName :: EventTableName -> EventTableName
+validateEventTableName name
+    | all isValidChar name && not (null name) && length name <= 63 = name
+    | otherwise =
+        error $
+            "[DomainDriven] Invalid event table name: "
+                <> show name
+                <> ". Names must be 1-63 characters of [a-zA-Z0-9_]."
+  where
+    isValidChar :: Char -> Bool
     isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
 
 -- | Create the table required for storing state and events, if they do not yet exist.
@@ -155,7 +159,8 @@ createEventTable pgt = do
             (pgt ^. #eventTableName)
 
 createEventTable' :: Connection -> EventTableName -> IO ()
-createEventTable' conn eventTable = do
+createEventTable' conn rawEventTable = do
+    eventTable <- evaluate (validateEventTableName rawEventTable)
     void . execute_ conn $
         "create table if not exists "
             <> quoteIdent eventTable
@@ -309,7 +314,8 @@ createPostgresPersistance
     -> model
     -- ^ Initial model
     -> IO (PostgresEvent index model event)
-createPostgresPersistance pool eventTable app' seed' = do
+createPostgresPersistance pool rawEventTable app' seed' = do
+    eventTable <- evaluate (validateEventTableName rawEventTable)
     ref <- newIORef HM.empty
     defaultParseConcurrency <- max 1 <$> getNumCapabilities
     pure $
@@ -462,6 +468,7 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans index model event)
     startTrans = liftIO $ do
+        void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
         (connR, localPool) <- takeResource (connectionPool pg)
         t0 <- getCurrentTime
         let conn = Pool.resource connR
@@ -501,6 +508,7 @@ withPooledConnection
     -> (Connection -> IO a)
     -> IO a
 withPooledConnection pg f = do
+    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
     t0 <- getCurrentTime
     withResource (connectionPool pg) $ \connR -> do
         t1 <- getCurrentTime
@@ -515,6 +523,7 @@ withIOTrans
     -> (PostgresEventTrans index model event -> IO a)
     -> IO a
 withIOTrans pg f = mask $ \restore -> do
+    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
     (connR, localPool) <- do
         t0 <- getCurrentTime
         r@(acquiredConnR, acquiredLocalPool) <- takeResource (connectionPool pg)
@@ -756,15 +765,21 @@ exclusiveLock (OngoingTransaction connR _ _) etName index = do
             :: IO [Only ()]
         )
 
--- | Command locks: the table key shared ('exclusiveTableLock' takes it
--- exclusively to drain writers) plus the index key exclusive. Postgres leaves
--- the evaluation order unspecified, but both orders are deadlock-free: the
--- index key is a leaf and migrations never take index keys. A 2^-64 collision
--- of the two keys would be a lock upgrade, which errors on a detected deadlock
--- rather than hanging.
+-- | Command locks: the table key shared plus the index key exclusive.
+-- Default to a five-second lock timeout, scoped to this transaction, because
+-- a nested command can wait behind a migration waiting for its outer command.
+-- Preserve any finite timeout configured on the connection.
 writerLocks :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
 writerLocks (OngoingTransaction connR _ _) etName index = do
     indexText <- indexParam index
+    void
+        ( query_
+            (Pool.resource connR)
+            "select set_config('lock_timeout', \
+            \case current_setting('lock_timeout') \
+            \when '0' then '5s' else current_setting('lock_timeout') end, true)"
+            :: IO [Only Text]
+        )
     void
         ( query
             (Pool.resource connR)

@@ -54,9 +54,9 @@ class ReadModel p => WriteModel p where
 
     -- | Apply a command and persist its events.
     -- Commands cannot recurse on the same index; failed writes leave the cache
-    -- unchanged. A command nested on the same table can hang undetected when a
-    -- migration queues in between (bound it with @lock_timeout@), and a stalled
-    -- command delays a starting migration.
+    -- unchanged. PostgreSQL commands default to a five-second @lock_timeout@
+    -- unless the connection configures a finite timeout. A nested command can
+    -- time out when a migration is waiting for its outer command to finish.
     transactionalUpdate
         :: HasCallStack
         => forall m a

@@ -9,6 +9,7 @@ import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception
     ( AsyncException (ThreadKilled)
+    , ErrorCall
     , SomeAsyncException
     , SomeException
     , bracket
@@ -82,6 +83,7 @@ import UnliftIO
     , readTVarIO
     , try
     , wait
+    , withAsync
     )
 import UnliftIO.Pool
 import Prelude
@@ -564,6 +566,37 @@ indexedSpec = describe "Indexed models" $ do
         getEventList reader index `shouldReturn` hooked
         getEventList p index `shouldReturn` hooked
 
+    it "rejects invalid raw table names before acquiring a connection" $ \(_p, _pool) -> do
+        let invalidNames :: [EventTableName]
+            invalidNames = ["", "bad;name", "bad\"name", "bad\0name", replicate 32 'é']
+                <> fmap (replicate 63 'a' <>) ["x", "y"]
+        bracket (simplePool (fail "Unexpected connection acquisition")) destroyAllResources $ \pool ->
+            for_ invalidNames $ \tableName ->
+                ( postgresWriteModelNoMigration pool tableName applyTestEvent 0
+                    :: IO (PostgresEvent Indexed TestModel TestEvent)
+                ) `shouldThrow` \(_ :: ErrorCall) -> True
+
+    it "accepts a 63-character raw table name without aliasing its suffixes" $ \(_p, pool) -> do
+        let tableName :: EventTableName
+            tableName = "test_events_v" <> replicate 50 'a'
+        backend <- postgresWriteModelNoMigration pool tableName applyTestEvent 0
+        runCmd backend (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+        for_ ["x", "y"] $ \suffix -> do
+            ( postgresWriteModelNoMigration pool (tableName <> suffix) applyTestEvent 0
+                :: IO (PostgresEvent Indexed TestModel TestEvent)
+                ) `shouldThrow` \(_ :: ErrorCall) -> True
+            let alias :: PostgresEvent Indexed TestModel TestEvent
+                alias = backend{eventTableName = tableName <> suffix}
+            runCmd alias (Indexed "a") (\_ -> pure (id, [AddOne]))
+                `shouldThrow` \(_ :: ErrorCall) -> True
+            getModel alias (Indexed "a") `shouldThrow` \(_ :: ErrorCall) -> True
+            getEventList alias (Indexed "a") `shouldThrow` \(_ :: ErrorCall) -> True
+            Stream.toList (getEventStream alias (Indexed "a"))
+                `shouldThrow` \(_ :: ErrorCall) -> True
+        reader <- postgresWriteModelNoMigration pool tableName applyTestEvent 0
+        getModel reader (Indexed "a") `shouldReturn` 1
+        fmap storedEvent <$> getEventList reader (Indexed "a") `shouldReturn` [AddOne]
+
     it "blocks indexed writers while their table is migrated" $ \(p, pool) -> do
         runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
         copyStarted <- newEmptyMVar
@@ -690,6 +723,75 @@ indexedSpec = describe "Indexed models" $ do
                 pure (const inner, [AddOne])
         outcome `shouldBe` Just 2
         getModel p (Indexed "outer") `shouldReturn` 1
+
+    for_ [("0", 10000000), ("100ms", 2000000)] $ \(configuredTimeout, deadline) ->
+        it ("bounds nested commands behind migrations with lock_timeout=" <> T.unpack configuredTimeout) $ \(p, pool) -> do
+            runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+            commandStarted <- newEmptyMVar
+            migrationPid <- newEmptyMVar
+            startNested <- newEmptyMVar
+            let mkCommandConn :: IO Connection
+                mkCommandConn = do
+                    conn <- mkTestConn
+                    void (query conn "select set_config('lock_timeout', ?, false)" (Only configuredTimeout) :: IO [Only T.Text])
+                    pure conn
+
+                mkMigrationConn :: IO Connection
+                mkMigrationConn = do
+                    conn <- mkTestConn
+                    [Only pid] <- query_ conn "select pg_backend_pid()"
+                    putMVar migrationPid (pid :: Int)
+                    pure conn
+
+                migrated :: EventTable
+                migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+
+                waitForQueuedMigrator :: Connection -> Int -> IO ()
+                waitForQueuedMigrator conn pid = do
+                    result <- query conn
+                        "select exists (select 1 from pg_locks where pid = ? \
+                        \and locktype = 'advisory' and mode = 'ExclusiveLock' and not granted)"
+                        (Only pid)
+                    case result of
+                        [Only True] -> pure ()
+                        [Only False] -> threadDelay 1000 >> waitForQueuedMigrator conn pid
+                        unexpected -> expectationFailure $ "Unexpected lock query result: " <> show unexpected
+
+            bracket (simplePool mkCommandConn) destroyAllResources $ \commandPool ->
+                bracket (simplePool mkMigrationConn) destroyAllResources $ \migrationPool -> do
+                    let backend :: PostgresEvent Indexed TestModel TestEvent
+                        backend = p{connectionPool = commandPool}
+                        startMigration :: IO (PostgresEvent Indexed TestModel TestEvent)
+                        startMigration = postgresWriteModel migrationPool migrated applyTestEvent 0
+                    outcome <- timeout deadline $
+                        concurrently
+                            ( try @IO @SqlError $ runCmd backend (Indexed "outer") $ \_ -> do
+                                putMVar commandStarted ()
+                                takeMVar startNested
+                                inner <- runCmd backend (Indexed "inner") $ \_ -> pure (id, [AddOne])
+                                pure (const inner, [AddOne])
+                            )
+                            ( do
+                                takeMVar commandStarted
+                                withAsync startMigration $ \migrator -> do
+                                    pid <- takeMVar migrationPid
+                                    withResource pool $ \conn -> waitForQueuedMigrator conn pid
+                                    putMVar startNested ()
+                                    wait migrator
+                            )
+                    case outcome of
+                        Nothing -> expectationFailure "Nested command and migration did not finish before the deadline"
+                        Just (writer, migratedBackend) -> do
+                            writer `shouldSatisfy` \case
+                                Left err -> sqlState err == "55P03"
+                                Right _ -> False
+                            for_ [backend, migratedBackend] $ \reader -> do
+                                getModel reader (Indexed "a") `shouldReturn` 1
+                                getEventList reader (Indexed "outer") `shouldReturn` []
+                                getEventList reader (Indexed "inner") `shouldReturn` []
+                            runCmd migratedBackend (Indexed "outer") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
+                    withResource commandPool $ \conn ->
+                        query_ conn "show lock_timeout" `shouldReturn` [Only configuredTimeout]
 
     it "Updates to different indices can be done in parallel" $ \(p, _pool) -> do
         let testCmd :: Int -> TestModel -> IO (TestModel -> TestModel, [TestEvent])

@@ -8,10 +8,11 @@
   table key shared and their index key exclusive, and migrations take the table
   key exclusively instead of `LOCK TABLE` (no table privilege needed).
   In-flight commands complete and are copied when a migration starts; a command
-  nested on the same table can hang undetected if a migration queues in between
-  (bound it with `lock_timeout`). Writers sharing a database must all run the
-  same domaindriven-core version — 0.6 and 0.7 lock keys do not conflict with
-  each other.
+  nested on the same table can time out if a migration queues in between.
+  Commands use a transaction-local five-second `lock_timeout` when the
+  connection has no finite timeout configured. Writers sharing a database must
+  all run the same domaindriven-core version — 0.6 and 0.7 lock keys do not
+  conflict with each other.
 - **Breaking:** simplify the internal PostgreSQL event-query API.
 - **Breaking:** serialize `ForgetfulInMemory` commands per index and update its
   model and history atomically.
@@ -19,7 +20,9 @@
   duplicate `(index, event_number)` indexes.
 - Make indexed-table migrations safe for concurrent writers and starts, and
   parse migrated events in parallel.
-- Enforce PostgreSQL's 63-character event-table name limit.
+- Enforce PostgreSQL's 63-character event-table name limit in both constructors,
+  including `postgresWriteModelNoMigration`, before acquiring a connection.
+  Reads and commands also validate names supplied through backend record updates.
 - Normalize stored timestamps to PostgreSQL microsecond precision.
 - Document the locking and sequence requirements for `writeEvents`.
 - Include caller locations when logging `getEventList` connection waits.
