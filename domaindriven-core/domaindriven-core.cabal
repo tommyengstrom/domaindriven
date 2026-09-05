@@ -80,12 +80,14 @@ library
       DomainDriven.Persistance.Postgres.Internal
       DomainDriven.Persistance.Postgres.Migration
       DomainDriven.Persistance.Postgres.Types
+      DomainDriven.Persistance.Snapshot
   hs-source-dirs:
       src
   build-depends:
       aeson
     , base
     , bytestring
+    , cborg
     , containers
     , deepseq
     , exceptions
@@ -96,6 +98,7 @@ library
     , postgresql-simple
     , random
     , resource-pool
+    , serialise
     , streamly
     , streamly-core
     , text
@@ -116,6 +119,8 @@ test-suite domaindriven-core-test
   other-modules:
       DomainDriven.Persistance.PostgresSpec
       DomainDriven.Persistance.Postgres.TypesSpec
+      DomainDriven.Persistance.PostgresSnapshotSpec
+      DomainDriven.Persistance.SnapshotSpec
   hs-source-dirs:
       test
   build-depends:
@@ -127,6 +132,8 @@ test-suite domaindriven-core-test
     , domaindriven-core
     , hspec
     , postgresql-simple
+    , resource-pool
+    , serialise
     , streamly
     , text
     , time

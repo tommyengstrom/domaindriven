@@ -49,7 +49,10 @@ class Hashable a => IsPgIndex a where
     toPgIndex :: a -> Text -- FIXME: Should not be Text
     fromPgIndex :: Text -> a
     toQuery :: a -> PG.Query
-    toQuery t = "'" <> (fromString . T.unpack . toPgIndex) t <> "'"
+    toQuery t = "'" <> fromString (concatMap escapeQuote $ T.unpack $ toPgIndex t) <> "'"
+      where
+        escapeQuote '\'' = "''"
+        escapeQuote c = [c]
 
 instance IsPgIndex NoIndex where
     toPgIndex = const "0"
@@ -74,9 +77,16 @@ instance FF.FromField EventNumber where
 
 data NumberedModel m = NumberedModel
     { model :: !m
-    , eventNumber :: !EventNumber
+    , checkpoint :: !(Maybe EventCheckpoint)
+    , eventsSinceSnapshot :: !Int64
     }
     deriving (Show, Generic)
+
+data EventCheckpoint = EventCheckpoint
+    { eventNumber :: !EventNumber
+    , eventId :: !UUID
+    }
+    deriving (Show, Eq, Generic, NFData)
 
 data NumberedEvent e = NumberedEvent
     { event :: !(Stored e)

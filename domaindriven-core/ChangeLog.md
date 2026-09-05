@@ -2,6 +2,17 @@
 
 ## 0.6.1
 
+- Added opt-in PostgreSQL model snapshots with strict Aeson JSON and typed
+  `serialise`/CBOR codecs. Existing PostgreSQL constructors remain
+  snapshot-free; use `postgresWriteModelWithSnapshots` or its no-migration
+  counterpart to enable them.
+- **Breaking for direct backend construction:** `PostgresEvent` and its cache
+  metadata gained snapshot runtime fields. Constructor functions are source
+  compatible, but code constructing or positionally matching the exported
+  record must be updated.
+- PostgreSQL command checkpoints now come directly from `INSERT ... RETURNING`,
+  freshness checks are aggregate-index-specific, committed cache publications
+  are merged monotonically, and commit failures are propagated.
 - Switched the build from Stackage LTS 24.31 to Nightly 2026-08-10 with GHC
   9.12.4.
 - PostgreSQL advisory lock keys now include the resolved event table name as
