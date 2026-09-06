@@ -2,31 +2,37 @@
 module DomainDriven.Persistance.Postgres.Internal where
 
 import Control.Concurrent (getNumCapabilities)
+import Control.Applicative ((<|>))
 import Control.DeepSeq (NFData, force)
-import Control.Exception (evaluate)
+import Control.Exception (SomeAsyncException, SomeException, evaluate, fromException, mask_, onException, throwIO, try)
 import Control.Monad
-import Control.Monad.Catch
+import Control.Monad.Catch (MonadCatch, bracket, finally, throwM, tryJust)
 import Control.Monad.IO.Class
 import Data.Aeson
+import Data.ByteString.Lazy qualified as LBS
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Foldable
 import Data.Generics.Labels ()
 import Data.Generics.Product
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (hash)
+import Data.Hashable (Hashable, hash)
 import Data.IORef
 import Data.Int
-import Data.Maybe (fromMaybe)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.String
+import Data.Text.Encoding qualified as Text
 import Data.Time
+import Data.UUID (UUID)
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
+import Database.PostgreSQL.Simple.Types (Query (..))
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
+import DomainDriven.Persistance.Snapshot
+import DomainDriven.Persistance.Snapshot.Worker qualified as SnapshotWorker
 import GHC.Generics (Generic)
 import GHC.Stack
 import Lens.Micro
@@ -37,6 +43,7 @@ import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
+import System.Timeout qualified as Timeout
 import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
@@ -47,6 +54,7 @@ data LogEntry
     | EventTableLockDuration NominalDiffTime OneLineCallStack
     | EventTableMigrationDuration NominalDiffTime EventTableName
     | WaitForConnectionDuration NominalDiffTime OneLineCallStack
+    | SnapshotOperationFailure String
     deriving (Show, Generic)
 
 newtype OneLineCallStack = OneLineCallStack CallStack
@@ -88,6 +96,7 @@ data PostgresEvent index model event = PostgresEvent
         -> [Stored event]
         -> IO ()
     , logger :: LogEntry -> IO ()
+    , snapshotRuntime :: Maybe (SnapshotConfig model, SnapshotWorker.SnapshotWriter index)
     }
     deriving (Generic)
 
@@ -111,7 +120,7 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
     type Index (PostgresEvent i m e) = i
     type Event (PostgresEvent i m e) = e
     applyEvent pg = pg ^. field @"app"
-    getModel pg index = liftIO $ withIOTrans pg (`getModel'` index)
+    getModel pg index = liftIO $ getModelIO pg index
 
     getEventList pg index = withResource (connectionPool pg) $ \conn ->
         fmap fst
@@ -224,6 +233,22 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
     withIOTrans pg createEventTable
     pure pg
 
+postgresWriteModelNoMigrationWithSnapshots
+    :: forall index model event
+     . HasCallStack
+    => Pool Connection
+    -> EventTableName
+    -> SnapshotConfig model
+    -> (model -> Stored event -> model)
+    -> model
+    -> IO (PostgresEvent index model event)
+postgresWriteModelNoMigrationWithSnapshots pool eventTable snapshots app' seed' = do
+    initializeSnapshotStore (snapshotStore snapshots)
+    pg <- createPostgresPersistance pool eventTable app' seed'
+    withIOTrans pg createEventTable
+    writer <- SnapshotWorker.newSnapshotWriter (snapshotQueueCapacity snapshots)
+    pure (pg :: PostgresEvent index model event){snapshotRuntime = Just (snapshots, writer)}
+
 -- | Setup the persistance model and verify that the tables exist.
 postgresWriteModel
     :: HasCallStack
@@ -236,6 +261,37 @@ postgresWriteModel pool eventTable app' seed' = do
     pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
     pure pg
+
+postgresWriteModelWithSnapshots
+    :: forall index model event
+     . HasCallStack
+    => Pool Connection
+    -> EventTable
+    -> SnapshotConfig model
+    -> (model -> Stored event -> model)
+    -> model
+    -> IO (PostgresEvent index model event)
+postgresWriteModelWithSnapshots pool eventTable snapshots app' seed' = do
+    initializeSnapshotStore (snapshotStore snapshots)
+    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
+    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
+    writer <- SnapshotWorker.newSnapshotWriter (snapshotQueueCapacity snapshots)
+    pure (pg :: PostgresEvent index model event){snapshotRuntime = Just (snapshots, writer)}
+
+-- | Stop snapshot admission, discard pending work, and cancel/join active work.
+-- Idempotent; does not close caller-owned pools or disable event operations.
+-- Close the writer before destroying its pools. Custom store/codec callbacks
+-- must cooperate with asynchronous cancellation.
+closeSnapshotWriter :: PostgresEvent index model event -> IO ()
+closeSnapshotWriter pg = traverse_ (SnapshotWorker.closeSnapshotWriter . snd) (pg ^. field @"snapshotRuntime")
+
+-- | Wait for snapshot attempts to become idle. Failures remain logged, and
+-- concurrent requests can extend the wait. This does not snapshot below cadence.
+-- A timeout leaves work running; a closed writer reports 'SnapshotFlushClosed'.
+flushSnapshots :: SnapshotTimeout -> PostgresEvent index model event -> IO SnapshotFlushResult
+flushSnapshots duration pg = case pg ^. field @"snapshotRuntime" of
+    Nothing -> pure SnapshotFlushCompleted
+    Just (_, writer) -> SnapshotWorker.flushSnapshots duration writer
 
 newtype Exists = Exists
     { exists :: Bool
@@ -303,6 +359,8 @@ createPostgresPersistance pool eventTable app' seed' = do
                 e@(EventTableLockDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
                 EventTableMigrationDuration dt etName -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
                 e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                SnapshotOperationFailure failure -> putStrLn $ "[DomainDriven] snapshot operation failed: " <> failure
+            , snapshotRuntime = Nothing
             }
 
 -- | Default number of events fetched per Postgres cursor batch. Also sets the
@@ -330,15 +388,13 @@ queryEventsWithParseConcurrency
     -> index
     -> IO [(Stored a, EventNumber)]
 queryEventsWithParseConcurrency workers chunkSize conn eventTable index = do
-    parseEventRows workers chunkSize =<< query_ conn q
+    parseEventRows workers chunkSize =<< query conn q (Only $ toPgIndex index)
   where
     q :: PG.Query
     q =
         "select id, event_number,timestamp,event::text from "
             <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " order by event_number"
+            <> " where index = ? order by event_number"
 
 queryEventsAfter
     :: (FromJSON a, NFData a)
@@ -358,17 +414,15 @@ queryEventsAfterWithParseConcurrency
     -> IO [(Stored a, EventNumber)]
 queryEventsAfterWithParseConcurrency workers chunkSize conn eventTable (EventNumber lastEvent) =
     parseEventRows workers chunkSize
-        =<< query_
+        =<< query
             conn
             ( "select id, event_number,timestamp,event::text from "
                 <> quoteIdent eventTable
-                <> " where event_number > "
-                <> fromString (show lastEvent)
-                <> " order by event_number"
+                <> " where event_number > ? order by event_number"
             )
+            (Only lastEvent)
 
-newtype EventQuery = EventQuery {getPgQuery :: PG.Query}
-    deriving (Show, Generic)
+newtype EventQuery = EventQuery {getPgQuery :: Connection -> IO PG.Query}
 
 mkEventsAfterQuery
     :: IsPgIndex index
@@ -377,39 +431,44 @@ mkEventsAfterQuery
     -> EventNumber
     -> EventQuery
 mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
-    EventQuery $
-        "select id, event_number,timestamp,event::text from "
-            <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " and event_number > "
-            <> fromString (show lastEvent)
-            <> " order by event_number"
+    EventQuery $ \conn -> do
+        formatted <-
+            formatQuery
+                conn
+                ( "select id, event_number,timestamp,event::text from "
+                    <> quoteIdent eventTable
+                    <> " where index = ? and event_number > ? order by event_number"
+                )
+                (toPgIndex index, lastEvent)
+        pure $ Query formatted
 
 mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
 mkEventQuery eventTable index =
-    EventQuery $
-        "select id, event_number,timestamp,event::text from "
-            <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " order by event_number"
+    EventQuery $ \conn -> do
+        formatted <-
+            formatQuery
+                conn
+                ( "select id, event_number,timestamp,event::text from "
+                    <> quoteIdent eventTable
+                    <> " where index = ? order by event_number"
+                )
+                (Only $ toPgIndex index)
+        pure $ Query formatted
 
 headMay :: [a] -> Maybe a
 headMay = \case
     a : _ -> Just a
     [] -> Nothing
 
-queryHasEventsAfter :: Connection -> EventTableName -> EventNumber -> IO Bool
-queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
-    maybe True fromOnly . headMay <$> query_ conn q
+queryHasEventsAfter :: IsPgIndex index => Connection -> EventTableName -> index -> EventNumber -> IO Bool
+queryHasEventsAfter conn eventTable index (EventNumber lastEvent) =
+    maybe True fromOnly . headMay <$> query conn q (toPgIndex index, lastEvent)
   where
     q :: PG.Query
     q =
-        "select count(*) > 0 from "
+        "select exists(select 1 from "
             <> quoteIdent eventTable
-            <> " where event_number > "
-            <> fromString (show lastEvent)
+            <> " where index = ? and event_number > ?)"
 
 -- writeEvents
 --     :: forall a
@@ -445,31 +504,43 @@ writeEvents
     -> index
     -> [Stored a]
     -> IO EventNumber
-writeEvents conn eventTable index storedEvents = do
-    _ <-
-        executeMany
-            conn
-            ( "insert into "
-                <> quoteIdent eventTable
-                <> " (id, index, timestamp, event) \
-                   \values (?, ?, ?, ?)"
-            )
-            ( fmap
-                ( \x ->
-                    ( storedUUID x
-                    , toPgIndex index
-                    , storedTimestamp x
-                    , encode $ storedEvent x
+writeEvents conn eventTable index storedEvents =
+    maybe 0 (\EventCheckpoint{eventNumber = number} -> number)
+        <$> writeEventsCheckpoint conn eventTable index storedEvents
+
+writeEventsCheckpoint
+    :: forall a index
+     . (ToJSON a, IsPgIndex index)
+    => Connection
+    -> EventTableName
+    -> index
+    -> [Stored a]
+    -> IO (Maybe EventCheckpoint)
+writeEventsCheckpoint conn eventTable index storedEvents =
+    case storedEvents of
+        [] -> pure Nothing
+        _ -> do
+            rows <-
+                query
+                    conn
+                    ( "with inserted as (insert into "
+                        <> quoteIdent eventTable
+                        <> " (id, index, timestamp, event) select id, index, timestamp, event from jsonb_to_recordset(?::jsonb) as batch(id uuid, index varchar, timestamp timestamptz, event jsonb) returning event_number, id) select event_number, id from inserted order by event_number desc limit 1"
                     )
-                )
-                storedEvents
-            )
-    foldl' max 0 . fmap fromOnly
-        <$> query_
-            conn
-            ( "select coalesce(max(event_number),1) from "
-                <> quoteIdent eventTable
-            )
+                    (Only $ Text.decodeUtf8 $ LBS.toStrict $ encode $ fmap eventRow storedEvents)
+                    :: IO [(EventNumber, UUID)]
+            case rows of
+                [(number, eventId)] -> pure . Just $ EventCheckpoint number eventId
+                _ -> fail "Event insertion did not return a checkpoint"
+  where
+    eventRow :: Stored a -> Value
+    eventRow stored =
+        object
+            [ "id" .= storedUUID stored
+            , "index" .= toPgIndex index
+            , "timestamp" .= storedTimestamp stored
+            , "event" .= storedEvent stored
+            ]
 
 getEventStream'
     :: ( FromJSON event
@@ -499,9 +570,31 @@ withStreamReadTransaction
 withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans index model event)
-    startTrans = liftIO $ do
-        (connR, localPool) <- takeResource (connectionPool pg)
+    startTrans = liftIO $ beginTransaction pg
+
+    rollbackTrans :: PostgresEventTrans index model event -> m ()
+    rollbackTrans pgt = liftIO $ do
+        -- Nothing changes. We just need the transaction to be able to stream events.
+        let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
+            conn = Pool.resource connR
+        (do
+            PG.rollback conn `onException` destroyResource (connectionPool pg) localPool conn
+            Pool.putResource localPool conn
+            ) `finally` do
+                t1 <- getCurrentTime
+                logIgnoringFailures
+                    (pgt ^. field' @"logger")
+                    (DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack))
+
+beginTransaction :: HasCallStack => PostgresEvent index model event -> IO (PostgresEventTrans index model event)
+beginTransaction pg = mask_ $ do
+    waitingSince <- getCurrentTime
+    (connR, localPool) <- takeResource (connectionPool pg)
+    (do
         t0 <- getCurrentTime
+        logIgnoringFailures
+            (pg ^. field @"logger")
+            (WaitForConnectionDuration (diffUTCTime t0 waitingSince) (OneLineCallStack callStack))
         PG.begin $ Pool.resource connR
         pure $
             PostgresEventTrans
@@ -514,25 +607,7 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
                 , parseConcurrency = pg ^. field @"parseConcurrency"
                 , logger = pg ^. field @"logger"
                 }
-
-    rollbackTrans :: PostgresEventTrans index model event -> m ()
-    rollbackTrans pgt = liftIO $ do
-        -- Nothing changes. We just need the transaction to be able to stream events.
-        let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
-            conn = Pool.resource connR
-
-            giveBackConn :: IO ()
-            giveBackConn = do
-                PG.rollback conn
-                putResource localPool conn
-                t1 <- getCurrentTime
-                pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        giveBackConn `catchAll` \_ -> do
-            t1 <- getCurrentTime
-            pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-            destroyResource (connectionPool pg) localPool conn
+        ) `onException` destroyResource (connectionPool pg) localPool (Pool.resource connR)
 
 withIOTrans
     :: forall a index model event
@@ -542,14 +617,7 @@ withIOTrans
     -> IO a
 withIOTrans pg f = do
     transactionCompleted <- newIORef False
-    (connR, localPool) <- do
-        t0 <- getCurrentTime
-        r <- takeResource (connectionPool pg)
-        t1 <- getCurrentTime
-        pg ^. field @"logger" $
-            WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        pure r
-    bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
+    bracket (beginTransaction pg) (cleanup transactionCompleted) $ \pgt -> do
         a <- f pgt
         writeIORef transactionCompleted True
         pure a
@@ -558,40 +626,30 @@ withIOTrans pg f = do
     cleanup transactionCompleted pgt = do
         let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
             conn = Pool.resource connR
+        completed <- readIORef transactionCompleted
+        transactionResult <- try @SomeException $ case completed of
+            True -> PG.commit conn
+            False -> PG.rollback conn
+        case transactionResult of
+            Left failure -> do
+                destroyResource (connectionPool pg) localPool conn
+                logTransactionDuration pgt t0
+                throwIO failure
+            Right () -> do
+                returnResult <- try @SomeException $ Pool.putResource localPool conn
+                case returnResult of
+                    Left failure -> do
+                        destroyResource (connectionPool pg) localPool conn
+                        logTransactionDuration pgt t0
+                        throwIO failure
+                    Right () -> logTransactionDuration pgt t0
 
-            giveBackConn :: IO ()
-            giveBackConn = do
-                readIORef transactionCompleted >>= \case
-                    True -> PG.commit conn
-                    False -> PG.rollback conn
-                Pool.putResource localPool conn
-                t1 <- getCurrentTime
-                pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        giveBackConn `catchAll` \_ -> do
-            t1 <- getCurrentTime
-            pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-            destroyResource (connectionPool pg) localPool conn
-
-    prepareTransaction
-        :: Pool.Resource Connection
-        -> LocalPool Connection
-        -> IO (PostgresEventTrans index model event)
-    prepareTransaction connR localPool = do
-        t0 <- getCurrentTime
-        PG.begin $ Pool.resource connR
-        pure $
-            PostgresEventTrans
-                { transaction = OngoingTransaction connR localPool t0
-                , eventTableName = pg ^. field @"eventTableName"
-                , modelIORef = pg ^. field @"modelIORef"
-                , app = pg ^. field @"app"
-                , seed = pg ^. field @"seed"
-                , chunkSize = pg ^. field @"chunkSize"
-                , parseConcurrency = pg ^. field @"parseConcurrency"
-                , logger = pg ^. field @"logger"
-                }
+    logTransactionDuration :: PostgresEventTrans index model event -> UTCTime -> IO ()
+    logTransactionDuration pgt t0 = do
+        t1 <- getCurrentTime
+        logIgnoringFailures
+            (pgt ^. field' @"logger")
+            (DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack))
 
 mkEventStream
     :: (FromJSON event, NFData event)
@@ -618,7 +676,7 @@ mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn q = do
                 Right a -> pure $ Just (a, cursor)
 
     Stream.bracketIO
-        (Cursor.declareCursor conn (getPgQuery q))
+        (getPgQuery q conn >>= Cursor.declareCursor conn)
         Cursor.closeCursor
         ( Stream.unfoldEach Unfold.fromList
             . Stream.mapM (parseEventRows parseConcurrency chunkSize . toList)
@@ -666,66 +724,302 @@ parseEventRows workers chunkSize rows = do
                     $ Stream.fromList rows
     either throwM pure (sequence parsed)
 
-getModel'
+data LoadedSnapshot model = LoadedSnapshot
+    { loadedStoredSnapshot :: !StoredSnapshot
+    , loadedModel :: !(Either SnapshotFailure model)
+    }
+
+getModelIO
     :: forall e index m
-     . (IsPgIndex index, FromJSON e, NFData e)
-    => PostgresEventTrans index m e
+     . (HasCallStack, IsPgIndex index, FromJSON e, NFData e)
+    => PostgresEvent index m e
     -> index
     -> IO m
-getModel' pgt index = do
-    NumberedModel model lastEventNo <- getCurrentState pgt index
-    hasNewEvents <-
-        queryHasEventsAfter
-            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
-            (pgt ^. field @"eventTableName")
-            lastEventNo
-    if hasNewEvents then fst <$> refreshModel pgt index else pure model
+getModelIO pg index = do
+    cached <- HM.lookup index <$> readIORef (pg ^. field @"modelIORef")
+    loaded <- case cached of
+        Just _ -> pure Nothing
+        Nothing -> loadSnapshotCandidate pg index
+    (state, invalidSnapshot) <- withIOTrans pg $ \pgt -> do
+        current <- HM.lookup index <$> readIORef (pgt ^. field @"modelIORef")
+        case current of
+            Just currentState -> do
+                hasNewEvents <- queryHasEventsAfter (transactionConnection pgt) (pgt ^. field @"eventTableName") index (stateEventNumber currentState)
+                if hasNewEvents
+                    then withExclusiveLock pgt index $ reconstructModel pgt index loaded
+                    else pure (currentState, Nothing)
+            Nothing -> withExclusiveLock pgt index $ reconstructModel pgt index loaded
+    published <- publishModel pg index state
+    traverse_ (deleteInvalidSnapshot pg index) invalidSnapshot
+    attemptSnapshot pg index published
+    pure (model published)
 
-getCurrentState
-    :: forall pg index model
-     . ( IsPgIndex index
-       , HasField' "modelIORef" pg (IORef (HashMap index (NumberedModel model)))
-       , HasField' "seed" pg model
-       )
-    => pg
-    -> index
-    -> IO (NumberedModel model)
-getCurrentState pg index =
-    fromMaybe (NumberedModel (pg ^. field' @"seed") 0) . HM.lookup index
-        <$> readIORef (pg ^. field' @"modelIORef")
-
-refreshModel
+reconstructModel
     :: forall i m e
      . (IsPgIndex i, FromJSON e, NFData e)
     => PostgresEventTrans i m e
     -> i
-    -> IO (m, EventNumber)
-refreshModel pgt index = withExclusiveLock pgt index $ do
-    -- refresh doesn't write any events but changes the state and thus needs a lock
-    NumberedModel model lastEventNo <- getCurrentState pgt index
-    let eventStream =
-            mkEventStreamWithParseConcurrency
-                (pgt ^. field @"parseConcurrency")
-                (pgt ^. field @"chunkSize")
-                (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
-                (mkEventsAfterQuery (pgt ^. field @"eventTableName") index lastEventNo)
+    -> Maybe (LoadedSnapshot m)
+    -> IO (NumberedModel m, Maybe (StoredSnapshot, SnapshotFailure))
+reconstructModel pgt index loaded = do
+    cached <- HM.lookup index <$> readIORef (pgt ^. field @"modelIORef")
+    (initialState, invalidSnapshot) <- case cached of
+        Just state -> pure (state, Nothing)
+        Nothing -> stateFromSnapshot pgt index loaded
+    state <- replayEvents pgt index initialState
+    pure (state, invalidSnapshot)
 
-        applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
-        applyModel (NumberedModel m _) (ev, evNumber) =
-            NumberedModel ((pgt ^. field @"app") m ev) evNumber
+stateFromSnapshot
+    :: IsPgIndex i
+    => PostgresEventTrans i m e
+    -> i
+    -> Maybe (LoadedSnapshot m)
+    -> IO (NumberedModel m, Maybe (StoredSnapshot, SnapshotFailure))
+stateFromSnapshot pgt index = \case
+    Nothing -> pure (seedState pgt, Nothing)
+    Just LoadedSnapshot{loadedStoredSnapshot, loadedModel} -> case loadedModel of
+        Left failure -> pure (seedState pgt, Just (loadedStoredSnapshot, failure))
+        Right snapshotModel -> do
+            valid <- validateSnapshotCheckpoint pgt index (storedSnapshotCheckpoint loadedStoredSnapshot)
+            pure $
+                if valid
+                    then
+                        ( NumberedModel
+                            snapshotModel
+                            (Just $ fromSnapshotCheckpoint $ storedSnapshotCheckpoint loadedStoredSnapshot)
+                            (snapshotEventCount $ storedSnapshotCheckpoint loadedStoredSnapshot)
+                            (snapshotEventCount $ storedSnapshotCheckpoint loadedStoredSnapshot)
+                        , Nothing
+                        )
+                    else (seedState pgt, Just (loadedStoredSnapshot, SnapshotFailure "Snapshot checkpoint does not match the event log"))
 
-    newNumberedModel@(NumberedModel newModel lastNewEventNo) <-
-        Stream.fold
-            ( Fold.foldl'
-                applyModel
-                (NumberedModel model lastEventNo)
+seedState :: HasField' "seed" pg m => pg -> NumberedModel m
+seedState pg = NumberedModel (pg ^. field' @"seed") Nothing 0 0
+
+replayEvents
+    :: forall i m e
+     . (IsPgIndex i, FromJSON e, NFData e)
+    => PostgresEventTrans i m e
+    -> i
+    -> NumberedModel m
+    -> IO (NumberedModel m)
+replayEvents pgt index initialState =
+    Stream.fold (Fold.foldl' applyModel initialState) eventStream
+  where
+    eventStream :: Stream IO (Stored e, EventNumber)
+    eventStream =
+        mkEventStreamWithParseConcurrency
+            (pgt ^. field @"parseConcurrency")
+            (pgt ^. field @"chunkSize")
+            (transactionConnection pgt)
+            (mkEventsAfterQuery (pgt ^. field @"eventTableName") index (stateEventNumber initialState))
+
+    applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
+    applyModel NumberedModel{model = currentModel, eventCount, snapshottedEventCount} (stored, number) =
+        NumberedModel
+            ((pgt ^. field @"app") currentModel stored)
+            (Just $ EventCheckpoint number (storedUUID stored))
+            (eventCount + 1)
+            snapshottedEventCount
+
+validateSnapshotCheckpoint
+    :: IsPgIndex i
+    => PostgresEventTrans i m e
+    -> i
+    -> SnapshotCheckpoint
+    -> IO Bool
+validateSnapshotCheckpoint pgt index SnapshotCheckpoint{snapshotEventNumber, snapshotEventId, snapshotEventCount} = do
+    rows <-
+        query
+            (transactionConnection pgt)
+            ( "select exists(select 1 from "
+                <> quoteIdent (pgt ^. field @"eventTableName")
+                <> " where index = ? and event_number = ? and id = ?)"
             )
-            eventStream
+            (toPgIndex index, snapshotEventNumber, snapshotEventId)
+            :: IO [Only Bool]
+    pure $ case rows of
+        [Only valid] -> valid && snapshotEventCount > 0 && snapshotEventCount <= snapshotEventNumber
+        _ -> False
 
-    atomicModifyIORef
-        (pgt ^. field @"modelIORef")
-        (\a -> (HM.insert index newNumberedModel a, ()))
-    pure (newModel, lastNewEventNo)
+transactionConnection :: PostgresEventTrans i m e -> Connection
+transactionConnection pgt =
+    pgt ^. field @"transaction" . field @"connectionResource" . field @"resource"
+
+stateEventNumber :: NumberedModel m -> EventNumber
+stateEventNumber NumberedModel{checkpoint} =
+    maybe 0 (\EventCheckpoint{eventNumber = number} -> number) checkpoint
+
+fromSnapshotCheckpoint :: SnapshotCheckpoint -> EventCheckpoint
+fromSnapshotCheckpoint SnapshotCheckpoint{snapshotEventNumber, snapshotEventId} =
+    EventCheckpoint (EventNumber snapshotEventNumber) snapshotEventId
+
+toSnapshotCheckpoint :: EventCheckpoint -> Int64 -> SnapshotCheckpoint
+toSnapshotCheckpoint EventCheckpoint{eventNumber = EventNumber number, eventId} count =
+    SnapshotCheckpoint number eventId count
+
+publishModel
+    :: forall index m e. Hashable index
+    => PostgresEvent index m e
+    -> index
+    -> NumberedModel m
+    -> IO (NumberedModel m)
+publishModel pg index candidate =
+    atomicModifyIORef' (pg ^. field @"modelIORef") $ \models ->
+        let published :: NumberedModel m
+            published = case HM.lookup index models of
+                Just current ->
+                    (if stateEventNumber current > stateEventNumber candidate then current else candidate)
+                        { snapshottedEventCount = max (snapshottedEventCount current) (snapshottedEventCount candidate)
+                        }
+                Nothing -> candidate
+         in (HM.insert index published models, published)
+
+loadSnapshotCandidate
+    :: IsPgIndex index
+    => PostgresEvent index m e
+    -> index
+    -> IO (Maybe (LoadedSnapshot m))
+loadSnapshotCandidate pg index = case pg ^. field @"snapshotRuntime" of
+    Nothing -> pure Nothing
+    Just (config, _) -> do
+        loaded <- runSnapshotOperation pg config ("load/decode " <> show (snapshotKey pg config index)) $ do
+            snapshot <- loadSnapshot (snapshotStore config) (snapshotKey pg config index)
+            traverse (decodeLoaded config) snapshot
+        pure $ join loaded
+  where
+    decodeLoaded :: SnapshotConfig m -> StoredSnapshot -> IO (LoadedSnapshot m)
+    decodeLoaded config stored = do
+        decoded <-
+            if storedSnapshotFormat stored == snapshotCodecFormat (snapshotCodec config)
+                then decodeSnapshot (snapshotCodec config) (storedSnapshotPayload stored)
+                else pure . Left $ SnapshotFailure "Snapshot format does not match the configured codec"
+        pure $ LoadedSnapshot stored decoded
+
+deleteInvalidSnapshot
+    :: IsPgIndex index
+    => PostgresEvent index m e
+    -> index
+    -> (StoredSnapshot, SnapshotFailure)
+    -> IO ()
+deleteInvalidSnapshot pg index (snapshot, failure) = case pg ^. field @"snapshotRuntime" of
+    Nothing -> pure ()
+    Just (config, _) -> do
+        logSnapshotFailure pg ("reject " <> show (snapshotKey pg config index) <> ": " <> snapshotFailureMessage failure)
+        void . runSnapshotOperation pg config ("delete " <> show (snapshotKey pg config index)) $
+            deleteSnapshot (snapshotStore config) (snapshotKey pg config index) snapshot
+
+attemptSnapshot
+    :: forall index m e. IsPgIndex index
+    => PostgresEvent index m e
+    -> index
+    -> NumberedModel m
+    -> IO ()
+attemptSnapshot pg index observed = case pg ^. field @"snapshotRuntime" of
+    Just (config, writer)
+        | eventCount observed - snapshottedEventCount observed >= everyNEvents (snapshotFrequency config) -> do
+            let context :: String
+                context = show (snapshotKey pg config index)
+            result <- trySynchronous $
+                SnapshotWorker.enqueueSnapshot writer index $
+                    SnapshotWorker.SnapshotJob
+                        { jobEventNumber = unEventNumber $ stateEventNumber observed
+                        , jobAction = do
+                            current <- HM.lookup index <$> readIORef (pg ^. field @"modelIORef")
+                            traverse_ (storeIfDue config) current
+                        , jobFailure = \failure -> logSnapshotFailure pg ("background write " <> context <> ": " <> show failure)
+                        }
+            case result of
+                Left failure -> logSnapshotFailure pg ("enqueue " <> context <> ": " <> show failure)
+                Right SnapshotWorker.SnapshotQueueFull -> logSnapshotFailure pg ("write queue full for " <> context <> "; later traffic can retry")
+                Right SnapshotWorker.SnapshotQueued -> pure ()
+                Right SnapshotWorker.SnapshotWriterStopped -> pure ()
+    Just _ -> pure ()
+    Nothing -> pure ()
+  where
+    storeIfDue :: SnapshotConfig m -> NumberedModel m -> IO ()
+    storeIfDue config state = case checkpoint state of
+        Just eventCheckpoint
+            | eventCount state - snapshottedEventCount state >= everyNEvents (snapshotFrequency config) -> do
+                result <- runSnapshotOperation pg config ("encode/store " <> show (snapshotKey pg config index)) $ do
+                    encoded <- encodeSnapshot (snapshotCodec config) (model state)
+                    bytes <- case encoded of
+                        Left failure -> fail (snapshotFailureMessage failure)
+                        Right bytes -> pure bytes
+                    storeSnapshot
+                        (snapshotStore config)
+                        (snapshotKey pg config index)
+                        (toSnapshotCheckpoint eventCheckpoint $ eventCount state)
+                        (snapshotCodecFormat $ snapshotCodec config)
+                        bytes
+                case result of
+                    Just SnapshotStored -> markSnapshotStored pg index state
+                    Just NewerSnapshotRetained -> pure ()
+                    Nothing -> pure ()
+        Just _ -> pure ()
+        Nothing -> pure ()
+
+markSnapshotStored
+    :: forall index m e. Hashable index
+    => PostgresEvent index m e
+    -> index
+    -> NumberedModel m
+    -> IO ()
+markSnapshotStored pg index storedState =
+    atomicModifyIORef' (pg ^. field @"modelIORef") $ \models ->
+        let updated :: HashMap index (NumberedModel m)
+            updated = HM.adjust markStored index models
+         in (updated, ())
+  where
+    markStored :: NumberedModel m -> NumberedModel m
+    markStored current
+        | stateEventNumber current < stateEventNumber storedState = current
+        | otherwise =
+            current
+                { snapshottedEventCount =
+                    max (snapshottedEventCount current) (eventCount storedState)
+                }
+
+snapshotKey :: IsPgIndex index => PostgresEvent index m e -> SnapshotConfig m -> index -> SnapshotKey
+snapshotKey pg config index =
+    SnapshotKey
+        (pg ^. field @"eventTableName")
+        (toPgIndex index)
+        (snapshotProjectionName config)
+        (snapshotProjectionRevision config)
+        (snapshotCodecId $ snapshotCodec config)
+
+runSnapshotOperation
+    :: PostgresEvent index m e
+    -> SnapshotConfig m
+    -> String
+    -> IO a
+    -> IO (Maybe a)
+runSnapshotOperation pg config context operation = do
+    result <- trySynchronous $ Timeout.timeout timeoutMicros operation
+    case result of
+        Left failure -> do
+            logSnapshotFailure pg (context <> ": " <> show failure)
+            pure Nothing
+        Right Nothing -> do
+            logSnapshotFailure pg (context <> ": operation timed out")
+            pure Nothing
+        Right (Just value) -> pure (Just value)
+  where
+    timeoutMicros :: Int
+    timeoutMicros = ceiling (snapshotTimeoutDuration (snapshotTimeout config) * 1000000)
+
+logSnapshotFailure :: PostgresEvent index m e -> String -> IO ()
+logSnapshotFailure pg failure =
+    logIgnoringFailures (pg ^. field @"logger") (SnapshotOperationFailure failure)
+
+logIgnoringFailures :: (LogEntry -> IO ()) -> LogEntry -> IO ()
+logIgnoringFailures logger entry = void . trySynchronous $ logger entry
+
+trySynchronous :: IO a -> IO (Either SomeException a)
+trySynchronous = tryJust $ \failure -> case fromException failure :: Maybe SomeAsyncException of
+    Just _ -> Nothing
+    Nothing -> Just failure
 
 exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
 exclusiveLock (OngoingTransaction connR _ _) etName index = do
@@ -753,25 +1047,36 @@ withExclusiveLock pgt index a = do
 instance (IsPgIndex i, ToJSON e, FromJSON e, NFData e) => WriteModel (PostgresEvent i m e) where
     postUpdateHook pg i m e = liftIO $ (pg ^. field @"updateHook") pg i m e
 
-    transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
-        withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
-            m <- getModel' pgt index
-            (returnFun, evs) <- runInIO $ cmd m
-            storedEvs <- traverse toStored evs
-            newNumberedModel <-
-                uncurry NumberedModel
-                    <$> concurrently
+    transactionalUpdate pg index cmd = withRunInIO $ \runInIO -> do
+        cached <- HM.lookup index <$> readIORef (pg ^. field @"modelIORef")
+        loaded <- case cached of
+            Just _ -> pure Nothing
+            Nothing -> loadSnapshotCandidate pg index
+        (newState, storedEvents, returnFun, invalidSnapshot) <-
+            withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
+                (currentState, invalid) <- reconstructModel pgt index loaded
+                (extractResult, events) <- runInIO $ cmd (model currentState)
+                stored <- traverse toStored events
+                (newModel, writtenCheckpoint) <-
+                    concurrently
                         ( Stream.fold
-                            (Fold.foldl' (pg ^. field @"app") m)
-                            (Stream.fromList storedEvs)
+                            (Fold.foldl' (pg ^. field @"app") (model currentState))
+                            (Stream.fromList stored)
                         )
-                        ( writeEvents
-                            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
+                        ( writeEventsCheckpoint
+                            (transactionConnection pgt)
                             (pg ^. field @"eventTableName")
                             index
-                            storedEvs
+                            stored
                         )
-            atomicModifyIORef
-                (pg ^. field @"modelIORef")
-                (\a -> (HM.insert index newNumberedModel a, ()))
-            pure (model newNumberedModel, storedEvs, returnFun)
+                let newState =
+                        NumberedModel
+                            newModel
+                            (writtenCheckpoint <|> checkpoint currentState)
+                            (eventCount currentState + fromIntegral (length stored))
+                            (snapshottedEventCount currentState)
+                pure (newState, stored, extractResult, invalid)
+        published <- publishModel pg index newState
+        traverse_ (deleteInvalidSnapshot pg index) invalidSnapshot
+        attemptSnapshot pg index published
+        pure (model newState, storedEvents, returnFun)
