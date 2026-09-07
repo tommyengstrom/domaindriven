@@ -3,7 +3,7 @@ module DomainDriven.Persistance.Postgres.Internal where
 
 import Control.Concurrent (getNumCapabilities)
 import Control.DeepSeq (NFData, force)
-import Control.Exception (evaluate)
+import Control.Exception (SomeAsyncException, evaluate)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -14,25 +14,24 @@ import Data.Generics.Labels ()
 import Data.Generics.Product
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (hash)
+import Data.Hashable (Hashable)
 import Data.IORef
 import Data.Int
 import Data.Maybe (fromMaybe)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
-import Data.String
+import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Time
 import Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Cursor qualified as Cursor
+import Database.PostgreSQL.Simple.Types qualified as PGT
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres.Types
 import GHC.Generics (Generic)
 import GHC.Stack
-import Lens.Micro
-    ( to
-    , (^.)
-    )
+import Lens.Micro ((^.))
 import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
@@ -111,33 +110,44 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
     type Index (PostgresEvent i m e) = i
     type Event (PostgresEvent i m e) = e
     applyEvent pg = pg ^. field @"app"
-    getModel pg index = liftIO $ withIOTrans pg (`getModel'` index)
+    getModel pg index = liftIO $ do
+        NumberedModel cached lastEventNo <- getCurrentState pg index
+        -- Release this connection before refreshing; the pool may contain one.
+        hasNewEvents <- withPooledConnection pg $ \conn ->
+            queryHasEventsAfter conn (pg ^. field @"eventTableName") index lastEventNo
+        if hasNewEvents
+            then model <$> withIOTrans pg (`refreshModel` index)
+            else pure cached
 
-    getEventList pg index = withResource (connectionPool pg) $ \conn ->
+    getEventList pg index = withPooledConnection pg $ \conn ->
         fmap fst
             <$> queryEventsWithParseConcurrency
                 (pg ^. field @"parseConcurrency")
                 (pg ^. field @"chunkSize")
-                (Pool.resource conn)
+                conn
                 (pg ^. field @"eventTableName")
                 index
 
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
 getEventTableName :: EventTable -> EventTableName
-getEventTableName = validate . go 0
+getEventTableName = validateEventTableName . go 0
   where
     go :: Int -> EventTable -> String
     go i = \case
         MigrateUsing _ u -> go (i + 1) u
         InitialVersion n -> n <> "_v" <> show (i + 1)
-    validate name
-        | all isValidChar name && not (null name) = name
-        | otherwise =
-            error $
-                "[DomainDriven] Invalid event table name: "
-                    <> show name
-                    <> ". Names must be non-empty and contain only [a-zA-Z0-9_]."
+
+validateEventTableName :: EventTableName -> EventTableName
+validateEventTableName name
+    | all isValidChar name && not (null name) && length name <= 63 = name
+    | otherwise =
+        error $
+            "[DomainDriven] Invalid event table name: "
+                <> show name
+                <> ". Names must be 1-63 characters of [a-zA-Z0-9_]."
+  where
+    isValidChar :: Char -> Bool
     isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
 
 -- | Create the table required for storing state and events, if they do not yet exist.
@@ -148,23 +158,32 @@ createEventTable pgt = do
             (pgt ^. #transaction . #connectionResource . #resource)
             (pgt ^. #eventTableName)
 
-createEventTable' :: Connection -> EventTableName -> IO Int64
-createEventTable' conn eventTable = do
-    _ <-
-        execute_ conn $
-            "create table if not exists "
-                <> quoteIdent eventTable
-                <> " \
-                   \( id uuid primary key\
-                   \, index varchar not null\
-                   \, event_number bigint not null generated always as identity\
-                   \, timestamp timestamptz not null default now()\
-                   \, event jsonb not null\
-                   \);"
-    execute_ conn $
-        "create index on "
+createEventTable' :: Connection -> EventTableName -> IO ()
+createEventTable' conn rawEventTable = do
+    eventTable <- evaluate (validateEventTableName rawEventTable)
+    void . execute_ conn $
+        "create table if not exists "
             <> quoteIdent eventTable
-            <> " (index, event_number);"
+            <> " \
+               \( id uuid primary key\
+               \, index varchar not null\
+               \, event_number bigint not null generated always as identity\
+               \, timestamp timestamptz not null default now()\
+               \, event jsonb not null\
+               \);"
+    -- Postgres may truncate generated names, so match the index definition.
+    hasIndex <-
+        query
+            conn
+            "select exists (select 1 from pg_indexes \
+            \where schemaname = current_schema() and tablename = ? \
+            \and indexdef like '%(index, event_number)')"
+            (Only eventTable)
+            >>= \case
+                [Only found] -> pure found
+                unexpected -> fail $ "Unexpected index query result: " <> show unexpected
+    unless hasIndex . void . execute_ conn $
+        "create index on " <> quoteIdent eventTable <> " (index, event_number)"
 
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
@@ -212,6 +231,8 @@ simplePoolWith'
 simplePoolWith' modifyConfig connInfo = simplePoolWith modifyConfig (PG.connect connInfo)
 
 -- | Setup the persistance model and verify that the tables exist.
+--
+-- Writers sharing the database must all run the same domaindriven-core version.
 postgresWriteModelNoMigration
     :: HasCallStack
     => Pool Connection
@@ -225,6 +246,8 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
     pure pg
 
 -- | Setup the persistance model and verify that the tables exist.
+--
+-- Writers sharing the database must all run the same domaindriven-core version.
 postgresWriteModel
     :: HasCallStack
     => Pool Connection
@@ -237,39 +260,45 @@ postgresWriteModel pool eventTable app' seed' = do
     withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
     pure pg
 
-newtype Exists = Exists
-    { exists :: Bool
-    }
-    deriving (Show, Eq, Generic)
-    deriving anyclass (FromRow)
-
 runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
 runMigrations logger trans et = do
-    tableExistQuery <-
+    exists <- tableExists
+    -- Existence is monotone (tables are retired, never dropped), so the
+    -- steady-state check takes no lock; the exclusive key below both
+    -- serializes concurrent first migrations and drains the table's writers.
+    unless exists $ do
+        exclusiveTableLock conn (getEventTableName et)
+        stillMissing <- not <$> tableExists
+        when stillMissing migrate
+  where
+    conn :: Connection
+    conn = trans ^. field @"connectionResource" . field @"resource"
+
+    tableExists :: IO Bool
+    tableExists =
         query
             conn
             "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
             (Only $ getEventTableName et)
+            >>= \case
+                [Only found] -> pure found
+                unexpected -> fail $ "Unexpected table query result: " <> show unexpected
 
-    case (et, tableExistQuery) of
-        (InitialVersion _, [Only True]) -> pure ()
-        (MigrateUsing{}, [Only True]) -> pure ()
-        (InitialVersion _, [Only False]) -> createTable
-        (MigrateUsing mig prevEt, [Only False]) -> do
+    migrate :: IO ()
+    migrate = case et of
+        InitialVersion _ -> createTable
+        MigrateUsing mig prevEt -> do
             -- Ensure migrations are done up until the previous table
             runMigrations logger trans prevEt
-            -- Then lock lock the previous table before we start
-            exclusiveLock trans (getEventTableName prevEt) NoIndex
+            -- Drain the previous table's writers, which hold this key shared,
+            -- and block new ones until the old table is retired.
+            exclusiveTableLock conn (getEventTableName prevEt)
             t0 <- getCurrentTime
             createTable
             mig (getEventTableName prevEt) (getEventTableName et) conn
             retireTable conn (getEventTableName prevEt)
             t1 <- getCurrentTime
-            logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
-        (_, r) -> fail $ "Unexpected table query result: " <> show r
-  where
-    conn :: Connection
-    conn = trans ^. field @"connectionResource" . field @"resource"
+            logSafely logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
 
     createTable :: IO ()
     createTable = do
@@ -285,7 +314,8 @@ createPostgresPersistance
     -> model
     -- ^ Initial model
     -> IO (PostgresEvent index model event)
-createPostgresPersistance pool eventTable app' seed' = do
+createPostgresPersistance pool rawEventTable app' seed' = do
+    eventTable <- evaluate (validateEventTableName rawEventTable)
     ref <- newIORef HM.empty
     defaultParseConcurrency <- max 1 <$> getNumCapabilities
     pure $
@@ -330,111 +360,51 @@ queryEventsWithParseConcurrency
     -> index
     -> IO [(Stored a, EventNumber)]
 queryEventsWithParseConcurrency workers chunkSize conn eventTable index = do
-    parseEventRows workers chunkSize =<< query_ conn q
-  where
-    q :: PG.Query
-    q =
-        "select id, event_number,timestamp,event::text from "
-            <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " order by event_number"
+    indexText <- indexParam index
+    parseEventRows workers chunkSize
+        =<< query conn (eventsQuery eventTable) (indexText, 0 :: Int64)
 
-queryEventsAfter
-    :: (FromJSON a, NFData a)
+eventsQuery :: EventTableName -> PG.Query
+eventsQuery eventTable =
+    "select id, event_number, timestamp, event::text from "
+        <> quoteIdent eventTable
+        <> " where index = ? and event_number > ? order by event_number"
+
+-- | Reject NULs, which libpq would truncate.
+indexParam :: IsPgIndex index => index -> IO Text
+indexParam index
+    | T.any (== '\0') indexText = throwM (ValueError "Index values must not contain NUL bytes")
+    | otherwise = pure indexText
+  where
+    indexText :: Text
+    indexText = toPgIndex index
+
+queryHasEventsAfter
+    :: IsPgIndex index
     => Connection
     -> EventTableName
-    -> EventNumber
-    -> IO [(Stored a, EventNumber)]
-queryEventsAfter = queryEventsAfterWithParseConcurrency 1 defaultReadChunkSize
-
-queryEventsAfterWithParseConcurrency
-    :: (FromJSON a, NFData a)
-    => ParseConcurrency
-    -> ChunkSize
-    -> Connection
-    -> EventTableName
-    -> EventNumber
-    -> IO [(Stored a, EventNumber)]
-queryEventsAfterWithParseConcurrency workers chunkSize conn eventTable (EventNumber lastEvent) =
-    parseEventRows workers chunkSize
-        =<< query_
-            conn
-            ( "select id, event_number,timestamp,event::text from "
-                <> quoteIdent eventTable
-                <> " where event_number > "
-                <> fromString (show lastEvent)
-                <> " order by event_number"
-            )
-
-newtype EventQuery = EventQuery {getPgQuery :: PG.Query}
-    deriving (Show, Generic)
-
-mkEventsAfterQuery
-    :: IsPgIndex index
-    => EventTableName
     -> index
     -> EventNumber
-    -> EventQuery
-mkEventsAfterQuery eventTable index (EventNumber lastEvent) =
-    EventQuery $
-        "select id, event_number,timestamp,event::text from "
-            <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " and event_number > "
-            <> fromString (show lastEvent)
-            <> " order by event_number"
+    -> IO Bool
+queryHasEventsAfter conn eventTable index (EventNumber lastEvent) = do
+    indexText <- indexParam index
+    result <-
+        query
+            conn
+            ( "select exists (select 1 from "
+                <> quoteIdent eventTable
+                <> " where index = ? and event_number > ?)"
+            )
+            (indexText, lastEvent)
+    case result of
+        [Only hasEvents] -> pure hasEvents
+        unexpected -> fail $ "Unexpected freshness query result: " <> show unexpected
 
-mkEventQuery :: IsPgIndex index => EventTableName -> index -> EventQuery
-mkEventQuery eventTable index =
-    EventQuery $
-        "select id, event_number,timestamp,event::text from "
-            <> quoteIdent eventTable
-            <> " where index = "
-            <> toQuery index
-            <> " order by event_number"
-
-headMay :: [a] -> Maybe a
-headMay = \case
-    a : _ -> Just a
-    [] -> Nothing
-
-queryHasEventsAfter :: Connection -> EventTableName -> EventNumber -> IO Bool
-queryHasEventsAfter conn eventTable (EventNumber lastEvent) =
-    maybe True fromOnly . headMay <$> query_ conn q
-  where
-    q :: PG.Query
-    q =
-        "select count(*) > 0 from "
-            <> quoteIdent eventTable
-            <> " where event_number > "
-            <> fromString (show lastEvent)
-
--- writeEvents
---     :: forall a
---      . ToJSON a
---     => Connection
---     -> EventTableName
---     -> [Stored a]
---     -> IO EventNumber
--- writeEvents conn eventTable storedEvents = do
---     _ <-
---         executeMany
---             conn
---             ( "insert into \""
---                 <> fromString eventTable
---                 <> "\" (id, timestamp, event) \
---                    \values (?, ?, ?)"
---             )
---             ( fmap
---                 (\x -> (storedUUID x, storedTimestamp x, encode $ storedEvent x))
---                 storedEvents
---             )
---     foldl' max 0 . fmap fromOnly
---         <$> query_
---             conn
---             ("select coalesce(max(event_number),1) from \"" <> fromString eventTable <> "\"")
+-- | Insert events and return the highest event number, or 0 for none.
+--
+-- Hold the shared table key and the exclusive index key ('writerLocks') from
+-- model read through commit and keep the event sequence at @CACHE 1@;
+-- otherwise caches can miss events and migrations can copy incompletely.
 writeEvents
     :: forall a index
      . ( ToJSON a
@@ -446,30 +416,26 @@ writeEvents
     -> [Stored a]
     -> IO EventNumber
 writeEvents conn eventTable index storedEvents = do
-    _ <-
-        executeMany
+    indexText <- indexParam index
+    eventNumbers <-
+        returning
             conn
             ( "insert into "
                 <> quoteIdent eventTable
                 <> " (id, index, timestamp, event) \
-                   \values (?, ?, ?, ?)"
+                   \values (?, ?, ?, ?) returning event_number"
             )
             ( fmap
                 ( \x ->
                     ( storedUUID x
-                    , toPgIndex index
+                    , indexText
                     , storedTimestamp x
                     , encode $ storedEvent x
                     )
                 )
                 storedEvents
             )
-    foldl' max 0 . fmap fromOnly
-        <$> query_
-            conn
-            ( "select coalesce(max(event_number),1) from "
-                <> quoteIdent eventTable
-            )
+    pure $ foldl' max 0 (fmap fromOnly eventNumbers)
 
 getEventStream'
     :: ( FromJSON event
@@ -485,7 +451,9 @@ getEventStream' pgt index =
             (pgt ^. #parseConcurrency)
             (pgt ^. #chunkSize)
             (pgt ^. #transaction . #connectionResource . #resource)
-            (pgt ^. #eventTableName . to (`mkEventQuery` index))
+            (pgt ^. #eventTableName)
+            index
+            0
 
 -- | A transaction that is always rolled back at the end.
 -- This is useful when using cursors as they can only be used inside a transaction.
@@ -500,9 +468,16 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans index model event)
     startTrans = liftIO $ do
+        void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
         (connR, localPool) <- takeResource (connectionPool pg)
         t0 <- getCurrentTime
-        PG.begin $ Pool.resource connR
+        let conn = Pool.resource connR
+        beginResult <- tryIO (PG.begin conn)
+        case beginResult of
+            Left beginError -> do
+                destroyConnection (connectionPool pg) localPool conn
+                throwM beginError
+            Right () -> pure ()
         pure $
             PostgresEventTrans
                 { transaction = OngoingTransaction connR localPool t0
@@ -517,22 +492,29 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
 
     rollbackTrans :: PostgresEventTrans index model event -> m ()
     rollbackTrans pgt = liftIO $ do
-        -- Nothing changes. We just need the transaction to be able to stream events.
         let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
             conn = Pool.resource connR
+        rollbackResult <- tryIO (PG.rollback conn)
+        case rollbackResult of
+            Right () -> releaseConnection (connectionPool pg) localPool conn
+            Left _ -> destroyConnection (connectionPool pg) localPool conn
+        t1 <- getCurrentTime
+        logSafely (pgt ^. field' @"logger") $
+            DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
 
-            giveBackConn :: IO ()
-            giveBackConn = do
-                PG.rollback conn
-                putResource localPool conn
-                t1 <- getCurrentTime
-                pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        giveBackConn `catchAll` \_ -> do
-            t1 <- getCurrentTime
-            pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-            destroyResource (connectionPool pg) localPool conn
+withPooledConnection
+    :: HasCallStack
+    => PostgresEvent index model event
+    -> (Connection -> IO a)
+    -> IO a
+withPooledConnection pg f = do
+    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
+    t0 <- getCurrentTime
+    withResource (connectionPool pg) $ \connR -> do
+        t1 <- getCurrentTime
+        logSafely (pg ^. field @"logger") $
+            WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+        f (Pool.resource connR)
 
 withIOTrans
     :: forall a index model event
@@ -540,39 +522,64 @@ withIOTrans
     => PostgresEvent index model event
     -> (PostgresEventTrans index model event -> IO a)
     -> IO a
-withIOTrans pg f = do
-    transactionCompleted <- newIORef False
+withIOTrans pg f = mask $ \restore -> do
+    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
     (connR, localPool) <- do
         t0 <- getCurrentTime
-        r <- takeResource (connectionPool pg)
+        r@(acquiredConnR, acquiredLocalPool) <- takeResource (connectionPool pg)
         t1 <- getCurrentTime
-        pg ^. field @"logger" $
-            WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        pure r
-    bracket (prepareTransaction connR localPool) (cleanup transactionCompleted) $ \pgt -> do
-        a <- f pgt
-        writeIORef transactionCompleted True
-        pure a
+        waitLogResult <- tryIO $
+            logSafely (pg ^. field @"logger") $
+                WaitForConnectionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
+        case waitLogResult of
+            Right () -> pure r
+            Left waitLogError -> do
+                releaseConnection
+                    (connectionPool pg)
+                    acquiredLocalPool
+                    (Pool.resource acquiredConnR)
+                throwM waitLogError
+    prepareResult <- tryIO (prepareTransaction connR localPool)
+    pgt <- case prepareResult of
+        Right transaction -> pure transaction
+        Left prepareError -> do
+            destroyConnection (connectionPool pg) localPool (Pool.resource connR)
+            throwM prepareError
+    bodyResult <- tryIO (restore (f pgt))
+    case bodyResult of
+        Left bodyError -> do
+            rollbackAndRelease pgt
+            throwM bodyError
+        Right result -> do
+            let OngoingTransaction committedConnR committedLocalPool _ = pgt ^. field' @"transaction"
+                conn = Pool.resource committedConnR
+            commitResult <- tryIO (PG.commit conn)
+            case commitResult of
+                Left commitError -> do
+                    destroyConnection (connectionPool pg) committedLocalPool conn
+                    logTransactionDuration pgt
+                    throwM commitError
+                Right () -> do
+                    releaseConnection (connectionPool pg) committedLocalPool conn
+                    logTransactionDuration pgt
+                    pure result
   where
-    cleanup :: IORef Bool -> PostgresEventTrans index model event -> IO ()
-    cleanup transactionCompleted pgt = do
-        let OngoingTransaction connR localPool t0 = pgt ^. field' @"transaction"
+    rollbackAndRelease :: PostgresEventTrans index model event -> IO ()
+    rollbackAndRelease pgt = do
+        let OngoingTransaction connR localPool _ = pgt ^. field' @"transaction"
             conn = Pool.resource connR
+        rollbackResult <- tryIO (PG.rollback conn)
+        case rollbackResult of
+            Right () -> releaseConnection (connectionPool pg) localPool conn
+            Left _ -> destroyConnection (connectionPool pg) localPool conn
+        logTransactionDuration pgt
 
-            giveBackConn :: IO ()
-            giveBackConn = do
-                readIORef transactionCompleted >>= \case
-                    True -> PG.commit conn
-                    False -> PG.rollback conn
-                Pool.putResource localPool conn
-                t1 <- getCurrentTime
-                pgt ^. field' @"logger" $
-                    DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-        giveBackConn `catchAll` \_ -> do
-            t1 <- getCurrentTime
-            pgt ^. field' @"logger" $
-                DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
-            destroyResource (connectionPool pg) localPool conn
+    logTransactionDuration :: PostgresEventTrans index model event -> IO ()
+    logTransactionDuration pgt = do
+        let OngoingTransaction _ _ t0 = pgt ^. field' @"transaction"
+        t1 <- getCurrentTime
+        logSafely (pgt ^. field' @"logger") $
+            DbTransactionDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
 
     prepareTransaction
         :: Pool.Resource Connection
@@ -593,22 +600,17 @@ withIOTrans pg f = do
                 , logger = pg ^. field @"logger"
                 }
 
-mkEventStream
-    :: (FromJSON event, NFData event)
-    => ChunkSize
-    -> Connection
-    -> EventQuery
-    -> Stream IO (Stored event, EventNumber)
-mkEventStream = mkEventStreamWithParseConcurrency 1
-
 mkEventStreamWithParseConcurrency
-    :: (FromJSON event, NFData event)
+    :: (FromJSON event, NFData event, IsPgIndex index)
     => ParseConcurrency
     -> ChunkSize
     -> Connection
-    -> EventQuery
+    -> EventTableName
+    -> index
+    -> EventNumber
+    -- ^ Start after this event number
     -> Stream IO (Stored event, EventNumber)
-mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn q = do
+mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn eventTable index (EventNumber after) = do
     let step :: Cursor.Cursor -> IO (Maybe (Seq EventRowOut, Cursor.Cursor))
         step cursor = do
             r <- Cursor.foldForward cursor chunkSize (\a r -> pure (a :|> r)) Seq.Empty
@@ -617,8 +619,15 @@ mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn q = do
                 Left a -> pure $ Just (a, cursor)
                 Right a -> pure $ Just (a, cursor)
 
+        -- Cursors cannot bind parameters; render them with libpq.
+        declare :: IO Cursor.Cursor
+        declare = do
+            indexText <- indexParam index
+            rendered <- formatQuery conn (eventsQuery eventTable) (indexText, after)
+            Cursor.declareCursor conn (PGT.Query rendered)
+
     Stream.bracketIO
-        (Cursor.declareCursor conn (getPgQuery q))
+        declare
         Cursor.closeCursor
         ( Stream.unfoldEach Unfold.fromList
             . Stream.mapM (parseEventRows parseConcurrency chunkSize . toList)
@@ -666,20 +675,23 @@ parseEventRows workers chunkSize rows = do
                     $ Stream.fromList rows
     either throwM pure (sequence parsed)
 
-getModel'
+getNumberedModel'
     :: forall e index m
      . (IsPgIndex index, FromJSON e, NFData e)
     => PostgresEventTrans index m e
     -> index
-    -> IO m
-getModel' pgt index = do
-    NumberedModel model lastEventNo <- getCurrentState pgt index
+    -> IO (NumberedModel m)
+getNumberedModel' pgt index = do
+    current@(NumberedModel _ lastEventNo) <- getCurrentState pgt index
     hasNewEvents <-
         queryHasEventsAfter
             (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
             (pgt ^. field @"eventTableName")
+            index
             lastEventNo
-    if hasNewEvents then fst <$> refreshModel pgt index else pure model
+    if hasNewEvents
+        then refreshModel pgt index
+        else pure current
 
 getCurrentState
     :: forall pg index model
@@ -699,7 +711,7 @@ refreshModel
      . (IsPgIndex i, FromJSON e, NFData e)
     => PostgresEventTrans i m e
     -> i
-    -> IO (m, EventNumber)
+    -> IO (NumberedModel m)
 refreshModel pgt index = withExclusiveLock pgt index $ do
     -- refresh doesn't write any events but changes the state and thus needs a lock
     NumberedModel model lastEventNo <- getCurrentState pgt index
@@ -708,13 +720,15 @@ refreshModel pgt index = withExclusiveLock pgt index $ do
                 (pgt ^. field @"parseConcurrency")
                 (pgt ^. field @"chunkSize")
                 (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
-                (mkEventsAfterQuery (pgt ^. field @"eventTableName") index lastEventNo)
+                (pgt ^. field @"eventTableName")
+                index
+                lastEventNo
 
         applyModel :: NumberedModel m -> (Stored e, EventNumber) -> NumberedModel m
         applyModel (NumberedModel m _) (ev, evNumber) =
             NumberedModel ((pgt ^. field @"app") m ev) evNumber
 
-    newNumberedModel@(NumberedModel newModel lastNewEventNo) <-
+    newNumberedModel <-
         Stream.fold
             ( Fold.foldl'
                 applyModel
@@ -722,56 +736,143 @@ refreshModel pgt index = withExclusiveLock pgt index $ do
             )
             eventStream
 
-    atomicModifyIORef
-        (pgt ^. field @"modelIORef")
-        (\a -> (HM.insert index newNumberedModel a, ()))
-    pure (newModel, lastNewEventNo)
+    publishNumberedModel (pgt ^. field @"modelIORef") index newNumberedModel
+    pure newNumberedModel
+
+publishNumberedModel
+    :: Hashable index
+    => IORef (HashMap index (NumberedModel model))
+    -> index
+    -> NumberedModel model
+    -> IO ()
+publishNumberedModel ref index candidate@(NumberedModel _ candidateEventNumber) =
+    atomicModifyIORef' ref $ \models ->
+        case HM.lookup index models of
+            Just (NumberedModel _ currentEventNumber)
+                | currentEventNumber >= candidateEventNumber -> (models, ())
+            Nothing -> (HM.insert index candidate models, ())
+            Just _ -> (HM.insert index candidate models, ())
 
 exclusiveLock :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
 exclusiveLock (OngoingTransaction connR _ _) etName index = do
-    -- We use advisory locks in favor of row level locks as we would not have the ability
-    -- to lock an index before the first event is written with row level locks.
-    void $
+    -- Advisory locks cover empty indices; Postgres derives stable keys.
+    indexText <- indexParam index
+    void
         ( query
             (Pool.resource connR)
-            "SELECT pg_advisory_xact_lock(?)"
-            (Only (fromIntegral (hash (etName, index)) :: Int64))
+            "select pg_advisory_xact_lock(hashtextextended(?, hashtextextended(?, 0)))"
+            (indexText, etName)
             :: IO [Only ()]
         )
 
-withExclusiveLock
-    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
-withExclusiveLock pgt index a = do
-    exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index
+-- | Command locks: the table key shared plus the index key exclusive.
+-- Default to a five-second lock timeout, scoped to this transaction, because
+-- a nested command can wait behind a migration waiting for its outer command.
+-- Preserve any finite timeout configured on the connection.
+writerLocks :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
+writerLocks (OngoingTransaction connR _ _) etName index = do
+    indexText <- indexParam index
+    void
+        ( query_
+            (Pool.resource connR)
+            "select set_config('lock_timeout', \
+            \case current_setting('lock_timeout') \
+            \when '0' then '5s' else current_setting('lock_timeout') end, true)"
+            :: IO [Only Text]
+        )
+    void
+        ( query
+            (Pool.resource connR)
+            "select pg_advisory_xact_lock_shared(hashtextextended(?, 0)), \
+            \pg_advisory_xact_lock(hashtextextended(?, hashtextextended(?, 0)))"
+            (etName, indexText, etName)
+            :: IO [((), ())]
+        )
+
+-- | The whole-table lock: waits for every in-flight command on the table (they
+-- hold this key shared) and blocks new ones until the transaction ends.
+exclusiveTableLock :: Connection -> EventTableName -> IO ()
+exclusiveTableLock conn etName =
+    void
+        ( query
+            conn
+            "select pg_advisory_xact_lock(hashtextextended(?, 0))"
+            (Only etName)
+            :: IO [Only ()]
+        )
+
+withLockLogging
+    :: HasCallStack => PostgresEventTrans i m e -> IO () -> IO a -> IO a
+withLockLogging pgt takeLocks a = do
+    takeLocks
     t0 <- getCurrentTime
     r <- a
     t1 <- getCurrentTime
-    pgt ^. field' @"logger" $
+    logSafely (pgt ^. field' @"logger") $
         EventTableLockDuration (diffUTCTime t1 t0) (OneLineCallStack callStack)
     pure r
+
+withExclusiveLock
+    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
+withExclusiveLock pgt index =
+    withLockLogging
+        pgt
+        (exclusiveLock (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index)
+
+withWriterLocks
+    :: (HasCallStack, IsPgIndex i) => PostgresEventTrans i m e -> i -> IO a -> IO a
+withWriterLocks pgt index =
+    withLockLogging
+        pgt
+        (writerLocks (pgt ^. field' @"transaction") (pgt ^. field @"eventTableName") index)
 
 instance (IsPgIndex i, ToJSON e, FromJSON e, NFData e) => WriteModel (PostgresEvent i m e) where
     postUpdateHook pg i m e = liftIO $ (pg ^. field @"updateHook") pg i m e
 
-    transactionalUpdate pg index cmd = withRunInIO $ \runInIO ->
-        withIOTrans pg $ \pgt -> withExclusiveLock pgt index $ do
-            m <- getModel' pgt index
-            (returnFun, evs) <- runInIO $ cmd m
-            storedEvs <- traverse toStored evs
-            newNumberedModel <-
-                uncurry NumberedModel
-                    <$> concurrently
-                        ( Stream.fold
-                            (Fold.foldl' (pg ^. field @"app") m)
-                            (Stream.fromList storedEvs)
-                        )
-                        ( writeEvents
-                            (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
-                            (pg ^. field @"eventTableName")
-                            index
-                            storedEvs
-                        )
-            atomicModifyIORef
-                (pg ^. field @"modelIORef")
-                (\a -> (HM.insert index newNumberedModel a, ()))
-            pure (model newNumberedModel, storedEvs, returnFun)
+    transactionalUpdate pg index cmd = withRunInIO $ \runInIO -> do
+        (newNumberedModel, storedEvs, returnFun) <-
+            withIOTrans pg $ \pgt ->
+                withWriterLocks pgt index $ do
+                    NumberedModel m previousEventNumber <- getNumberedModel' pgt index
+                    (returnFun, evs) <- runInIO $ cmd m
+                    storedEvs <- traverse toStored evs
+                    (newModel, batchEventNumber) <-
+                        concurrently
+                            ( Stream.fold
+                                (Fold.foldl' (pg ^. field @"app") m)
+                                (Stream.fromList storedEvs)
+                            )
+                            ( writeEvents
+                                (pgt ^. field @"transaction" . field @"connectionResource" . field @"resource")
+                                (pg ^. field @"eventTableName")
+                                index
+                                storedEvs
+                            )
+                    let newNumberedModel =
+                            NumberedModel
+                                newModel
+                                (max previousEventNumber batchEventNumber)
+                    pure (newNumberedModel, storedEvs, returnFun)
+        publishNumberedModel (pg ^. field @"modelIORef") index newNumberedModel
+        pure (model newNumberedModel, storedEvs, returnFun)
+
+tryIO :: IO a -> IO (Either SomeException a)
+tryIO = try
+
+releaseConnection :: Pool Connection -> LocalPool Connection -> Connection -> IO ()
+releaseConnection pool localPool conn =
+    Pool.putResource localPool conn `catchAll` \exception -> do
+        destroyConnection pool localPool conn
+        rethrowAsyncException exception
+
+destroyConnection :: Pool Connection -> LocalPool Connection -> Connection -> IO ()
+destroyConnection pool localPool conn =
+    destroyResource pool localPool conn `catchAll` rethrowAsyncException
+
+logSafely :: (LogEntry -> IO ()) -> LogEntry -> IO ()
+logSafely logEntry entry = logEntry entry `catchAll` rethrowAsyncException
+
+rethrowAsyncException :: SomeException -> IO ()
+rethrowAsyncException exception = case fromException exception :: Maybe SomeAsyncException of
+    Just _ -> throwM exception
+    Nothing -> pure ()

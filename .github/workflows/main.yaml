@@ -9,7 +9,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: domaindriven
@@ -20,6 +20,12 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: domaindriven
 
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +51,7 @@ jobs:
         run: nix develop --command cabal update
 
       - name: Build
-        run: nix develop --command cabal build all
+        run: nix develop --command cabal build all --enable-tests --enable-benchmarks
 
       - name: Run tests
         run: nix develop --command cabal test all

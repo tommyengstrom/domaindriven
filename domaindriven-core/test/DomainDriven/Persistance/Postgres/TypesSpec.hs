@@ -29,3 +29,9 @@ spec = do
         it "rejects names with double quotes" $ do
             evaluate (getEventTableName (InitialVersion "bad\"name"))
                 `shouldThrow` \(_ :: ErrorCall) -> True
+        it "accepts 63-character names including the version suffix" $ do
+            getEventTableName (InitialVersion (replicate 60 'a'))
+                `shouldBe` replicate 60 'a' <> "_v1"
+        it "rejects names whose version suffix exceeds 63 characters" $ do
+            evaluate (getEventTableName (InitialVersion (replicate 61 'a')))
+                `shouldThrow` \(_ :: ErrorCall) -> True

@@ -37,7 +37,7 @@ class NFData (Event p) => ReadModel p where
     type Index p :: Type
     applyEvent :: p -> Model p -> Stored (Event p) -> Model p
     getModel :: MonadIO m => HasCallStack => p -> Index p -> m (Model p)
-    getEventList :: p -> Index p -> IO [Stored (Event p)]
+    getEventList :: HasCallStack => p -> Index p -> IO [Stored (Event p)]
     getEventStream :: HasCallStack => p -> Index p -> Stream IO (Stored (Event p))
 
 class ReadModel p => WriteModel p where
@@ -52,6 +52,11 @@ class ReadModel p => WriteModel p where
         -> [Stored (Event p)]
         -> m ()
 
+    -- | Apply a command and persist its events.
+    -- Commands cannot recurse on the same index; failed writes leave the cache
+    -- unchanged. PostgreSQL commands default to a five-second @lock_timeout@
+    -- unless the connection configures a finite timeout. A nested command can
+    -- time out when a migration is waiting for its outer command to finish.
     transactionalUpdate
         :: HasCallStack
         => forall m a
@@ -144,4 +149,9 @@ mkId :: MonadIO m => m UUID
 mkId = liftIO randomIO
 
 toStored :: MonadIO m => e -> m (Stored e)
-toStored e = Stored e <$> liftIO getCurrentTime <*> mkId
+toStored e = Stored e <$> liftIO (truncateToMicroseconds <$> getCurrentTime) <*> mkId
+
+-- | Truncate to Postgres microsecond precision.
+truncateToMicroseconds :: UTCTime -> UTCTime
+truncateToMicroseconds (UTCTime day time) =
+    UTCTime day (picosecondsToDiffTime (diffTimeToPicoseconds time `div` 1000000 * 1000000))

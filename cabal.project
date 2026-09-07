@@ -11,6 +11,10 @@ index-state: 2026-08-10T00:00:00Z
 
 with-compiler: ghc-9.12.4
 
+-- Keep every cabal invocation on the same plan (tests and benchmarks included).
+tests: True
+benchmarks: True
+
 package servant-reqbody-field
   ghc-options: -Werror
 

@@ -1,5 +1,32 @@
 # Changelog for domaindriven
 
+## 0.7.0
+
+- **Breaking:** parameterize PostgreSQL index values and remove
+  `IsPgIndex.toQuery`; reject index values containing NUL bytes.
+- **Breaking:** derive advisory lock keys in PostgreSQL: commands hold the
+  table key shared and their index key exclusive, and migrations take the table
+  key exclusively instead of `LOCK TABLE` (no table privilege needed).
+  In-flight commands complete and are copied when a migration starts; a command
+  nested on the same table can time out if a migration queues in between.
+  Commands use a transaction-local five-second `lock_timeout` when the
+  connection has no finite timeout configured. Writers sharing a database must
+  all run the same domaindriven-core version — 0.6 and 0.7 lock keys do not
+  conflict with each other.
+- **Breaking:** simplify the internal PostgreSQL event-query API.
+- **Breaking:** serialize `ForgetfulInMemory` commands per index and update its
+  model and history atomically.
+- Avoid unnecessary transactions for current cached models and prevent
+  duplicate `(index, event_number)` indexes.
+- Make indexed-table migrations safe for concurrent writers and starts, and
+  parse migrated events in parallel.
+- Enforce PostgreSQL's 63-character event-table name limit in both constructors,
+  including `postgresWriteModelNoMigration`, before acquiring a connection.
+  Reads and commands also validate names supplied through backend record updates.
+- Normalize stored timestamps to PostgreSQL microsecond precision.
+- Document the locking and sequence requirements for `writeEvents`.
+- Include caller locations when logging `getEventList` connection waits.
+
 ## 0.6.1
 
 - Switched the build from Stackage LTS 24.31 to Nightly 2026-08-10 with GHC
@@ -8,6 +35,15 @@
   well as the aggregate index, so equal indices in unrelated tables no longer
   block each other. Because this changes the lock-key protocol, all writers
   sharing a database should be upgraded together.
+- PostgreSQL indexed-model freshness checks now use a parameterized `EXISTS`
+  query over `(index, event_number)`, and writes derive their watermark from
+  `INSERT ... RETURNING` instead of scanning the whole event table. Commit
+  failures are propagated and model caches are updated strictly, monotonically,
+  and only after a successful write commit.
+- Existing PostgreSQL deployments should verify that every active event table
+  has an index on `(index, event_number)`. For large tables, consumers should
+  create a missing index with `CREATE INDEX CONCURRENTLY`; startup migrations
+  intentionally continue to avoid blocking index replacement.
 
 ## 0.6.0
 

@@ -1,7 +1,7 @@
 cabal-version: 3.12
 
 name:           domaindriven-examples
-version:        0.6.1
+version:        0.7.0
 synopsis:       Examples for domaindriven
 description:    Examples demonstrating the domaindriven library
 category:       Web

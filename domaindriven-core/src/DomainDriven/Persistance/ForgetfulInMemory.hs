@@ -3,11 +3,15 @@
 module DomainDriven.Persistance.ForgetfulInMemory where
 
 import Control.DeepSeq (NFData)
+import Data.Foldable (toList)
 import Data.Generics.Labels ()
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
-import Data.Maybe (fromMaybe)
+import Data.Sequence (Seq)
+import Data.Sequence qualified as Seq
 import DomainDriven.Persistance.Class
 import GHC.Generics (Generic)
 import Streamly.Data.Stream.Prelude qualified as Stream
@@ -23,17 +27,15 @@ createForgetful
     -> m (ForgetfulInMemory model index event)
 createForgetful appEvent m0 = do
     state <- newIORef HM.empty
-    evs <- newIORef HM.empty
-    lock <- newQSem 1
-    pure $ ForgetfulInMemory state appEvent m0 evs lock (\_ _ _ -> pure ())
+    busy <- newTVarIO HS.empty
+    pure $ ForgetfulInMemory state appEvent m0 busy (\_ _ _ -> pure ())
 
--- | STM state without event persistance
+-- | In-memory state with per-index command serialization.
 data ForgetfulInMemory model index event = ForgetfulInMemory
-    { stateRef :: IORef (HashMap index model)
+    { stateRef :: IORef (HashMap index (model, Seq (Stored event)))
     , apply :: model -> Stored event -> model
     , seed :: model
-    , events :: IORef (HashMap index [Stored event])
-    , lock :: QSem
+    , busyIndices :: TVar (HashSet index)
     , updateHook :: index -> model -> [Stored event] -> IO ()
     }
     deriving (Generic)
@@ -48,8 +50,8 @@ instance (Hashable index, NFData event) => ReadModel (ForgetfulInMemory model in
         => ForgetfulInMemory model index event
         -> index
         -> m model
-    getModel ff index = HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
-    getEventList ff index = HM.lookupDefault [] index <$> readIORef (events ff)
+    getModel ff index = maybe (seed ff) fst . HM.lookup index <$> readIORef (stateRef ff)
+    getEventList ff index = maybe [] (toList . snd) . HM.lookup index <$> readIORef (stateRef ff)
     getEventStream ff index =
         Stream.bracketIO
             (getEventList ff index)
@@ -58,13 +60,30 @@ instance (Hashable index, NFData event) => ReadModel (ForgetfulInMemory model in
 
 instance (Hashable index, NFData event) => WriteModel (ForgetfulInMemory model index event) where
     postUpdateHook p index model events = liftIO $ updateHook p index model events
-    transactionalUpdate ff index evalCmd =
-        bracket_ (waitQSem $ lock ff) (signalQSem $ lock ff) $ do
-            model <- HM.lookupDefault (seed ff) index <$> readIORef (stateRef ff)
-            (returnFun, evs) <- evalCmd model
-            storedEvs <- traverse toStored evs
-            let newModel = foldl' (apply ff) model storedEvs
-            modifyIORef (events ff) $
-                HM.alter (Just . (<> storedEvs) . fromMaybe []) index
-            modifyIORef (stateRef ff) $ HM.insert index newModel
-            pure (newModel, storedEvs, returnFun)
+    transactionalUpdate ff index evalCmd = withIndexLock ff index $ do
+        model <- getModel ff index
+        (returnFun, evs) <- evalCmd model
+        storedEvs <- traverse toStored evs
+        let newModel = foldl' (apply ff) model storedEvs
+            appendHistory :: (model, Seq (Stored event)) -> (model, Seq (Stored event)) -> (model, Seq (Stored event))
+            appendHistory (_, new) (_, old) = (newModel, old <> new)
+        atomicModifyIORef' (stateRef ff) $ \states ->
+            (HM.insertWith appendHistory index (newModel, Seq.fromList storedEvs) states, ())
+        pure (newModel, storedEvs, returnFun)
+
+withIndexLock
+    :: (MonadUnliftIO m, Hashable index)
+    => ForgetfulInMemory model index event
+    -> index
+    -> m a
+    -> m a
+withIndexLock ff index = bracket_ (atomically acquire) (atomically release)
+  where
+    acquire :: STM ()
+    acquire = do
+        busy <- readTVar (busyIndices ff)
+        checkSTM (not (HS.member index busy))
+        writeTVar (busyIndices ff) (HS.insert index busy)
+
+    release :: STM ()
+    release = modifyTVar' (busyIndices ff) (HS.delete index)

@@ -2,6 +2,7 @@
 
 module DomainDriven.Persistance.Postgres.Migration where
 
+import Control.Concurrent (getNumCapabilities)
 import Control.DeepSeq (NFData)
 import Control.Monad
 import Data.Aeson
@@ -10,7 +11,7 @@ import Data.IORef
 import Data.Int
 import Database.PostgreSQL.Simple as PG
 import DomainDriven.Persistance.Class
-import DomainDriven.Persistance.Postgres.Internal (mkEventQuery, mkEventStream)
+import DomainDriven.Persistance.Postgres.Internal (defaultReadChunkSize, mkEventStreamWithParseConcurrency)
 import DomainDriven.Persistance.Postgres.Types
 import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude qualified as Stream
@@ -19,7 +20,7 @@ import UnliftIO (liftIO)
 import Prelude
 
 defaultChunkSize :: ChunkSize
-defaultChunkSize = 100
+defaultChunkSize = defaultReadChunkSize
 
 migrateValue1to1
     :: forall index
@@ -113,13 +114,14 @@ migrate1toManyWithState'
     -> state
     -> IO ()
 migrate1toManyWithState' chunkSize conn prevTName tName f initialState = do
+    parseConcurrency <- max 1 <$> getNumCapabilities
     indices <- fetchAllIndices conn prevTName :: IO [index]
     for_ indices $ \i -> do
         stateRef <- newIORef initialState
         Stream.fold (Fold.groupsOf chunkSize Fold.toList (Fold.drainMapM (liftIO . writeIt i)))
             . Stream.unfoldEach Unfold.fromList
             . Stream.mapM (mapMigratedEvents stateRef)
-            $ fst <$> mkEventStream chunkSize conn (mkEventQuery prevTName i)
+            $ fst <$> mkEventStreamWithParseConcurrency parseConcurrency chunkSize conn prevTName i 0
   where
     mapMigratedEvents :: IORef state -> Stored a -> IO [Stored b]
     mapMigratedEvents stateRef event = do

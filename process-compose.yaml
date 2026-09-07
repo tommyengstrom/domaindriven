@@ -1,7 +1,10 @@
-# Haskell graph:
-#   1-deps-cabal -> 2-cabal-build-all -> 3-cabal-test-all
-#                                      -> 3-cabal-benchmark-all
+# Process graph:
+#   0-postgres -> 1-postgres-db ------------------> 3-cabal-test-all -> 3-cabal-benchmark-all
+#   1-deps-cabal -> 2-cabal-build-all ------------> 3-cabal-test-all
 #                -> 2-ghcid              <- live feedback
+#
+# PostgreSQL runs per worktree through libpq PG* variables. Its Unix socket path
+# is limited to roughly 100 characters.
 version: "0.5"
 log_location: ./.pc-logs
 processes:
@@ -12,13 +15,50 @@ processes:
     availability:
       restart: always
 
+  0-postgres:
+    command: |
+      set -eu
+      PGDIR="$PWD/.pc-postgres"
+      major=$(postgres --version | sed -E 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/')
+      if [ -f "$PGDIR/data/PG_VERSION" ] && [ "$(cat "$PGDIR/data/PG_VERSION")" != "$major" ]; then
+        rm -rf "$PGDIR/data"
+      fi
+      if [ ! -f "$PGDIR/data/PG_VERSION" ]; then
+        initdb --pgdata "$PGDIR/data" --username postgres \
+          --auth-local trust --auth-host reject --no-instructions
+      fi
+      exec postgres -D "$PGDIR/data" -k "$PGDIR" \
+        -c listen_addresses='' \
+        -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+    readiness_probe:
+      exec:
+        command: 'pg_isready -h "$PWD/.pc-postgres" -U postgres'
+      initial_delay_seconds: 1
+      period_seconds: 1
+      failure_threshold: 30
+    availability:
+      restart: on_failure
+      max_restarts: 3
+
+  1-postgres-db:
+    command: |
+      set -eu
+      export PGHOST="$PWD/.pc-postgres" PGUSER=postgres
+      psql -d postgres -tAc "select 1 from pg_database where datname = 'domaindriven'" | grep -q 1 \
+        || createdb domaindriven
+    availability:
+      restart: "no"
+    depends_on:
+      0-postgres:
+        condition: process_healthy
+
   1-deps-cabal:
-    command: "cabal update && cabal build all --only-dependencies --enable-tests --enable-benchmarks -O0"
+    command: "cabal update && cabal build all --only-dependencies -O0"
     availability:
       restart: "no"
 
   2-cabal-build-all:
-    command: "cabal build all --enable-tests --enable-benchmarks -O0"
+    command: "cabal build all -O0"
     availability:
       restart: "no"
     depends_on:
@@ -45,19 +85,26 @@ processes:
         condition: process_completed_successfully
 
   3-cabal-test-all:
-    command: "cabal test all -O0"
+    command: |
+      export PGHOST="$PWD/.pc-postgres" PGUSER=postgres PGDATABASE=domaindriven
+      exec cabal test all -O0
     is_tty: true
     availability:
       restart: "no"
     depends_on:
       2-cabal-build-all:
+        condition: process_completed_successfully
+      1-postgres-db:
         condition: process_completed_successfully
 
   3-cabal-benchmark-all:
-    command: "cabal bench all -O0"
+    # Run after tests to avoid lock-timeout flakes under CPU contention.
+    command: |
+      export PGHOST="$PWD/.pc-postgres" PGUSER=postgres PGDATABASE=domaindriven
+      exec cabal bench all -O0 -j1
     is_tty: true
     availability:
       restart: "no"
     depends_on:
-      2-cabal-build-all:
-        condition: process_completed_successfully
+      3-cabal-test-all:
+        condition: process_completed
