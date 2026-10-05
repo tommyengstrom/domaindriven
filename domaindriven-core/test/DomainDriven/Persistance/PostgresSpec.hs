@@ -4,17 +4,17 @@
 module DomainDriven.Persistance.PostgresSpec where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception
     ( AsyncException (ThreadKilled)
-    , ErrorCall
+    , Exception
     , SomeAsyncException
-    , SomeException
     , bracket
     , bracket_
     , displayException
+    , throw
     , throwIO
     )
 import Control.Exception qualified as Exception
@@ -34,12 +34,11 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable
 import Data.Maybe (fromMaybe)
 import Data.HashMap.Strict qualified as HM
-import Data.IORef (newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.List qualified as L
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.String (fromString)
 import Data.Text qualified as T
 import Data.Time
 import Data.Traversable
@@ -49,13 +48,18 @@ import Database.PostgreSQL.Simple
 import DomainDriven.Persistance.Class
 import DomainDriven.Persistance.Postgres
 import DomainDriven.Persistance.Postgres.Internal
-    ( LogEntry (..)
+    ( PostgresEventTrans (transaction)
+    , createEventTable'
+    , existingEventTableVersions
     , getCurrentState
-    , getEventTableName
+    , migrationLock
     , parseEventRows
     , publishNumberedModel
     , queryHasEventsAfter
     , queryEvents
+    , retireTable
+    , runMigrations
+    , withIOTrans
     , writeEvents
     )
 import DomainDriven.Persistance.Postgres.Migration
@@ -76,10 +80,12 @@ import UnliftIO
     ( TVar
     , async
     , atomically
+    , checkSTM
     , concurrently
     , forConcurrently
     , modifyTVar
     , newTVarIO
+    , readTVar
     , readTVarIO
     , try
     , wait
@@ -88,24 +94,25 @@ import UnliftIO
 import UnliftIO.Pool
 import Prelude
 
+testEventsBase :: EventTableBaseName
+testEventsBase = "test_events"
+
+-- | Two no-op migrations on top of the base version. On a fresh database only the
+-- current table (test_events_v3) is created and the migrations never run.
 eventTable :: EventTable
 eventTable =
-    MigrateUsing (\_ _ _ -> pure ())
-        . MigrateUsing (\_ _ _ -> pure ())
-        $ InitialVersion
-            "test_events"
+    MigrateTo 3 (\_ _ _ -> pure ())
+        . MigrateTo 2 (\_ _ _ -> pure ())
+        $ TableName testEventsBase 1
 
 eventTable2 :: EventTable
-eventTable2 = MigrateUsing mig eventTable
-  where
-    mig :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-    mig prevName name conn = migrate1to1 @NoIndex @Value conn prevName name id
+eventTable2 = MigrateTo 4 copyMigration eventTable
 
 lockEventTable1 :: EventTable
-lockEventTable1 = InitialVersion "test_lock_events_1"
+lockEventTable1 = TableName "test_lock_events_1" 1
 
 lockEventTable2 :: EventTable
-lockEventTable2 = InitialVersion "test_lock_events_2"
+lockEventTable2 = TableName "test_lock_events_2" 1
 
 spec :: Spec
 spec = do
@@ -136,6 +143,7 @@ spec = do
     around setupPersistanceIndexed indexedSpec
     around setupTableScopedLocks tableScopedLockSpec
     cacheSpec
+    around withTestPool versionedMigrationsSpec
 
 type TestModel = Int
 
@@ -145,6 +153,10 @@ data TestEvent
     | Reset
     deriving (Show, Eq, Generic, FromJSON, ToJSON, NFData)
 
+data ProbeFailure = ForceProbeFailure | MigrationFailure
+    deriving stock (Eq, Show)
+    deriving anyclass (Exception)
+
 data ForceProbeEvent = ForceProbeEvent ~String
 
 instance FromJSON ForceProbeEvent where
@@ -152,7 +164,7 @@ instance FromJSON ForceProbeEvent where
         shouldThrowOnForce <- o .: "shouldThrowOnForce"
         let payload =
                 if shouldThrowOnForce
-                    then error "force-probe"
+                    then throw ForceProbeFailure
                     else "ok"
         pure (ForceProbeEvent payload)
 
@@ -183,7 +195,7 @@ setupPersistance
     -> ((PostgresEvent NoIndex TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistance postHook test = do
-    dropEventTables =<< mkTestConn
+    withTestConn (`dropEventTables` testEventsBase)
     pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
     test
@@ -200,7 +212,7 @@ setupPersistanceIndexed
     :: ((PostgresEvent Indexed TestModel TestEvent, Pool Connection) -> IO ())
     -> IO ()
 setupPersistanceIndexed test = do
-    dropEventTables =<< mkTestConn
+    withTestConn (`dropEventTables` testEventsBase)
     -- One stripe makes concurrent tests contend for the same pool.
     pool <- simplePool mkTestConn
     p <- postgresWriteModel pool eventTable applyTestEvent 0
@@ -227,10 +239,10 @@ setupTableScopedLocks test =
         pure conn
 
     cleanupTables :: IO ()
-    cleanupTables = bracket mkTestConn close $ \conn ->
+    cleanupTables = withTestConn $ \conn ->
         traverse_
-            (dropEventTableChain conn)
-            [lockEventTable1, lockEventTable2]
+            (dropEventTables conn)
+            ["test_lock_events_1", "test_lock_events_2"]
 
 mkTestConn :: IO Connection
 mkTestConn = connect =<< testConnectInfo
@@ -247,28 +259,55 @@ testConnectInfo = do
         <*> setting "PGPASSWORD" "postgres"
         <*> setting "PGDATABASE" "domaindriven"
 
-dropEventTables :: Connection -> IO ()
-dropEventTables conn = do
-    testTables <-
-        query_
-            conn
-            "select table_name from information_schema.tables where table_name like 'test_events_v%'"
-            :: IO [Only String]
-    traverse_
-        (\t -> execute_ conn ("drop table \"" <> fromString (fromOnly t) <> "\""))
-        testTables
+withTestConn :: (Connection -> IO a) -> IO a
+withTestConn = bracket mkTestConn close
 
-dropEventTableChain :: Connection -> EventTable -> IO ()
-dropEventTableChain conn et =
-    traverse_ dropTable (reverse $ tableNames et)
+withTestPool :: (Pool Connection -> IO ()) -> IO ()
+withTestPool = bracket (simplePool mkTestConn) destroyAllResources
+
+-- | Drops every event table of a base name in its first schema on the search path.
+dropEventTables :: Connection -> EventTableBaseName -> IO ()
+dropEventTables conn base = do
+    versions <- existingEventTableVersions conn base
+    for_ versions $ \v ->
+        execute_ conn $ "drop table if exists " <> quoteIdent (eventTableNameFor base v)
+
+-- | Runs the action with an empty schema of the given name, dropping it afterwards.
+withSchema :: String -> IO a -> IO a
+withSchema schema = bracket_ (dropSchema >> createSchema) dropSchema
   where
-    dropTable tableName =
-        void $ execute_ conn ("drop table if exists " <> quoteIdent tableName)
+    dropSchema :: IO ()
+    dropSchema = withTestConn $ \conn ->
+        void . execute_ conn $ "drop schema if exists " <> quoteIdent schema <> " cascade"
 
-tableNames :: EventTable -> [EventTableName]
-tableNames et = case et of
-    MigrateUsing _ next -> getEventTableName et : tableNames next
-    InitialVersion{} -> [getEventTableName et]
+    createSchema :: IO ()
+    createSchema = withTestConn $ \conn ->
+        void . execute_ conn $ "create schema " <> quoteIdent schema
+
+-- | A pool whose connections start with the given statement, for example a @set@.
+withPoolRunning :: Query -> (Pool Connection -> IO a) -> IO a
+withPoolRunning statement = bracket (simplePool mkConn) destroyAllResources
+  where
+    mkConn :: IO Connection
+    mkConn = do
+        conn <- mkTestConn
+        void $ execute_ conn statement
+        pure conn
+
+isRetired :: Connection -> EventTableName -> IO Bool
+isRetired conn tableName = do
+    [Only retired] <-
+        query
+            conn
+            "select exists (select 1 from pg_trigger \
+            \where tgrelid = to_regclass(?) and tgname = 'retired')"
+            (Only tableName)
+    pure retired
+
+countRows :: Connection -> EventTableName -> IO Int64
+countRows conn tableName = do
+    [Only rowCount] <- query_ conn $ "select count(*) from " <> quoteIdent tableName
+    pure rowCount
 
 writeEventsSpec :: SpecWith (PostgresEvent NoIndex TestModel TestEvent, Pool Connection)
 writeEventsSpec = describe "queryEvents" $ do
@@ -399,8 +438,7 @@ parallelParsingSpec = describe "parseEventRows" $ do
                         object ["shouldThrowOnForce" .= True]
                     )
 
-        parseEventRows @ForceProbeEvent 1 testChunkSize [row] `shouldThrow` \e ->
-            "force-probe" `L.isInfixOf` displayException (e :: SomeException)
+        parseEventRows @ForceProbeEvent 1 testChunkSize [row] `shouldThrow` (== ForceProbeFailure)
 
 encodeStrict :: ToJSON a => a -> ByteString
 encodeStrict = LBS.toStrict . encode
@@ -450,6 +488,7 @@ indexedSpec = describe "Indexed models" $ do
             DbTransactionDuration{} -> False
             EventTableMigrationDuration{} -> True
             WaitForConnectionDuration{} -> True
+            WaitingForMigrationLock{} -> True
 
         nextEventA <- stored AddOne
         withResource pool $ \conn ->
@@ -461,6 +500,7 @@ indexedSpec = describe "Indexed models" $ do
             DbTransactionDuration{} -> False
             EventTableMigrationDuration{} -> False
             WaitForConnectionDuration{} -> False
+            WaitingForMigrationLock{} -> False
 
     it "retains the zero watermark for an empty transaction" $ \(p, pool) -> do
         let index = Indexed "empty"
@@ -566,33 +606,43 @@ indexedSpec = describe "Indexed models" $ do
         getEventList reader index `shouldReturn` hooked
         getEventList p index `shouldReturn` hooked
 
-    it "rejects invalid raw table names before acquiring a connection" $ \(_p, _pool) -> do
-        let invalidNames :: [EventTableName]
-            invalidNames = ["", "bad;name", "bad\"name", "bad\0name", replicate 32 'é']
-                <> fmap (replicate 63 'a' <>) ["x", "y"]
+    it "rejects invalid raw table names before acquiring a connection" $ \(p, _pool) -> do
+        let invalidNames :: [(EventTableName, MigrationError)]
+            invalidNames =
+                [(name, InvalidEventTableName name) | name <- ["", "bad;name", "bad\"name", "bad\0name", replicate 32 'é']]
+                    <> [(name, EventTableNameTooLong name) | name <- fmap (replicate 63 'a' <>) ["x", "y"]]
         bracket (simplePool (fail "Unexpected connection acquisition")) destroyAllResources $ \pool ->
-            for_ invalidNames $ \tableName ->
+            for_ invalidNames $ \(tableName, expected) -> do
                 ( postgresWriteModelNoMigration pool tableName applyTestEvent 0
                     :: IO (PostgresEvent Indexed TestModel TestEvent)
-                ) `shouldThrow` \(_ :: ErrorCall) -> True
+                    ) `shouldThrow` (== expected)
+                let alias :: PostgresEvent Indexed TestModel TestEvent
+                    alias = p{connectionPool = pool, eventTableName = tableName}
+                runCmd alias (Indexed "a") (\_ -> pure (id, [AddOne]))
+                    `shouldThrow` (== expected)
+                getModel alias (Indexed "a") `shouldThrow` (== expected)
+                getEventList alias (Indexed "a") `shouldThrow` (== expected)
+                Stream.toList (getEventStream alias (Indexed "a")) `shouldThrow` (== expected)
 
     it "accepts a 63-character raw table name without aliasing its suffixes" $ \(_p, pool) -> do
         let tableName :: EventTableName
             tableName = "test_events_v" <> replicate 50 'a'
+        withResource pool $ \conn ->
+            void . execute_ conn $ "drop table if exists " <> quoteIdent tableName
         backend <- postgresWriteModelNoMigration pool tableName applyTestEvent 0
         runCmd backend (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
         for_ ["x", "y"] $ \suffix -> do
             ( postgresWriteModelNoMigration pool (tableName <> suffix) applyTestEvent 0
                 :: IO (PostgresEvent Indexed TestModel TestEvent)
-                ) `shouldThrow` \(_ :: ErrorCall) -> True
+                ) `shouldThrow` (== EventTableNameTooLong (tableName <> suffix))
             let alias :: PostgresEvent Indexed TestModel TestEvent
                 alias = backend{eventTableName = tableName <> suffix}
             runCmd alias (Indexed "a") (\_ -> pure (id, [AddOne]))
-                `shouldThrow` \(_ :: ErrorCall) -> True
-            getModel alias (Indexed "a") `shouldThrow` \(_ :: ErrorCall) -> True
-            getEventList alias (Indexed "a") `shouldThrow` \(_ :: ErrorCall) -> True
+                `shouldThrow` (== EventTableNameTooLong (tableName <> suffix))
+            getModel alias (Indexed "a") `shouldThrow` (== EventTableNameTooLong (tableName <> suffix))
+            getEventList alias (Indexed "a") `shouldThrow` (== EventTableNameTooLong (tableName <> suffix))
             Stream.toList (getEventStream alias (Indexed "a"))
-                `shouldThrow` \(_ :: ErrorCall) -> True
+                `shouldThrow` (== EventTableNameTooLong (tableName <> suffix))
         reader <- postgresWriteModelNoMigration pool tableName applyTestEvent 0
         getModel reader (Indexed "a") `shouldReturn` 1
         fmap storedEvent <$> getEventList reader (Indexed "a") `shouldReturn` [AddOne]
@@ -617,7 +667,8 @@ indexedSpec = describe "Indexed models" $ do
 
             migrated :: EventTable
             migrated =
-                MigrateUsing
+                MigrateTo
+                    4
                     ( \prev next conn -> do
                         putMVar copyStarted ()
                         waitForBlockedWriter conn prev
@@ -650,7 +701,7 @@ indexedSpec = describe "Indexed models" $ do
     it "runs a migration once when two instances start concurrently" $ \(p, pool) -> do
         runCmd p (Indexed "a") (\_ -> pure (id, [AddOne, AddOne])) `shouldReturn` 2
         let migrated :: EventTable
-            migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+            migrated = MigrateTo 4 (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
             start :: IO (PostgresEvent Indexed TestModel TestEvent)
             start = postgresWriteModel pool migrated applyTestEvent 0
         (p1, p2) <- concurrently start start
@@ -680,7 +731,7 @@ indexedSpec = describe "Indexed models" $ do
 
             migrated :: EventTable
             migrated =
-                MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+                MigrateTo 4 (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
 
             inFlightCommand :: TestModel -> IO (TestModel -> TestModel, [TestEvent])
             inFlightCommand _ = do
@@ -724,7 +775,11 @@ indexedSpec = describe "Indexed models" $ do
         outcome `shouldBe` Just 2
         getModel p (Indexed "outer") `shouldReturn` 1
 
-    for_ [("0", 10000000), ("100ms", 2000000)] $ \(configuredTimeout, deadline) ->
+    -- A finite lock_timeout on the connection is kept, so the nested command fails
+    -- with lock_not_available. With the server default (0, no timeout) the library
+    -- applies a transaction-local 60s timeout; rather than wait that out, check that the
+    -- nested command is still queued after two seconds and cancel it (query_canceled).
+    for_ [("0", "57014", 10000000), ("100ms", "55P03", 2000000) :: (T.Text, ByteString, Int)] $ \(configuredTimeout, expectedState, deadline) ->
         it ("bounds nested commands behind migrations with lock_timeout=" <> T.unpack configuredTimeout) $ \(p, pool) -> do
             runCmd p (Indexed "a") (\_ -> pure (id, [AddOne])) `shouldReturn` 1
             commandStarted <- newEmptyMVar
@@ -744,7 +799,7 @@ indexedSpec = describe "Indexed models" $ do
                     pure conn
 
                 migrated :: EventTable
-                migrated = MigrateUsing (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
+                migrated = MigrateTo 4 (\prev next conn -> migrate1to1 @Indexed @Value conn prev next id) eventTable
 
                 waitForQueuedMigrator :: Connection -> Int -> IO ()
                 waitForQueuedMigrator conn pid = do
@@ -756,6 +811,22 @@ indexedSpec = describe "Indexed models" $ do
                         [Only True] -> pure ()
                         [Only False] -> threadDelay 1000 >> waitForQueuedMigrator conn pid
                         unexpected -> expectationFailure $ "Unexpected lock query result: " <> show unexpected
+
+                -- The nested command's shared table-key request queues behind the
+                -- migrator's exclusive one. It must still be queued after two seconds.
+                cancelQueuedNestedCommand :: Connection -> IO ()
+                cancelQueuedNestedCommand conn = do
+                    threadDelay 2000000
+                    waiting <-
+                        query_ conn
+                            "select pid from pg_locks where locktype = 'advisory' \
+                            \and mode = 'ShareLock' and not granted"
+                    case waiting of
+                        [Only nestedPid] ->
+                            void (query conn "select pg_cancel_backend(?)" (Only (nestedPid :: Int)) :: IO [Only Bool])
+                        unexpected ->
+                            expectationFailure $
+                                "Expected the nested command to still be queued, found: " <> show unexpected
 
             bracket (simplePool mkCommandConn) destroyAllResources $ \commandPool ->
                 bracket (simplePool mkMigrationConn) destroyAllResources $ \migrationPool -> do
@@ -777,13 +848,15 @@ indexedSpec = describe "Indexed models" $ do
                                     pid <- takeMVar migrationPid
                                     withResource pool $ \conn -> waitForQueuedMigrator conn pid
                                     putMVar startNested ()
+                                    when (configuredTimeout == "0") $
+                                        withResource pool cancelQueuedNestedCommand
                                     wait migrator
                             )
                     case outcome of
                         Nothing -> expectationFailure "Nested command and migration did not finish before the deadline"
                         Just (writer, migratedBackend) -> do
                             writer `shouldSatisfy` \case
-                                Left err -> sqlState err == "55P03"
+                                Left err -> sqlState err == expectedState
                                 Right _ -> False
                             for_ [backend, migratedBackend] $ \reader -> do
                                 getModel reader (Indexed "a") `shouldReturn` 1
@@ -985,34 +1058,20 @@ migrationSpec = describe "migrate1to1" $ do
 
     it "Broken migration throws and rollbacks transaction" $ \(_, pool) -> do
         let eventTableBroken :: EventTable
-            eventTableBroken = MigrateUsing (\_ _ _ -> error "ops") eventTable2
+            eventTableBroken = MigrateTo 5 (\_ _ _ -> throwIO MigrationFailure) eventTable2
 
         postgresWriteModel pool eventTableBroken applyTestEvent 0
-            `shouldThrow` const @_ @SomeException True
-        conn <- mkTestConn
+            `shouldThrow` (== MigrationFailure)
 
-        case tableNames eventTableBroken of
-            failedMig : prevMig : _ -> do
-                [Only prevExists] <-
-                    query_ @(Only Bool) conn $
-                        "select exists(select * from pg_tables where tablename='"
-                            <> fromString prevMig
-                            <> "')"
-                [Only brokenExists] <-
-                    query_ @(Only Bool) conn $
-                        "select exists(select * from pg_tables where tablename='"
-                            <> fromString failedMig
-                            <> "')"
-                prevExists `shouldBe` True
-                brokenExists `shouldBe` False
-            _ -> fail "Unexpectedly lacking table versions!"
+        withTestConn $ \conn ->
+            existingEventTableVersions conn testEventsBase `shouldReturn` [3, 4]
 
     it "migrate1toManyWithState threads state in order and resets it per index" $ \(_p, pool) -> do
         let statefulTable :: EventTable
-            statefulTable = InitialVersion "test_events_stateful"
+            statefulTable = TableName "test_events_stateful" 1
 
             migratedTable :: EventTable
-            migratedTable = MigrateUsing statefulMigration statefulTable
+            migratedTable = MigrateTo 2 statefulMigration statefulTable
 
             eventValue :: String -> Value
             eventValue label = object ["label" .= label]
@@ -1041,7 +1100,7 @@ migrationSpec = describe "migrate1to1" $ do
                     )
                     0
 
-        withResource pool (`dropEventTableChain` migratedTable)
+        withResource pool (`dropEventTables` "test_events_stateful")
         _ <-
             postgresWriteModelNoMigration
                 pool
@@ -1115,7 +1174,7 @@ migrationConcurrencySpec = describe "Event table is locked during migration" $ d
                 )
                 ( postgresWriteModel
                     pool
-                    (MigrateUsing mig eventTable2)
+                    (MigrateTo 5 mig eventTable2)
                     applyTestEvent
                     0
                 )
@@ -1148,6 +1207,7 @@ transactionSpec = describe "Postgres transactions" $ do
                 DbTransactionDuration{} -> pure ()
                 EventTableMigrationDuration{} -> pure ()
                 WaitForConnectionDuration{} -> pure ()
+                WaitingForMigrationLock{} -> pure ()
             backendWithCancellingLogger = p{logger = cancellingLogger}
         result <-
             Exception.try @SomeAsyncException $
@@ -1230,3 +1290,504 @@ loggingSpec = describe "Callstacks" $ do
     withStmLogger p = do
         logVar <- newTVarIO []
         pure (logVar, p{logger = \s -> atomically $ modifyTVar logVar (s :)})
+
+type TestPersistance = PostgresEvent NoIndex TestModel TestEvent
+
+noopMigration :: EventMigration
+noopMigration _ _ _ = pure ()
+
+-- | Copies the events unchanged.
+copyMigration :: EventMigration
+copyMigration prevName name conn = migrate1to1 @NoIndex @Value conn prevName name id
+
+-- | Copies the events unchanged and counts how many times it ran.
+probeMigration :: IORef Int -> EventMigration
+probeMigration probe prevName name conn = do
+    modifyIORef' probe (+ 1)
+    copyMigration prevName name conn
+
+-- | Signals when it starts (i.e. once the migrator holds its locks), then copies the
+-- events slowly enough for a concurrent reader to race it.
+slowMigration :: MVar () -> EventMigration
+slowMigration started prevName name conn = do
+    putMVar started ()
+    migrate1to1 @NoIndex @Value conn prevName name slowId
+
+startPersistance :: Pool Connection -> EventTable -> IO TestPersistance
+startPersistance pool et = postgresWriteModel pool et applyTestEvent 0
+
+addEvents :: TestPersistance -> Int -> IO TestModel
+addEvents p n = runCmd p NoIndex $ \_ -> pure (id, replicate n AddOne)
+
+-- | Drops any event tables left for the base name by an earlier run.
+freshBase :: EventTableBaseName -> IO EventTableBaseName
+freshBase base = base <$ withTestConn (`dropEventTables` base)
+
+tablesInSchema :: Connection -> String -> IO [String]
+tablesInSchema conn schema =
+    fmap fromOnly
+        <$> query
+            conn
+            "select tablename from pg_tables where schemaname = ? order by tablename"
+            (Only schema)
+
+-- | Starts a slow migration and, once it holds its locks, a second instance of the same
+-- chain. The second one must wait for the first and then find nothing left to do.
+secondStarterWaits :: Pool Connection -> IO ()
+secondStarterWaits pool = do
+    base <- freshBase "test_mig_second_starter"
+    p <- startPersistance pool (TableName base 1)
+    addEvents p 3 `shouldReturn` 3
+    started <- newEmptyMVar
+    probe <- newIORef (0 :: Int)
+    (p1, p2) <-
+        concurrently
+            (startPersistance pool (MigrateTo 2 (slowMigration started) $ TableName base 1))
+            ( do
+                readMVar started
+                startPersistance pool (MigrateTo 2 (probeMigration probe) $ TableName base 1)
+            )
+    readIORef probe `shouldReturn` 0
+    getModel p1 NoIndex `shouldReturn` 3
+    getModel p2 NoIndex `shouldReturn` 3
+    withTestConn $ \conn -> do
+        existingEventTableVersions conn base `shouldReturn` [1, 2]
+        countRows conn (eventTableNameFor base 2) `shouldReturn` 3
+
+versionedMigrationsSpec :: SpecWith (Pool Connection)
+versionedMigrationsSpec = describe "versioned migrations" $ do
+    describe "database without tables for the base name" $ do
+        it "creates only the current table and runs no migration" $ \pool -> do
+            base <- freshBase "test_mig_fresh"
+            probe <- newIORef (0 :: Int)
+            p <-
+                startPersistance pool $
+                    MigrateTo 5 (probeMigration probe)
+                        . MigrateTo 4 (probeMigration probe)
+                        $ TableName base 3
+            addEvents p 2 `shouldReturn` 2
+            readIORef probe `shouldReturn` 0
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [5]
+
+        it "concurrent starts create one table" $ \pool -> do
+            base <- freshBase "test_mig_concurrent_fresh"
+            let et :: EventTable
+                et = MigrateTo 2 noopMigration $ TableName base 1
+            (p1, p2) <- concurrently (startPersistance pool et) (startPersistance pool et)
+            addEvents p1 1 `shouldReturn` 1
+            addEvents p2 1 `shouldReturn` 2
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [2]
+
+    describe "existing database" $ do
+        it "runs every pending step, each reading the table the previous one produced" $ \pool -> do
+            base <- freshBase "test_mig_two_steps"
+            p1 <- startPersistance pool (TableName base 1)
+            addEvents p1 2 `shouldReturn` 2
+            let negateEvents :: EventMigration
+                negateEvents prevName name conn =
+                    migrate1to1 @NoIndex @TestEvent conn prevName name $ fmap $ \case
+                        AddOne -> SubtractOne
+                        SubtractOne -> AddOne
+                        Reset -> Reset
+            p3 <-
+                startPersistance pool $
+                    MigrateTo 3 copyMigration . MigrateTo 2 negateEvents $
+                        TableName base 1
+            getModel p3 NoIndex `shouldReturn` (-2)
+            withTestConn $ \conn -> do
+                existingEventTableVersions conn base `shouldReturn` [1, 2, 3]
+                countRows conn (eventTableNameFor base 3) `shouldReturn` 2
+                isRetired conn (eventTableNameFor base 1) `shouldReturn` True
+                isRetired conn (eventTableNameFor base 2) `shouldReturn` True
+                isRetired conn (eventTableNameFor base 3) `shouldReturn` False
+
+        it "makes a second starter wait for the migration and then run nothing" $ \pool ->
+            secondStarterWaits pool
+
+        it "makes a second starter wait even when the default isolation level is repeatable read" $ \_ ->
+            withPoolRunning "set default_transaction_isolation = 'repeatable read'" secondStarterWaits
+
+        it "restarting with the same chain runs nothing" $ \pool -> do
+            base <- freshBase "test_mig_restart"
+            probe <- newIORef (0 :: Int)
+            let et :: EventTable
+                et = MigrateTo 3 (probeMigration probe) . MigrateTo 2 noopMigration $ TableName base 1
+            p <- startPersistance pool et
+            addEvents p 3 `shouldReturn` 3
+            p' <- startPersistance pool et
+            getModel p' NoIndex `shouldReturn` 3
+            readIORef probe `shouldReturn` 0
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [3]
+
+        it "copies the events and retires the previous table; trimming the chain afterwards runs nothing" $ \pool -> do
+            base <- freshBase "test_mig_forward"
+            p1 <- startPersistance pool (TableName base 1)
+            addEvents p1 2 `shouldReturn` 2
+            probe <- newIORef (0 :: Int)
+            p2 <- startPersistance pool (MigrateTo 2 (probeMigration probe) $ TableName base 1)
+            readIORef probe `shouldReturn` 1
+            getModel p2 NoIndex `shouldReturn` 2
+            withTestConn $ \conn -> do
+                countRows conn (eventTableNameFor base 2) `shouldReturn` 2
+                isRetired conn (eventTableNameFor base 1) `shouldReturn` True
+            addEvents p1 1 `shouldThrow` \e -> sqlErrorMsg e == "Event table has been retired."
+            p3 <- startPersistance pool (TableName base 2)
+            addEvents p3 1 `shouldReturn` 3
+            readIORef probe `shouldReturn` 1
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [1, 2]
+
+        it "continues from the highest table of a chain built by earlier versions" $ \pool -> do
+            base <- freshBase "test_mig_handbuilt"
+            withTestConn $ \conn -> do
+                createEventTable' conn (eventTableNameFor base 1)
+                retireTable conn (eventTableNameFor base 1)
+                createEventTable' conn (eventTableNameFor base 2)
+                evs <-
+                    traverse
+                        (\e -> Stored e (UTCTime (fromGregorian 2020 10 15) 0) <$> mkId)
+                        [AddOne, AddOne, AddOne]
+                void $ writeEvents conn (eventTableNameFor base 2) NoIndex evs
+            probe <- newIORef (0 :: Int)
+            p <- startPersistance pool (MigrateTo 2 (probeMigration probe) $ TableName base 1)
+            getModel p NoIndex `shouldReturn` 3
+            readIORef probe `shouldReturn` 0
+            p' <-
+                startPersistance pool $
+                    MigrateTo 3 (probeMigration probe)
+                        . MigrateTo 2 (probeMigration probe)
+                        $ TableName base 1
+            readIORef probe `shouldReturn` 1
+            getModel p' NoIndex `shouldReturn` 3
+            withTestConn $ \conn -> countRows conn (eventTableNameFor base 3) `shouldReturn` 3
+
+        it "does not need the tables below the current one" $ \pool -> do
+            base <- freshBase "test_mig_gap"
+            p <- startPersistance pool (MigrateTo 2 noopMigration $ TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            probe <- newIORef (0 :: Int)
+            p' <-
+                startPersistance pool $
+                    MigrateTo 3 (probeMigration probe)
+                        . MigrateTo 2 noopMigration
+                        $ TableName base 1
+            readIORef probe `shouldReturn` 1
+            getModel p' NoIndex `shouldReturn` 2
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [2, 3]
+
+        it "keeps serving reads during a slow migration" $ \pool -> do
+            base <- freshBase "test_mig_reads"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 3 `shouldReturn` 3
+            getModel p NoIndex `shouldReturn` 3
+            started <- newEmptyMVar
+            (readDuration, _) <-
+                concurrently
+                    ( do
+                        readMVar started
+                        t0 <- getCurrentTime
+                        evs <- getEventList p NoIndex
+                        length evs `shouldBe` 3
+                        getModel p NoIndex `shouldReturn` 3
+                        t1 <- getCurrentTime
+                        pure $ diffUTCTime t1 t0
+                    )
+                    (startPersistance pool (MigrateTo 2 (slowMigration started) $ TableName base 1))
+            -- the copy takes >= 0.75s (3 events x 250ms); reads must not wait for it
+            readDuration `shouldSatisfy` (< 0.5)
+
+        it "rolls back every step when a later step fails" $ \pool -> do
+            base <- freshBase "test_mig_rollback"
+            p1 <- startPersistance pool (TableName base 1)
+            addEvents p1 2 `shouldReturn` 2
+            probe <- newIORef (0 :: Int)
+            let broken :: EventTable
+                broken =
+                    MigrateTo 3 (\_ _ _ -> throwIO MigrationFailure)
+                        . MigrateTo 2 (probeMigration probe)
+                        $ TableName base 1
+            startPersistance pool broken `shouldThrow` (== MigrationFailure)
+            readIORef probe `shouldReturn` 1
+            withTestConn $ \conn -> do
+                existingEventTableVersions conn base `shouldReturn` [1]
+                isRetired conn (eventTableNameFor base 1) `shouldReturn` False
+            addEvents p1 1 `shouldReturn` 3
+
+        it "finds tables through the search path instead of creating shadows" $ \pool -> do
+            base <- freshBase "test_mig_search_path"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            let emptySchema :: String
+                emptySchema = "test_mig_empty_schema"
+            withSchema emptySchema $
+                withPoolRunning ("set search_path = " <> quoteIdent emptySchema <> ", public") $ \shadowedPool -> do
+                    p' <- startPersistance shadowedPool (TableName base 1)
+                    getModel p' NoIndex `shouldReturn` 2
+                    migrated <- startPersistance shadowedPool (MigrateTo 2 copyMigration $ TableName base 1)
+                    getModel migrated NoIndex `shouldReturn` 2
+                    restarted <- startPersistance shadowedPool (TableName base 2)
+                    getModel restarted NoIndex `shouldReturn` 2
+                    withTestConn $ \conn -> tablesInSchema conn emptySchema `shouldReturn` []
+            withTestConn $ \conn -> isRetired conn (eventTableNameFor base 1) `shouldReturn` True
+            restarted <- startPersistance pool (TableName base 2)
+            getModel restarted NoIndex `shouldReturn` 2
+            addEvents p 1 `shouldThrow` \e -> sqlErrorMsg e == "Event table has been retired."
+
+        it "keeps tenant migrations separate from newer tables in a fallback schema" $ \pool -> do
+            base <- freshBase "test_mig_tenant_versions"
+            fallback <- startPersistance pool (TableName base 2)
+            addEvents fallback 5 `shouldReturn` 5
+            let schema :: String
+                schema = "test_mig_tenant"
+            withSchema schema $ do
+                withPoolRunning ("set search_path = " <> quoteIdent schema) $ \tenantPool -> do
+                    tenant <- startPersistance tenantPool (TableName base 1)
+                    addEvents tenant 2 `shouldReturn` 2
+                withPoolRunning ("set search_path = " <> quoteIdent schema <> ", public") $ \tenantPool -> do
+                    tenant <- startPersistance tenantPool (TableName base 1)
+                    getModel tenant NoIndex `shouldReturn` 2
+                    migrated <- startPersistance tenantPool (MigrateTo 2 copyMigration $ TableName base 1)
+                    getModel migrated NoIndex `shouldReturn` 2
+                    addEvents migrated 1 `shouldReturn` 3
+                    restarted <- startPersistance tenantPool (TableName base 2)
+                    getModel restarted NoIndex `shouldReturn` 3
+                    addEvents tenant 1 `shouldThrow` \e -> sqlErrorMsg e == "Event table has been retired."
+                    withTestConn $ \conn ->
+                        tablesInSchema conn schema
+                            `shouldReturn` [eventTableNameFor base 1, eventTableNameFor base 2]
+                fallbackRestarted <- startPersistance pool (TableName base 2)
+                getModel fallbackRestarted NoIndex `shouldReturn` 5
+                addEvents fallbackRestarted 1 `shouldReturn` 6
+
+        it "ignores an unretired predecessor in a fallback schema" $ \pool -> do
+            base <- freshBase "test_mig_tenant_predecessor"
+            fallback <- startPersistance pool (TableName base 1)
+            addEvents fallback 5 `shouldReturn` 5
+            let schema :: String
+                schema = "test_mig_tenant_current"
+            withSchema schema $ do
+                withPoolRunning ("set search_path = " <> quoteIdent schema) $ \tenantPool -> do
+                    tenant <- startPersistance tenantPool (TableName base 2)
+                    addEvents tenant 2 `shouldReturn` 2
+                withPoolRunning ("set search_path = " <> quoteIdent schema <> ", public") $ \tenantPool -> do
+                    tenant <- startPersistance tenantPool (TableName base 2)
+                    getModel tenant NoIndex `shouldReturn` 2
+                    migrated <- startPersistance tenantPool (MigrateTo 3 copyMigration $ TableName base 2)
+                    getModel migrated NoIndex `shouldReturn` 2
+                addEvents fallback 1 `shouldReturn` 6
+
+        it "finds and migrates tables that live outside the public schema" $ \_ -> do
+            let base :: EventTableBaseName
+                base = "test_mig_own_schema_events"
+
+                schema :: String
+                schema = "test_mig_own_schema"
+            withSchema schema $
+                withPoolRunning ("set search_path = " <> quoteIdent schema) $ \schemaPool -> do
+                    p <- startPersistance schemaPool (TableName base 1)
+                    addEvents p 2 `shouldReturn` 2
+                    probe <- newIORef (0 :: Int)
+                    p' <- startPersistance schemaPool (MigrateTo 2 (probeMigration probe) $ TableName base 1)
+                    readIORef probe `shouldReturn` 1
+                    getModel p' NoIndex `shouldReturn` 2
+                    restarted <- startPersistance schemaPool (TableName base 2)
+                    getModel restarted NoIndex `shouldReturn` 2
+                    withTestConn $ \conn -> do
+                        tablesInSchema conn schema
+                            `shouldReturn` [eventTableNameFor base 1, eventTableNameFor base 2]
+                        existingEventTableVersions conn base `shouldReturn` []
+
+        it "rejects retries after a committing migration until the incomplete table is removed" $ \pool -> do
+            base <- freshBase "test_mig_Commits"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            let committing :: EventMigration
+                committing prevName name conn =
+                    withTransaction conn $ copyMigration prevName name conn
+
+                failedChain :: EventTable
+                failedChain = MigrateTo 2 committing $ TableName base 1
+            startPersistance pool failedChain
+                `shouldThrow` (== MigrationEndedTransaction (eventTableNameFor base 2))
+            withTestConn $ \conn -> do
+                existingEventTableVersions conn base `shouldReturn` [1, 2]
+                isRetired conn (eventTableNameFor base 1) `shouldReturn` False
+            addEvents p 1 `shouldReturn` 3
+            probe <- newIORef (0 :: Int)
+            for_ [failedChain, TableName base 2, MigrateTo 3 (probeMigration probe) failedChain] $ \chain ->
+                startPersistance pool chain
+                    `shouldThrow` (== IncompleteMigration (eventTableNameFor base 1) (eventTableNameFor base 2))
+            readIORef probe `shouldReturn` 0
+            withTestConn $ \conn ->
+                void . execute_ conn $ "drop table " <> quoteIdent (eventTableNameFor base 2)
+            repaired <- startPersistance pool (MigrateTo 2 copyMigration $ TableName base 1)
+            getModel repaired NoIndex `shouldReturn` 3
+            restarted <- startPersistance pool (TableName base 2)
+            getModel restarted NoIndex `shouldReturn` 3
+            addEvents p 1 `shouldThrow` \e -> sqlErrorMsg e == "Event table has been retired."
+
+        it "rejects a waiting starter when a migration commits before retiring the previous table" $ \pool -> do
+            base <- freshBase "test_mig_commits_waiting"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            migrationStarted <- newEmptyMVar
+            starterWaiting <- newEmptyMVar
+            let committing :: EventMigration
+                committing prevName name conn = do
+                    copyMigration prevName name conn
+                    putMVar migrationStarted ()
+                    takeMVar starterWaiting
+                    commit conn
+
+                waitingLogger :: LogEntry -> IO ()
+                waitingLogger = \case
+                    WaitingForMigrationLock{} -> putMVar starterWaiting ()
+                    DbTransactionDuration{} -> pure ()
+                    EventTableLockDuration{} -> pure ()
+                    EventTableMigrationDuration{} -> pure ()
+                    WaitForConnectionDuration{} -> pure ()
+
+                chain :: EventTable
+                chain = MigrateTo 2 committing $ TableName base 1
+            outcome <- timeout 5000000 $
+                concurrently
+                    (try @IO @MigrationError . void $ startPersistance pool chain)
+                    ( do
+                        readMVar migrationStarted
+                        try @IO @MigrationError . void $
+                            postgresWriteModelWith
+                                (\backend -> backend{logger = waitingLogger})
+                                pool
+                                chain
+                                applyTestEvent
+                                0
+                    )
+            outcome
+                `shouldBe` Just
+                    ( Left $ MigrationEndedTransaction (eventTableNameFor base 2)
+                    , Left $ IncompleteMigration (eventTableNameFor base 1) (eventTableNameFor base 2)
+                    )
+            addEvents p 1 `shouldReturn` 3
+
+        it "checks only the previous existing table, even across gaps" $ \pool -> do
+            base <- freshBase "test_mig_previous_existing"
+            p <- startPersistance pool (TableName base 1)
+            withTestConn $ \conn -> do
+                createEventTable' conn (eventTableNameFor base 3)
+                retireTable conn (eventTableNameFor base 3)
+                createEventTable' conn (eventTableNameFor base 5)
+            void $ startPersistance pool (TableName base 5)
+            addEvents p 1 `shouldReturn` 1
+            withTestConn $ \conn ->
+                void . execute_ conn $ "drop table " <> quoteIdent (eventTableNameFor base 3)
+            startPersistance pool (TableName base 5)
+                `shouldThrow` (== IncompleteMigration (eventTableNameFor base 1) (eventTableNameFor base 5))
+
+        it "requires the previous table's retirement trigger to be enabled for ordinary writers" $ \pool -> do
+            base <- freshBase "test_mig_retirement_enabled"
+            _ <- startPersistance pool (TableName base 1)
+            let chain :: EventTable
+                chain = MigrateTo 2 copyMigration $ TableName base 1
+            _ <- startPersistance pool chain
+            for_ [("disable", False), ("enable replica", False), ("enable always", True), ("enable", True)] $ \(mode, retired) -> do
+                withTestConn $ \conn ->
+                    void . execute_ conn $
+                        "alter table " <> quoteIdent (eventTableNameFor base 1) <> " " <> mode <> " trigger retired"
+                if retired
+                    then void $ startPersistance pool chain
+                    else
+                        startPersistance pool chain
+                            `shouldThrow` (== IncompleteMigration (eventTableNameFor base 1) (eventTableNameFor base 2))
+
+        it "fails when a migration rolls back the startup transaction, leaving the previous table live" $ \pool -> do
+            base <- freshBase "test_mig_rolls_back"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            startPersistance pool (MigrateTo 2 (\_ _ conn -> rollback conn) $ TableName base 1)
+                `shouldThrow` (== MigrationEndedTransaction (eventTableNameFor base 2))
+            withTestConn $ \conn -> do
+                existingEventTableVersions conn base `shouldReturn` [1]
+                isRetired conn (eventTableNameFor base 1) `shouldReturn` False
+            addEvents p 1 `shouldReturn` 3
+            repaired <- startPersistance pool (MigrateTo 2 copyMigration $ TableName base 1)
+            getModel repaired NoIndex `shouldReturn` 3
+
+    describe "refusing to start" $ do
+        it "when the database is ahead of the code" $ \pool -> do
+            base <- freshBase "test_mig_ahead"
+            _ <- startPersistance pool (MigrateTo 2 noopMigration $ TableName base 1)
+            startPersistance pool (TableName base 1)
+                `shouldThrow` (== DatabaseAheadOfCode base 2 1)
+
+        it "when the database is behind the code's TableName version" $ \pool -> do
+            base <- freshBase "test_mig_behind"
+            p <- startPersistance pool (TableName base 1)
+            addEvents p 2 `shouldReturn` 2
+            startPersistance pool (MigrateTo 4 noopMigration $ TableName base 3)
+                `shouldThrow` (== DatabaseBelowBaseVersion base 1 3)
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [1]
+
+        it "when the chain is invalid, before connecting" $ \_ -> do
+            pool <- simplePool (throwIO (userError "connected") :: IO Connection)
+            let base :: EventTableBaseName
+                base = "test_mig_invalid"
+            startPersistance pool (MigrateTo 3 noopMigration $ TableName base 1)
+                `shouldThrow` (== MisnumberedMigration base 2 3)
+            startPersistance pool (TableName base 0)
+                `shouldThrow` (== InvalidEventTableVersion base 0)
+            startPersistance pool (TableName (replicate 61 'a') 1)
+                `shouldThrow` (== EventTableNameTooLong (replicate 61 'a' <> "_v1"))
+
+        it "when runMigrations is handed an invalid chain directly" $ \pool -> do
+            base <- freshBase "test_mig_direct"
+            p <- startPersistance pool (TableName base 1)
+            withIOTrans
+                p
+                ( \pgt ->
+                    runMigrations
+                        (const $ pure ())
+                        (transaction pgt)
+                        (MigrateTo 3 noopMigration $ TableName base 1)
+                )
+                `shouldThrow` (== MisnumberedMigration base 2 3)
+            withTestConn $ \conn -> existingEventTableVersions conn base `shouldReturn` [1]
+
+    it "keeps prefix bases apart (foo vs foo_v2)" $ \pool -> do
+        base <- freshBase "test_mig_prefix"
+        prefixBase <- freshBase (base <> "_v2")
+        pPrefix <- startPersistance pool (TableName prefixBase 1)
+        addEvents pPrefix 1 `shouldReturn` 1
+        p <- startPersistance pool (MigrateTo 2 noopMigration $ TableName base 1)
+        addEvents p 2 `shouldReturn` 2
+        withTestConn $ \conn -> do
+            existingEventTableVersions conn base `shouldReturn` [2]
+            existingEventTableVersions conn prefixBase `shouldReturn` [1]
+            dropEventTables conn base
+            existingEventTableVersions conn prefixBase `shouldReturn` [1]
+
+    it "reports waiting for the migration lock to a custom logger, only when it waits" $ \pool -> do
+        base <- freshBase "test_mig_lock_log"
+        logVar <- newTVarIO []
+        let waitedFor :: [LogEntry] -> [EventTableBaseName]
+            waitedFor entries = [waited | WaitingForMigrationLock waited <- entries]
+
+            start :: IO TestPersistance
+            start =
+                postgresWriteModelWith
+                    (\p -> p{logger = \entry -> atomically $ modifyTVar logVar (entry :)})
+                    pool
+                    (TableName base 1)
+                    applyTestEvent
+                    0
+        _ <- start
+        waitedFor <$> readTVarIO logVar `shouldReturn` []
+        withTestConn $ \conn -> do
+            begin conn
+            migrationLock (const $ pure ()) conn base
+            withAsync start $ \blocked -> do
+                logged <-
+                    timeout 5000000 . atomically $
+                        readTVar logVar >>= checkSTM . not . null . waitedFor
+                commit conn
+                void $ wait blocked
+                logged `shouldBe` Just ()
+        waitedFor <$> readTVarIO logVar `shouldReturn` [base]

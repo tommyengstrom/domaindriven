@@ -2,7 +2,7 @@
 
 -- | Server handlers demonstrating shared patterns:
 --
---   * @Effects@ type alias with qualified @Effectful.:>@
+--   * Explicit capabilities with qualified @Effectful.:>@
 --   * @withCustomer@ / @withOrder@ entity handler pattern (composed)
 --   * Event wrapping helpers (@wrapCustE@, @wrapOrdE@)
 --   * Dual lookup helpers (Eff + Pure variants)
@@ -24,17 +24,6 @@ import Types
 import Prelude
 
 --------------------------------------------------------------------------------
--- Effects type alias — qualified Effectful.:> avoids Servant collision
---------------------------------------------------------------------------------
-
-type Effects es =
-    ( Projection CrmDomain Effectful.:> es
-    , Aggregate CrmDomain Effectful.:> es
-    , Error ServerError Effectful.:> es
-    , GenId Effectful.:> es
-    )
-
---------------------------------------------------------------------------------
 -- Event wrapping helpers — composable chain mirroring the domain hierarchy
 --------------------------------------------------------------------------------
 
@@ -54,11 +43,9 @@ lookupCustomer cid m =
         Just c -> pure c
         Nothing -> throwError err404{errBody = "Customer not found"}
 
-lookupCustomerPure :: CustomerId -> CrmModel -> Customer
+lookupCustomerPure :: CustomerId -> CrmModel -> Either ServerError Customer
 lookupCustomerPure cid m =
-    case Map.lookup cid m.customers of
-        Just c -> c
-        Nothing -> error "Invariant violation: customer not found after transaction"
+    maybe (Left err500) Right (Map.lookup cid m.customers)
 
 lookupOrder :: Error ServerError Effectful.:> es => Customer -> OrderId -> Eff es Order
 lookupOrder cust oid =
@@ -66,12 +53,10 @@ lookupOrder cust oid =
         Just o -> pure o
         Nothing -> throwError err404{errBody = "Order not found"}
 
-lookupOrderPure :: CustomerId -> OrderId -> CrmModel -> Order
-lookupOrderPure cid oid m =
-    let cust = lookupCustomerPure cid m
-    in  case Map.lookup oid cust.orders of
-            Just o -> o
-            Nothing -> error "Invariant violation: order not found after transaction"
+lookupOrderPure :: CustomerId -> OrderId -> CrmModel -> Either ServerError Order
+lookupOrderPure cid oid m = do
+    cust <- lookupCustomerPure cid m
+    maybe (Left err500) Right (Map.lookup oid cust.orders)
 
 --------------------------------------------------------------------------------
 -- Entity handler patterns — withCustomer, withOrder (composed)
@@ -79,48 +64,66 @@ lookupOrderPure cid oid m =
 
 -- | Look up customer, 404 if missing, run callback, return updated customer.
 withCustomer
-    :: Effects es
+    :: (Aggregate CrmDomain Effectful.:> es, Error ServerError Effectful.:> es)
     => CustomerId
     -> (Customer -> Eff es [CrmEvent])
     -> Eff es Customer
-withCustomer cid mkEvents = runTransaction @CrmDomain \m -> do
-    cust <- lookupCustomer cid m
-    evts <- mkEvents cust
-    pure (\m' -> lookupCustomerPure cid m', evts)
+withCustomer cid mkEvents = do
+    result <- runTransaction @CrmDomain \m -> do
+        cust <- lookupCustomer cid m
+        evts <- mkEvents cust
+        pure (lookupCustomerPure cid, evts)
+    either throwError pure result
 
--- | Composed: withOrder delegates to withCustomer's transaction.
--- Looks up both customer and order, 404 if either missing.
+-- | Look up customer and order in one transaction, 404 if either is missing.
 withOrder
-    :: Effects es
+    :: (Aggregate CrmDomain Effectful.:> es, Error ServerError Effectful.:> es)
     => CustomerId
     -> OrderId
     -> (Customer -> Order -> Eff es [CrmEvent])
     -> Eff es Order
-withOrder cid oid mkEvents = runTransaction @CrmDomain \m -> do
-    cust <- lookupCustomer cid m
-    ord <- lookupOrder cust oid
-    evts <- mkEvents cust ord
-    pure (\m' -> lookupOrderPure cid oid m', evts)
+withOrder cid oid mkEvents = do
+    result <- runTransaction @CrmDomain \m -> do
+        cust <- lookupCustomer cid m
+        ord <- lookupOrder cust oid
+        evts <- mkEvents cust ord
+        pure (lookupOrderPure cid oid, evts)
+    either throwError pure result
 
 --------------------------------------------------------------------------------
 -- Server implementation
 --------------------------------------------------------------------------------
 
-customersServer :: Effects es => CustomersApi (AsServerT (Eff es))
+customersServer
+    :: ( Projection CrmDomain Effectful.:> es
+       , Aggregate CrmDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CustomersApi (AsServerT (Eff es))
 customersServer =
     CustomersApi
         { list_ = do
             CrmModel{customers} <- getModel @CrmDomain
             pure $ Map.elems customers
-        , create = \cmd -> runTransaction @CrmDomain \_ -> do
-            cid <- CustomerId <$> genId
-            let evts = [wrapCustE cid CustomerCreated{name = cmd.name, email = cmd.email}]
-            pure (\m' -> lookupCustomerPure cid m', evts)
+        , create = \cmd -> do
+            result <- runTransaction @CrmDomain \_ -> do
+                cid <- CustomerId <$> genId
+                let evts :: [CrmEvent]
+                    evts = [wrapCustE cid CustomerCreated{name = cmd.name, email = cmd.email}]
+                pure (lookupCustomerPure cid, evts)
+            either throwError pure result
         , detail = \cid ->
             FieldNameAsPathServer $ customerServer cid
         }
 
-customerServer :: Effects es => CustomerId -> CustomerApi (AsServerT (Eff es))
+customerServer
+    :: ( Projection CrmDomain Effectful.:> es
+       , Aggregate CrmDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CustomerId -> CustomerApi (AsServerT (Eff es))
 customerServer cid =
     CustomerApi
         { get_ = do
@@ -132,13 +135,19 @@ customerServer cid =
         , changeEmail = \cmd ->
             withCustomer cid \_cust ->
                 pure [wrapCustE cid CustomerEmailChanged{email = cmd.email}]
-        , remove = do
-            _ <- withCustomer cid \_cust -> pure [wrapCustE cid CustomerRemoved]
-            pure NoContent
+        , remove = runTransaction @CrmDomain \m -> do
+            _ <- lookupCustomer cid m
+            pure (const NoContent, [wrapCustE cid CustomerRemoved])
         , orders = FieldNameAsPathServer $ ordersServer cid
         }
 
-ordersServer :: Effects es => CustomerId -> OrdersApi (AsServerT (Eff es))
+ordersServer
+    :: ( Projection CrmDomain Effectful.:> es
+       , Aggregate CrmDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CustomerId -> OrdersApi (AsServerT (Eff es))
 ordersServer cid =
     OrdersApi
         { list_ = do
@@ -146,17 +155,25 @@ ordersServer cid =
             cust <- lookupCustomer cid m
             pure $ Map.elems cust.orders
         , create = \cmd -> do
-            oid <- OrderId <$> genId
-            _ <-
-                withCustomer cid \_cust ->
-                    pure [wrapOrdE cid oid OrderCreated{description = cmd.description}]
-            m' <- getModel @CrmDomain
-            pure $ lookupOrderPure cid oid m'
+            result <- runTransaction @CrmDomain \m -> do
+                _ <- lookupCustomer cid m
+                oid <- OrderId <$> genId
+                pure
+                    ( lookupOrderPure cid oid
+                    , [wrapOrdE cid oid OrderCreated{description = cmd.description}]
+                    )
+            either throwError pure result
         , detail = \oid ->
             FieldNameAsPathServer $ orderServer cid oid
         }
 
-orderServer :: Effects es => CustomerId -> OrderId -> OrderApi (AsServerT (Eff es))
+orderServer
+    :: ( Projection CrmDomain Effectful.:> es
+       , Aggregate CrmDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CustomerId -> OrderId -> OrderApi (AsServerT (Eff es))
 orderServer cid oid =
     OrderApi
         { get_ = do
@@ -169,9 +186,10 @@ orderServer cid oid =
         , changeDescription = \cmd ->
             withOrder cid oid \_ _ ->
                 pure [wrapOrdE cid oid OrderDescriptionChanged{description = cmd.description}]
-        , remove = do
-            _ <- withOrder cid oid \_ _ -> pure [wrapOrdE cid oid OrderRemoved]
-            pure NoContent
+        , remove = runTransaction @CrmDomain \m -> do
+            cust <- lookupCustomer cid m
+            _ <- lookupOrder cust oid
+            pure (const NoContent, [wrapOrdE cid oid OrderRemoved])
         , addItem = \cmd -> do
             iid <- ItemId <$> genId
             withOrder cid oid \_ _ ->

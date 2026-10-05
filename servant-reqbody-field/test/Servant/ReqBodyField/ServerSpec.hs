@@ -29,8 +29,9 @@ import Network.HTTP.Types
     , status404
     , status405
     , status415
+    , status500
     )
-import Network.Wai (Application, requestHeaders, requestMethod)
+import Network.Wai (Application, requestHeaders, requestMethod, vault)
 import Network.Wai.Test
     ( SRequest (SRequest)
     , SResponse
@@ -60,6 +61,7 @@ import Servant.Server
     , ErrorFormatter
     , ErrorFormatters (bodyParserErrorFormatter)
     , Handler
+    , HasServer (route, hoistServerWithContext)
     , Server
     , ServerError (errBody)
     , ServerT
@@ -71,6 +73,21 @@ import Servant.Server
     )
 import Test.Hspec
 import Prelude
+
+data DropVault
+
+instance HasServer api context => HasServer (DropVault :> api) context where
+    type ServerT (DropVault :> api) m = ServerT api m
+    route _ serverContext server =
+        fmap (\application request -> application request{vault = mempty}) $
+            route (Proxy @api) serverContext server
+    hoistServerWithContext _ = hoistServerWithContext (Proxy @api)
+
+missingCacheApp :: Application
+missingCacheApp =
+    serve
+        (Proxy @(ReqBodyField "value" Int :> DropVault :> Post '[JSON] Value))
+        (pure . toJSON)
 
 type TestAPI =
     "fields"
@@ -294,6 +311,10 @@ spec = do
         it "preserves method-before-content-type error priority" $ do
             response <- perform testApp methodGet "/echo" [] ""
             simpleStatus response `shouldBe` status405
+
+        it "returns 500 when a nested combinator removes the body cache" $ do
+            response <- postJSON missingCacheApp "/" "{\"value\":1}"
+            simpleStatus response `shouldBe` status500
 
         it "preserves authentication-before-content-type error priority" $ do
             response <- perform authApp methodPost "/auth" [] "not-json"

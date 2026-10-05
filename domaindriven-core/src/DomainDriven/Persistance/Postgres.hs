@@ -4,13 +4,18 @@ module DomainDriven.Persistance.Postgres
 where
 
 import DomainDriven.Persistance.Postgres.Internal as X
-    ( PostgresEvent (..)
+    ( LogEntry (..)
+    , OneLineCallStack
+    , PostgresEvent (..)
+    , getEventTableName
     , postgresWriteModel
     , postgresWriteModelNoMigration
+    , postgresWriteModelWith
     , simplePool
     , simplePool'
     , simplePoolWith
     , simplePoolWith'
+    , validateEventTable
     )
 import DomainDriven.Persistance.Postgres.Types as X
     ( ChunkSize
@@ -18,7 +23,11 @@ import DomainDriven.Persistance.Postgres.Types as X
     , EventTable (..)
     , EventTableBaseName
     , EventTableName
+    , EventTableVersion
     , IsPgIndex (..)
+    , MigrationError (..)
     , ParseConcurrency
     , PreviousEventTableName
+    , eventTableNameFor
+    , maxEventTableNameLength
     )

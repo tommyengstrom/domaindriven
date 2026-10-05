@@ -162,7 +162,5 @@ commit-failure/cache-poisoning bug; those items are checked off below.
       instead of a cursor for small deltas (4 round trips → 1).
 - [ ] `withIOTrans` could be built on `withPooledConnection` (rollback inside
       the bracket, ~50 fewer lines).
-- [ ] `runMigrations`: `to_regclass` instead of the `information_schema` join
-      for the existence check.
 - [ ] Optional transitional dual lock (legacy `hashable` key + new key) if a
       rolling 0.6 → 0.7 upgrade is ever required.

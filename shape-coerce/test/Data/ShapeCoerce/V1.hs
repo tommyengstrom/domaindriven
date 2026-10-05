@@ -3,6 +3,9 @@ module Data.ShapeCoerce.V1 where
 import GHC.Generics (Generic)
 import Prelude
 
+data Reordered = ReorderedFirst | ReorderedSecond
+    deriving stock (Eq, Show, Generic)
+
 data InsertAtStart
     = StartFirst
     | StartSecond Int

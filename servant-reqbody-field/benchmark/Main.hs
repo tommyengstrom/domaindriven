@@ -315,15 +315,15 @@ bodyLarge8App :: Application
 bodyLarge8App =
     serve (Proxy @(BodyAPI (Fields 8 Text))) (pure . toJSON)
 
-fieldSmall1Client :: Fields 1 Int -> Free ClientF Value
+fieldSmall1Client :: Fields 1 Int -> Either String (Free ClientF Value)
 fieldSmall1Client (Fields [f1]) =
-    FreeClient.client (Proxy @(Field1 Int)) f1
+    Right $ FreeClient.client (Proxy @(Field1 Int)) f1
 fieldSmall1Client _ =
-    error "fieldSmall1Client: expected exactly one field"
+    Left "fieldSmall1Client: expected exactly one field"
 
-fieldSmall8Client :: Fields 8 Int -> Free ClientF Value
+fieldSmall8Client :: Fields 8 Int -> Either String (Free ClientF Value)
 fieldSmall8Client (Fields [f1, f2, f3, f4, f5, f6, f7, f8]) =
-    FreeClient.client (Proxy @(Field8 Int))
+    Right $ FreeClient.client (Proxy @(Field8 Int))
         f1
         f2
         f3
@@ -333,11 +333,11 @@ fieldSmall8Client (Fields [f1, f2, f3, f4, f5, f6, f7, f8]) =
         f7
         f8
 fieldSmall8Client _ =
-    error "fieldSmall8Client: expected exactly eight fields"
+    Left "fieldSmall8Client: expected exactly eight fields"
 
-fieldLarge8Client :: Fields 8 Text -> Free ClientF Value
+fieldLarge8Client :: Fields 8 Text -> Either String (Free ClientF Value)
 fieldLarge8Client (Fields [f1, f2, f3, f4, f5, f6, f7, f8]) =
-    FreeClient.client (Proxy @(Field8 Text))
+    Right $ FreeClient.client (Proxy @(Field8 Text))
         f1
         f2
         f3
@@ -347,9 +347,9 @@ fieldLarge8Client (Fields [f1, f2, f3, f4, f5, f6, f7, f8]) =
         f7
         f8
 fieldLarge8Client _ =
-    error "fieldLarge8Client: expected exactly eight fields"
+    Left "fieldLarge8Client: expected exactly eight fields"
 
-fieldSmall32Client :: Fields 32 Int -> Free ClientF Value
+fieldSmall32Client :: Fields 32 Int -> Either String (Free ClientF Value)
 fieldSmall32Client
     ( Fields
             [ f1
@@ -386,7 +386,7 @@ fieldSmall32Client
                 , f32
                 ]
         ) =
-        FreeClient.client (Proxy @(Field32 Int))
+        Right $ FreeClient.client (Proxy @(Field32 Int))
             f1
             f2
             f3
@@ -420,11 +420,11 @@ fieldSmall32Client
             f31
             f32
 fieldSmall32Client _ =
-    error "fieldSmall32Client: expected exactly 32 fields"
+    Left "fieldSmall32Client: expected exactly 32 fields"
 
 optionalField32Client
     :: SparseFields 32 Int
-    -> Free ClientF Value
+    -> Either String (Free ClientF Value)
 optionalField32Client
     ( SparseFields
             [ f1
@@ -461,7 +461,7 @@ optionalField32Client
                 , f32
                 ]
         ) =
-        FreeClient.client (Proxy @(Field32 (Maybe Int)))
+        Right $ FreeClient.client (Proxy @(Field32 (Maybe Int)))
             f1
             f2
             f3
@@ -495,7 +495,7 @@ optionalField32Client
             f31
             f32
 optionalField32Client _ =
-    error "optionalField32Client: expected exactly 32 fields"
+    Left "optionalField32Client: expected exactly 32 fields"
 
 bodySmall1Client :: Fields 1 Int -> Free ClientF Value
 bodySmall1Client =
@@ -565,11 +565,8 @@ requestParts action = do
         Just (RequestBodySource _, _) -> Left "unexpected streaming body"
         Nothing -> Left "request has no body"
 
-clientRequestBody :: Free ClientF a -> LBS.ByteString
-clientRequestBody action =
-    case requestParts action of
-        Left failure -> error failure
-        Right (body, _) -> body
+clientRequestBody :: Free ClientF a -> Either String LBS.ByteString
+clientRequestBody = fmap fst . requestParts
 
 decodeObject :: LBS.ByteString -> Either String Object
 decodeObject body =
@@ -617,14 +614,14 @@ validateServerComparison name fieldApplication bodyApplication request = do
 
 validateClientComparison
     :: String
-    -> (input -> Free ClientF Value)
-    -> (input -> Free ClientF Value)
+    -> (input -> Either String (Free ClientF Value))
+    -> (input -> Either String (Free ClientF Value))
     -> input
     -> IO ()
 validateClientComparison name fieldGenerator bodyGenerator input =
     case
-        ( requestParts (fieldGenerator input)
-        , requestParts (bodyGenerator input)
+        ( fieldGenerator input >>= requestParts
+        , bodyGenerator input >>= requestParts
         )
     of
         (Right (fieldBody, fieldMediaType), Right (bodyBody, bodyMediaType)) -> do
@@ -679,17 +676,17 @@ serverComparison name fieldApplication bodyApplication request =
 
 clientComparison
     :: String
-    -> (input -> Free ClientF Value)
-    -> (input -> Free ClientF Value)
+    -> (input -> Either String (Free ClientF Value))
+    -> (input -> Either String (Free ClientF Value))
     -> input
     -> Benchmark
 clientComparison name fieldGenerator bodyGenerator input =
     bgroup
         name
         [ bench "ReqBodyField" $
-            nf (clientRequestBody . fieldGenerator) input
+            nf (\value -> fieldGenerator value >>= clientRequestBody) input
         , bench "ReqBody" $
-            nf (clientRequestBody . bodyGenerator) input
+            nf (\value -> bodyGenerator value >>= clientRequestBody) input
         ]
 
 main :: IO ()
@@ -723,27 +720,27 @@ main = do
     validateClientComparison
         "client/1-small"
         fieldSmall1Client
-        bodySmall1Client
+        (Right . bodySmall1Client)
         small1Payload
     validateClientComparison
         "client/8-small"
         fieldSmall8Client
-        bodySmall8Client
+        (Right . bodySmall8Client)
         small8Payload
     validateClientComparison
         "client/32-small"
         fieldSmall32Client
-        bodySmall32Client
+        (Right . bodySmall32Client)
         small32Payload
     validateClientComparison
         "client/8-large"
         fieldLarge8Client
-        bodyLarge8Client
+        (Right . bodyLarge8Client)
         large8Payload
     validateClientComparison
         "client/32-all-Nothing"
         optionalField32Client
-        bodyAllNothingClient
+        (Right . bodyAllNothingClient)
         allNothingPayload
 
     defaultMain
@@ -775,27 +772,27 @@ main = do
             [ clientComparison
                 "1-small"
                 fieldSmall1Client
-                bodySmall1Client
+                (Right . bodySmall1Client)
                 small1Payload
             , clientComparison
                 "8-small"
                 fieldSmall8Client
-                bodySmall8Client
+                (Right . bodySmall8Client)
                 small8Payload
             , clientComparison
                 "32-small"
                 fieldSmall32Client
-                bodySmall32Client
+                (Right . bodySmall32Client)
                 small32Payload
             , clientComparison
                 "8-large"
                 fieldLarge8Client
-                bodyLarge8Client
+                (Right . bodyLarge8Client)
                 large8Payload
             , clientComparison
                 "32-all-Nothing"
                 optionalField32Client
-                bodyAllNothingClient
+                (Right . bodyAllNothingClient)
                 allNothingPayload
             ]
         ]

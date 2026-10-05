@@ -21,7 +21,7 @@ Dependencies: `domaindriven-core` (persistence backends), `domaindriven` (Effect
 - `EventHandler.hs` — `applyEvent` with optics-based dispatch
 - `Command.hs` — Request body types (one per mutation endpoint)
 - `Api.hs` — Servant API types with `FieldNameAsPath`
-- `Server.hs` — Handlers, `Effects` alias, `withX` helpers, event wrappers
+- `Server.hs` — Handlers, `withX` helpers, event wrappers
 - `Main.hs` — Entry point, backend creation, effect stack wiring
 
 For larger apps, split `Api.hs` and `Server.hs` by sub-domain (e.g. `Api/Books.hs`, `Server/Books.hs`).
@@ -76,7 +76,7 @@ backend <- createForgetful applyEvent emptyLibraryModel
 pool <- simplePool' connectInfo
 backend <- postgresWriteModel pool eventTable applyEvent emptyLibraryModel
 
--- 6. Handlers use withX pattern + Effects alias; use genId for entity IDs
+-- 6. Handlers use withX pattern with explicit constraints; use genId for entity IDs
 --    instead of requiring IOE (see handler-patterns.md and app-wiring.md)
 -- 7. Wire effect stack (see app-wiring.md)
 ```
@@ -214,14 +214,26 @@ Nested capture fields become URL path segments, so name them after the resource 
 Each nested level needs its own `instance ApiTagFromLabel`. The handler nesting mirrors the API type:
 
 ```haskell
-booksServer :: Effects es => BooksApi (AsServerT (Eff es))
+booksServer
+    :: ( Projection LibraryDomain Effectful.:> es
+       , Aggregate LibraryDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => BooksApi (AsServerT (Eff es))
 booksServer = BooksApi
     { list   = Map.elems . (.books) <$> getModel @LibraryDomain
     , create = \cmd -> ...
     , book   = \bid -> FieldNameAsPathServer $ bookServer bid
     }
 
-bookServer :: Effects es => BookId -> BookApi (AsServerT (Eff es))
+bookServer
+    :: ( Projection LibraryDomain Effectful.:> es
+       , Aggregate LibraryDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => BookId -> BookApi (AsServerT (Eff es))
 bookServer bid = BookApi
     { get         = getModel @LibraryDomain >>= lookupBook bid
     , changeTitle = \cmd -> withBook bid \_book ->
@@ -250,11 +262,17 @@ See [handler-patterns.md](handler-patterns.md) for:
 Handlers that allocate application/entity IDs depend on `GenId`, not `IOE`, and call `genId` directly:
 
 ```haskell
-createBook :: Effects es => CreateBook -> Eff es Book
+createBook
+    :: ( Aggregate LibraryDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CreateBook -> Eff es Book
 createBook cmd = do
     bid <- BookId <$> genId
-    runTransaction @LibraryDomain \_model ->
+    result <- runTransaction @LibraryDomain \_model ->
         pure (lookupBookPure bid, [wrapBookE bid BookAdded{title = cmd.title, author = cmd.author}])
+    either throwError pure result
 ```
 
 Interpret `GenId` with `runGenId` only at the outer IO boundary. Persistence-generated stored-event UUIDs remain a backend concern and do not use this application effect.
@@ -262,7 +280,7 @@ Interpret `GenId` with `runGenId` only at the outer IO boundary. Persistence-gen
 ## Application Wiring
 
 See [app-wiring.md](app-wiring.md) for:
-- `Effects` type alias with qualified `Effectful.:>`
+- Handler constraints with qualified `Effectful.:>` (no constraint aliases)
 - `GenId` in application constraints and `runGenId` at the IO boundary
 - Effect stack ordering (type list vs interpreter chain)
 - `AnyWriteModel` backend polymorphism
@@ -290,11 +308,13 @@ instance ShapeCoercible V1.CounterEvent V2.CounterEvent where
 
 ```haskell
 eventTable :: EventTable
-eventTable = MigrateUsing myMigration $ InitialVersion "my_events"
+eventTable = MigrateTo 2 myMigration $ TableName "my_events" 1
 
 myMigration :: EventMigration
 myMigration prev next conn = migrate1to1 @NoIndex conn prev next shapeCoerce
 ```
+
+`MigrateTo 2` produces `my_events_v2` from `my_events_v1`. Steps are numbered consecutively from one above the `TableName` version, which names the oldest version the code still knows about; the current table here is `my_events_v2`. Table names are limited to 63 characters (PostgreSQL's identifier limit). The migration function must not commit or roll back the connection it is given (no `withTransaction`): the whole chain runs in one startup transaction. The Postgres backend requires PostgreSQL 13 or later.
 
 For multi-package project setup with compile-time migration safety, see [project-setup.md](project-setup.md).
 

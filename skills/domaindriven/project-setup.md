@@ -27,7 +27,7 @@ my-project/
         ├── Command.hs            # Request body types (one per mutation endpoint)
         ├── Api.hs                # Servant API types with FieldNameAsPath
         ├── Api/                  # Split large APIs into sub-modules
-        ├── Server.hs             # Handlers, Effects alias, withX helpers
+        ├── Server.hs             # Handlers, withX helpers
         ├── Hooks/                # Effectful hooks, one per file
         │   └── OnUserCreated.hs
         └── Main.hs               # Entry point, backend creation, effect stack wiring
@@ -91,15 +91,27 @@ The compiler guides you: try `shapeCoerce` first. If old and new types are struc
 eventTable :: EventTable
 eventTable =
     ensureMigrationIsUpToDate
-        $ MigrateUsing migrationV50
-        $ MigrateUsing migrationV49
-        $ MigrateUsing discardedMigration
-        $ MigrateUsing discardedMigration
-        -- ... older discarded versions ...
-        $ InitialVersion "events"
+        $ MigrateTo 50 migrationV50
+        $ MigrateTo 49 migrationV49
+        $ TableName "events" 48
 ```
 
-Each `MigrateUsing` wraps one migration step. The chain reads newest-first, oldest-last, with `InitialVersion` at the bottom.
+Each `MigrateTo` wraps one migration step and states the **version it produces**: `MigrateTo 50` reads `events_v49` and writes `events_v50`. The chain reads newest-first, oldest-last, with `TableName` at the bottom naming the **oldest version this code still knows about** (not necessarily 1). Steps must be numbered consecutively from one above the `TableName` version; the current table is the one the top step produces — `events_v50` above.
+
+At startup `postgresWriteModel` checks the chain and then looks at which `events_vN` tables exist:
+- a database without any gets only the current table (`events_v50`) — the migration functions do **not** run
+- otherwise the highest existing table is the current one, provided the previous existing table has an enabled retirement trigger; the steps above it run one at a time
+- a misnumbered chain, a table name over 63 characters, a database ahead of the code, or a database below the `TableName` version fail fast with a `MigrationError` whose message says what to do
+
+The chain check is pure, so a test can run it without a database: `validateEventTable eventTable`.
+
+The version numbers are the only link between the code and the database. A chain numbered one too high (`MigrateTo 51 migrationV50 $ TableName "events" 50` while the live table is `events_v50`) passes the check and runs `migrationV50` again, on the live table. Before deploying a renumbered chain, check that `getEventTableName eventTable` is the name of the live table.
+
+### Migration functions must not end the transaction
+
+The whole chain runs in one startup transaction that also holds the locks on the previous table. A migration function that calls `commit`, `rollback` or `withTransaction` on the connection it is given ends that transaction and releases the locks mid-chain. Startup detects this and fails with `MigrationEndedTransaction`; the previous table stays live. If the function committed, the new table exists with whatever was copied before the commit — drop it before starting again. Only use the connection for plain statements and the `migrate*` helpers.
+
+Retries and concurrent starters check that the previous existing table is retired before accepting the newest version. If it is still writable, startup fails with `IncompleteMigration`, including when the migration chain has been trimmed. This check examines only the previous existing version, not the full history.
 
 ## `ensureMigrationIsUpToDate`
 
@@ -122,19 +134,34 @@ The `Latest` import aliases the newest snapshot:
 import EventN.Event qualified as Latest
 ```
 
-## `discardedMigration`
+## Deleting Old Migrations
 
-Once all database instances have migrated past a version, replace its migration with `discardedMigration` to improve compile times:
+Once every database instance has migrated past a version, delete its migration from code to improve compile times: remove the `MigrateTo` wrapper and raise the `TableName` version to one below the oldest remaining step.
 
 ```haskell
--- | A migration that is no longer kept.
--- Once all instances have migrated past this version, the migration code
--- can be discarded. This improves compile speed.
-discardedMigration :: PreviousEventTableName -> EventTableName -> Connection -> IO ()
-discardedMigration _ etName conn = void $ createEventTable' conn etName
+-- before
+MigrateTo 50 migrationV50 $ MigrateTo 49 migrationV49 $ TableName "events" 48
+-- after
+MigrateTo 50 migrationV50 $ TableName "events" 49
 ```
 
-You can also remove the corresponding `EventN.*` snapshot modules from the migrations package.
+The current table name does not change, and a wrong `TableName` version is rejected as a misnumbered chain. A database that is still at a deleted version (here: live at `events_v48`) refuses to start with `DatabaseBelowBaseVersion` instead of silently coming up empty — deploy a build that still contains the missing migrations first.
+
+You can also remove the corresponding `EventN.*` snapshot modules from the migrations package. There is no need for placeholder migrations: a `MigrateTo` that does nothing would run against real data if a database were still at that version.
+
+## Rolling Back a Migration
+
+A build whose chain ends below the database's current table refuses to start with `DatabaseAheadOfCode`, so rolling back a deploy after a migration has run takes a manual step. With `events_v50` migrated to `events_v51`:
+
+1. Stop every instance of the new build. Instances that were already running when the migration happened keep serving reads from the retired `events_v50` until they are restarted, so restart or stop those too.
+2. `drop trigger retired on "events_v50";` — the retire trigger rejects every insert, so skipping this gives a build that starts and then fails every command with "Event table has been retired." It also blocks step 3.
+3. Move any events written to `events_v51` since the migration back into `events_v50` by hand, if they must be kept.
+4. `drop table "events_v51";`
+5. Start the old build.
+
+Table names are created quoted, so quote them here too if the base name has uppercase letters.
+
+Rolling back to the previous version of the migration code and re-running the migration later is then an ordinary deploy.
 
 ## Event Snapshot Script
 
@@ -166,7 +193,7 @@ Run from the `<project>-migrations` directory.
 1. **Change events** in `<project>-events`
 2. **Snapshot**: copy modules into `<project>-migrations` as `EventN.*`
 3. **Write migration**: create `Migration.VN` importing old as `Old`, new as `New`
-4. **Chain**: add `MigrateUsing migrationVN $` to the top of the chain in Runner.hs
+4. **Chain**: add `MigrateTo N migrationVN $` to the top of the chain in Runner.hs
 5. **Update Latest**: change the `Latest` import to `EventN`
 6. **Compile**: `ensureMigrationIsUpToDate` verifies everything is consistent
-7. **Over time**: replace old migrations with `discardedMigration` and remove their snapshots
+7. **Over time**: delete old migrations (remove the `MigrateTo`, raise the `TableName` version) and remove their snapshots

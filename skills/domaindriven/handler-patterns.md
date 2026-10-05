@@ -10,28 +10,34 @@ The most important boilerplate-killer in a real app. Every entity type gets a `w
 
 ```haskell
 -- Look up entity, 404 if missing, run callback to produce events, return updated entity
-withBook :: Effects es => BookId -> (Book -> Eff es [LibraryEvent]) -> Eff es Book
-withBook bid mkEvents = runTransaction @LibraryDomain \m -> do
-    book <- lookupBook bid m
-    evts <- mkEvents book
-    pure (\m' -> lookupBookPure bid m', evts)
+withBook
+    :: (Aggregate LibraryDomain Effectful.:> es, Error ServerError Effectful.:> es)
+    => BookId -> (Book -> Eff es [LibraryEvent]) -> Eff es Book
+withBook bid mkEvents = do
+    result <- runTransaction @LibraryDomain \m -> do
+        book <- lookupBook bid m
+        evts <- mkEvents book
+        pure (lookupBookPure bid, evts)
+    either throwError pure result
 ```
 
 ### Composed child version
 
-Child entity handlers delegate to the parent. This ensures both parent and child are validated in a single transaction:
+Child entity handlers validate both parent and child in a single transaction:
 
 ```haskell
 withChapter
-    :: Effects es
+    :: (Aggregate LibraryDomain Effectful.:> es, Error ServerError Effectful.:> es)
     => BookId -> ChapterId
     -> (Book -> Chapter -> Eff es [LibraryEvent])
     -> Eff es Chapter
-withChapter bid cid mkEvents = runTransaction @LibraryDomain \m -> do
-    book <- lookupBook bid m
-    chapter <- lookupChapter book cid
-    evts <- mkEvents book chapter
-    pure (\m' -> lookupChapterPure bid cid m', evts)
+withChapter bid cid mkEvents = do
+    result <- runTransaction @LibraryDomain \m -> do
+        book <- lookupBook bid m
+        chapter <- lookupChapter book cid
+        evts <- mkEvents book chapter
+        pure (lookupChapterPure bid cid, evts)
+    either throwError pure result
 ```
 
 ### Usage becomes trivial
@@ -48,17 +54,9 @@ changeChapterTitle = \cmd ->
 
 ## Lookup Helpers (Eff + Pure Variants)
 
-You always need **two variants** of every lookup:
+Use effectful lookups to validate user input before emitting events, returning 404 when an entity is missing. Pure transaction result callbacks return `Either ServerError Entity`, which the handler unwraps after `runTransaction`.
 
-1. **Eff variant** — throws 404, used inside `runTransaction`'s action to validate user input
-2. **Pure variant** — uses `error` for invariant violations, used in the `returnFn` callback
-
-### Why two variants
-
-`runTransaction` returns `(Model -> a, [Event])` where the first element runs *after* events are applied. Inside that callback:
-- The entity is guaranteed to exist (you just created/updated it)
-- You can't use `Eff` effects (it's a pure function `Model -> a`)
-- An invariant `error` is correct — if the entity is missing after your own events, that's a bug
+An unexpectedly missing result becomes HTTP 500. This happens after commit, so reporting the failure does not roll back the events. Delete handlers should return `const NoContent` from their transaction rather than look up the deleted entity.
 
 ```haskell
 -- Eff variant: validates user input, throws 404
@@ -69,11 +67,14 @@ lookupBook bid m =
         Nothing -> throwError err404{errBody = "Book not found"}
 
 -- Pure variant: for returnFn after events applied
-lookupBookPure :: BookId -> LibraryModel -> Book
+lookupBookPure :: BookId -> LibraryModel -> Either ServerError Book
 lookupBookPure bid m =
-    case Map.lookup bid m.books of
-        Just b  -> b
-        Nothing -> error "Invariant violation: book not found after transaction"
+    maybe (Left err500) Right (Map.lookup bid m.books)
+
+lookupChapterPure :: BookId -> ChapterId -> LibraryModel -> Either ServerError Chapter
+lookupChapterPure bid cid m = do
+    book <- lookupBookPure bid m
+    maybe (Left err500) Right (Map.lookup cid book.chapters)
 ```
 
 ## `setField` Helper
@@ -82,14 +83,15 @@ Generic field updates with equality check to skip redundant events. Essential be
 
 ```haskell
 setBookField
-    :: (Effects es, Eq a)
+    :: (Aggregate LibraryDomain Effectful.:> es, Error ServerError Effectful.:> es, Eq a)
     => BookId -> (Book -> a) -> (a -> BookEvent) -> a -> Eff es Book
-setBookField bid getField mkEvent newValue =
-    runTransaction @LibraryDomain \m -> do
+setBookField bid getField mkEvent newValue = do
+    result <- runTransaction @LibraryDomain \m -> do
         book <- lookupBook bid m
         if getField book == newValue
-            then pure (const book, [])
-            else pure (\m' -> lookupBookPure bid m', [wrapBookE bid (mkEvent newValue)])
+            then pure (const (Right book), [])
+            else pure (lookupBookPure bid, [wrapBookE bid (mkEvent newValue)])
+    either throwError pure result
 ```
 
 Usage:

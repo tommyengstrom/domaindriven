@@ -1,6 +1,7 @@
 module DomainDriven.GenIdSpec (spec) where
 
 import Data.UUID qualified as UUID
+import Data.Word (Word32)
 import DomainDriven
 import Effectful
 import Effectful.State.Static.Local
@@ -17,21 +18,21 @@ spec =
             actual `shouldBe` expected
 
         it "invokes a state-backed supplier once per request" $ do
-            let firstId = UUID.fromWords 1 0 0 0
+            let firstId :: UUID.UUID
+                firstId = UUID.fromWords 1 0 0 0
+                secondId :: UUID.UUID
                 secondId = UUID.fromWords 2 0 0 0
-                unusedId = UUID.fromWords 3 0 0 0
-                (actual, remaining) =
+                actual :: (UUID.UUID, UUID.UUID)
+                nextCounter :: Word32
+                (actual, nextCounter) =
                     runPureEff
-                        . runState [firstId, secondId, unusedId]
+                        . runState (1 :: Word32)
                         . runGenIdWith
-                            ( state \case
-                                nextId : remainingIds -> (nextId, remainingIds)
-                                [] -> error "test GenId supplier exhausted"
-                            )
+                            (state $ \next -> (UUID.fromWords next 0 0 0, next + 1))
                         $ (,) <$> genId <*> genId
 
             actual `shouldBe` (firstId, secondId)
-            remaining `shouldBe` [unusedId]
+            nextCounter `shouldBe` 3
 
         it "runs the production interpreter" $ do
             () <$ runEff (runGenId genId)

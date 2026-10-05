@@ -43,7 +43,7 @@ getConn =
             }
 
 eventTable :: EventTable
-eventTable = InitialVersion "benchmark_events"
+eventTable = TableName "benchmark_events" 1
 
 setupDbQuick :: Maybe Int -> IO (PostgresEvent CounterModel CounterEvent)
 setupDbQuick mChunkSize = do

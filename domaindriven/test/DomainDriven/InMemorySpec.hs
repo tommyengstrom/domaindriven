@@ -11,9 +11,14 @@ import Test.Hspec
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.DeepSeq (NFData)
+import Control.Exception (Exception, throwIO)
 import GHC.Generics (Generic)
 import System.Timeout (timeout)
 import Prelude
+
+data HookFailure = HookFailure
+    deriving stock (Show)
+    deriving anyclass (Exception)
 
 type TestModel = Int
 
@@ -145,7 +150,7 @@ spec = do
 
         it "failing hook does not crash the command" $ do
             mvar <- newEmptyMVar
-            let hook _ _ _ = putMVar mvar () >> error "hook explosion"
+            let hook _ _ _ = putMVar mvar () >> throwIO HookFailure
             backend <- createForgetful applyTestEvent (0 :: TestModel)
             result <- runTestWith backend hook $
                 runTransaction @TestDomain $ \_ -> pure (id, [AddOne])

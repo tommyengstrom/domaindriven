@@ -164,3 +164,36 @@ executable crm-example
     , text
     , uuid
     , warp
+
+test-suite crm-test
+  import: shared_opts
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Api
+      Command
+      Event
+      EventHandler
+      Model
+      Server
+      Types
+  hs-source-dirs:
+      test/crm
+      crm
+  build-depends:
+      aeson
+    , base
+    , containers
+    , deepseq
+    , domaindriven-core
+    , domaindriven
+    , effectful
+    , effectful-core
+    , effectful-plugin
+    , optics-core
+    , optics-extra
+    , servant
+    , servant-server
+    , text
+    , uuid
+    , hspec

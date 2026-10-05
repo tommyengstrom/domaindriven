@@ -2,7 +2,7 @@ module DomainDriven.InterpreterSpec (spec) where
 
 import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.DeepSeq (NFData)
-import Control.Exception (SomeException, evaluate, try)
+import Control.Exception (Exception, SomeException, evaluate, throw, try)
 import Data.Either (isLeft)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (mapMaybe)
@@ -15,6 +15,10 @@ import Effectful
 import GHC.Generics (Generic)
 import Test.Hspec
 import Prelude
+
+data ProjectionFailure = ProjectionFailure
+    deriving stock (Eq, Show)
+    deriving anyclass (Exception)
 
 data ChildIndex
     = ChildA
@@ -293,7 +297,7 @@ spec = do
                     (\model event -> applyParentPayload model (storedEvent event))
                     (ParentModel 0 0)
 
-            failed <- try @SomeException $
+            failed <- try @ProjectionFailure $
                 ( runEff
                     . runAggregate backend
                     . runSubAggregateI @IndexedChildDomain @IndexedParentDomain
@@ -301,7 +305,7 @@ spec = do
                         ( \model ->
                             if childValue model == 0
                                 then 0
-                                else error "updated model projection failed"
+                                else throw ProjectionFailure
                         )
                         ChildChanged
                 )
@@ -309,7 +313,7 @@ spec = do
                         childModel `seq` pure (id, [Added 1])
                     )
                     >>= evaluate
-            failed `shouldSatisfy` isLeft
+            failed `shouldBe` Left ProjectionFailure
 
             parentHistory <-
                 runEff

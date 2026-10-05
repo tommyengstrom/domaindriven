@@ -17,7 +17,8 @@ import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
 import Data.IORef
 import Data.Int
-import Data.Maybe (fromMaybe)
+import Data.List (sort, stripPrefix)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Pool.Introspection as Pool
 import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
@@ -36,6 +37,7 @@ import Streamly.Data.Fold qualified as Fold
 import Streamly.Data.Stream.Prelude (Stream)
 import Streamly.Data.Stream.Prelude qualified as Stream
 import Streamly.Data.Unfold qualified as Unfold
+import Text.Read (readMaybe)
 import UnliftIO (MonadUnliftIO (..), concurrently)
 import Prelude
 
@@ -46,6 +48,9 @@ data LogEntry
     | EventTableLockDuration NominalDiffTime OneLineCallStack
     | EventTableMigrationDuration NominalDiffTime EventTableName
     | WaitForConnectionDuration NominalDiffTime OneLineCallStack
+    | -- | Startup is waiting for another instance to finish verifying or migrating the
+      -- event tables of this base name.
+      WaitingForMigrationLock EventTableBaseName
     deriving (Show, Generic)
 
 newtype OneLineCallStack = OneLineCallStack CallStack
@@ -130,25 +135,69 @@ instance (IsPgIndex i, FromJSON e, NFData e) => ReadModel (PostgresEvent i m e) 
 
     getEventStream pg = withStreamReadTransaction pg . flip getEventStream'
 
-getEventTableName :: EventTable -> EventTableName
-getEventTableName = validateEventTableName . go 0
-  where
-    go :: Int -> EventTable -> String
-    go i = \case
-        MigrateUsing _ u -> go (i + 1) u
-        InitialVersion n -> n <> "_v" <> show (i + 1)
+-- | The base name and 'TableName' version at the bottom of the chain.
+eventTableBase :: EventTable -> (EventTableBaseName, EventTableVersion)
+eventTableBase = \case
+    MigrateTo _ _ prev -> eventTableBase prev
+    TableName base v -> (base, v)
 
-validateEventTableName :: EventTableName -> EventTableName
-validateEventTableName name
-    | all isValidChar name && not (null name) && length name <= 63 = name
-    | otherwise =
-        error $
-            "[DomainDriven] Invalid event table name: "
-                <> show name
-                <> ". Names must be 1-63 characters of [a-zA-Z0-9_]."
+-- | The 'MigrateTo' steps of the chain, oldest first.
+eventTableSteps :: EventTable -> [(EventTableVersion, EventMigration)]
+eventTableSteps = reverse . newestFirst
   where
-    isValidChar :: Char -> Bool
-    isValidChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
+    newestFirst :: EventTable -> [(EventTableVersion, EventMigration)]
+    newestFirst = \case
+        MigrateTo v mig prev -> (v, mig) : newestFirst prev
+        TableName{} -> []
+
+-- | The version of the current (newest) table of the chain.
+eventTableVersion :: EventTable -> EventTableVersion
+eventTableVersion = \case
+    MigrateTo v _ _ -> v
+    TableName _ v -> v
+
+-- | Non-empty and only @[a-zA-Z0-9_]@, so the name is safe both quoted in SQL and
+-- spliced into a regular expression.
+isSafeIdentifier :: String -> Bool
+isSafeIdentifier name = not (null name) && all isSafeChar name
+  where
+    isSafeChar :: Char -> Bool
+    isSafeChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_'
+
+-- | Render the current table name. Use 'validateEventTable' to check the chain
+-- before using the name; persistence entry points validate before connecting.
+getEventTableName :: EventTable -> EventTableName
+getEventTableName et =
+    eventTableNameFor (fst $ eventTableBase et) (eventTableVersion et)
+
+-- | Check a raw table name before database work. Throws 'MigrationError'.
+validateEventTableName :: MonadThrow m => EventTableName -> m ()
+validateEventTableName name
+    | not (isSafeIdentifier name) = throwM (InvalidEventTableName name)
+    | length name > maxEventTableNameLength = throwM (EventTableNameTooLong name)
+    | otherwise = pure ()
+
+-- | Check an 'EventTable' chain without touching the database: the base name must be
+-- non-empty and contain only @[a-zA-Z0-9_]@, the 'TableName' version must be at least 1,
+-- the current table name must be at most 'maxEventTableNameLength' characters, and the
+-- 'MigrateTo' steps must be numbered consecutively from one above the 'TableName'
+-- version. Throws 'MigrationError'. 'postgresWriteModel' runs this before connecting.
+validateEventTable :: MonadThrow m => EventTable -> m ()
+validateEventTable et = do
+    unless (isSafeIdentifier base) $ throwM $ InvalidEventTableBaseName base
+    unless (baseVersion >= 1) $ throwM $ InvalidEventTableVersion base baseVersion
+    unless (length currentName <= maxEventTableNameLength) $
+        throwM $
+            EventTableNameTooLong currentName
+    for_ (zip [baseVersion + 1 ..] (fst <$> eventTableSteps et)) $ \(expected, actual) ->
+        unless (expected == actual) $ throwM $ MisnumberedMigration base expected actual
+  where
+    base :: EventTableBaseName
+    baseVersion :: EventTableVersion
+    (base, baseVersion) = eventTableBase et
+
+    currentName :: EventTableName
+    currentName = eventTableNameFor base (eventTableVersion et)
 
 -- | Create the table required for storing state and events, if they do not yet exist.
 createEventTable :: PostgresEventTrans index model event -> IO ()
@@ -159,11 +208,14 @@ createEventTable pgt = do
             (pgt ^. #eventTableName)
 
 createEventTable' :: Connection -> EventTableName -> IO ()
-createEventTable' conn rawEventTable = do
-    eventTable <- evaluate (validateEventTableName rawEventTable)
+createEventTable' conn = createEventTableInSchema conn Nothing
+
+createEventTableInSchema :: Connection -> Maybe String -> EventTableName -> IO ()
+createEventTableInSchema conn schema eventTable = do
+    validateEventTableName eventTable
     void . execute_ conn $
         "create table if not exists "
-            <> quoteIdent eventTable
+            <> tableName
             <> " \
                \( id uuid primary key\
                \, index varchar not null\
@@ -176,31 +228,48 @@ createEventTable' conn rawEventTable = do
         query
             conn
             "select exists (select 1 from pg_indexes \
-            \where schemaname = current_schema() and tablename = ? \
+            \where schemaname = coalesce(?, current_schema()) and tablename = ? \
             \and indexdef like '%(index, event_number)')"
-            (Only eventTable)
+            (schema, eventTable)
             >>= \case
                 [Only found] -> pure found
                 unexpected -> fail $ "Unexpected index query result: " <> show unexpected
     unless hasIndex . void . execute_ conn $
-        "create index on " <> quoteIdent eventTable <> " (index, event_number)"
+        "create index on " <> tableName <> " (index, event_number)"
+  where
+    tableName :: Query
+    tableName = maybe "" ((<> ".") . quoteIdent) schema <> quoteIdent eventTable
 
 retireTable :: Connection -> EventTableName -> IO ()
 retireTable conn tableName = do
-    createRetireFunction conn
+    schema <- eventTableSchema conn tableName
+    let retiredFunction :: Query
+        retiredFunction = quoteIdent schema <> ".retired_table"
+    void . execute_ conn $
+        "create or replace function " <> retiredFunction <> "() returns trigger as \
+        \$$ begin raise exception 'Event table has been retired.'; end; $$ \
+        \language plpgsql;"
     void $
         execute_ conn $
             "create trigger retired before insert on "
+                <> quoteIdent schema
+                <> "."
                 <> quoteIdent tableName
-                <> " execute procedure retired_table()"
+                <> " execute procedure "
+                <> retiredFunction
+                <> "()"
 
-createRetireFunction :: Connection -> IO ()
-createRetireFunction conn =
-    void
-        . execute_ conn
-        $ "create or replace function retired_table() returns trigger as \
-          \$$ begin raise exception 'Event table has been retired.'; end; $$ \
-          \language plpgsql;"
+eventTableSchema :: Connection -> EventTableName -> IO String
+eventTableSchema conn tableName =
+    query
+        conn
+        "select n.nspname::text from pg_catalog.pg_class c \
+        \join pg_catalog.pg_namespace n on n.oid = c.relnamespace \
+        \where c.oid = to_regclass(quote_ident(?))"
+        (Only tableName)
+        >>= \case
+            [Only schema] -> pure schema
+            unexpected -> fail $ "Unexpected event table schema query result: " <> show unexpected
 
 -- | Create a connection pool with default settings (1 stripe, 5 connections, 60s idle).
 simplePool :: MonadUnliftIO m => IO Connection -> m (Pool Connection)
@@ -245,7 +314,9 @@ postgresWriteModelNoMigration pool eventTable app' seed' = do
     withIOTrans pg createEventTable
     pure pg
 
--- | Setup the persistance model and verify that the tables exist.
+-- | Setup the persistance model, validating the 'EventTable' chain and running any
+-- outstanding migrations (see 'runMigrations'). Throws 'MigrationError' if the chain is
+-- invalid or cannot be applied to the database.
 --
 -- Writers sharing the database must all run the same domaindriven-core version.
 postgresWriteModel
@@ -255,55 +326,135 @@ postgresWriteModel
     -> (model -> Stored event -> model)
     -> model
     -> IO (PostgresEvent index model event)
-postgresWriteModel pool eventTable app' seed' = do
-    pg <- createPostgresPersistance pool (getEventTableName eventTable) app' seed'
-    withIOTrans pg $ \pgt -> runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
+postgresWriteModel = postgresWriteModelWith id
+
+-- | Like 'postgresWriteModel', applying a modifier to the persistance model before
+-- migrations run, so that for instance a custom logger receives the startup entries.
+postgresWriteModelWith
+    :: HasCallStack
+    => (PostgresEvent index model event -> PostgresEvent index model event)
+    -> Pool Connection
+    -> EventTable
+    -> (model -> Stored event -> model)
+    -> model
+    -> IO (PostgresEvent index model event)
+postgresWriteModelWith modify pool eventTable app' seed' = do
+    validateEventTable eventTable
+    pg <- modify <$> createPostgresPersistance pool (getEventTableName eventTable) app' seed'
+    withIOTrans pg $ \pgt ->
+        runMigrations (pgt ^. field @"logger") (pgt ^. field @"transaction") eventTable
     pure pg
 
+-- | Versions in the first schema on the search path containing tables for this base,
+-- ascending. Prefix bases (@foo@ vs @foo_v2@) do not match each other.
+-- The base must pass 'isSafeIdentifier', since it is spliced into a regular expression.
+existingEventTableVersions :: Connection -> EventTableBaseName -> IO [EventTableVersion]
+existingEventTableVersions conn base = do
+    names <-
+        query
+            conn
+            "with event_tables as ( \
+            \ select c.relname, array_position(current_schemas(true), n.nspname) as schema_position \
+            \ from pg_catalog.pg_class c \
+            \ join pg_catalog.pg_namespace n on n.oid = c.relnamespace \
+            \ where c.relkind in ('r', 'p') \
+            \   and pg_catalog.pg_table_is_visible(c.oid) \
+            \   and c.relname ~ ? \
+            \) select relname::text from event_tables \
+            \where schema_position = (select min(schema_position) from event_tables)"
+            (Only $ "^" <> eventTablePrefix base <> "[1-9][0-9]*$")
+    pure . sort $
+        mapMaybe (readMaybe <=< stripPrefix (eventTablePrefix base) . fromOnly) names
+
+-- | Serialize migrators of one base name until the transaction ends.
+migrationLock :: (LogEntry -> IO ()) -> Connection -> EventTableBaseName -> IO ()
+migrationLock logger conn base = do
+    acquired <- tryAdvisoryXactLock conn key
+    unless acquired $ do
+        logSafely logger $ WaitingForMigrationLock base
+        advisoryXactLock conn key
+  where
+    -- Table keys hash a bare table name, which cannot contain a slash.
+    key :: String
+    key = "domaindriven/migration/" <> base
+
+-- | Whether the connection is in a transaction that has made changes. The migration
+-- transaction has created a table by the time a migration function runs, so 'False'
+-- afterwards means the function committed or rolled back. Requires PostgreSQL 13.
+inWriteTransaction :: Connection -> IO Bool
+inWriteTransaction conn =
+    query_ conn "select pg_current_xact_id_if_assigned() is not null" >>= \case
+        [Only inTransaction] -> pure inTransaction
+        unexpected -> fail $ "Unexpected transaction query result: " <> show unexpected
+
+-- | Bring the database forward to the code's current version. Runs in the transaction of
+-- the given 'OngoingTransaction', which must be freshly begun (nothing may have been
+-- executed in it yet). Throws 'MigrationError' for an invalid chain ('validateEventTable').
+--
+-- The highest existing version is the database's version, provided the previous
+-- existing table is retired. Otherwise startup fails with 'IncompleteMigration'.
+-- A database without tables for the base name gets only the code's current table; no
+-- migration function runs. Otherwise each step above the database's version locks the
+-- previous table against writers, creates the new table, runs the migration function and
+-- retires the previous table. A database above the code's version or below its
+-- 'TableName' version throws 'MigrationError'.
 runMigrations :: (LogEntry -> IO ()) -> OngoingTransaction -> EventTable -> IO ()
 runMigrations logger trans et = do
-    exists <- tableExists
-    -- Existence is monotone (tables are retired, never dropped), so the
-    -- steady-state check takes no lock; the exclusive key below both
-    -- serializes concurrent first migrations and drains the table's writers.
-    unless exists $ do
-        exclusiveTableLock conn (getEventTableName et)
-        stillMissing <- not <$> tableExists
-        when stillMissing migrate
+    validateEventTable et
+    -- Every statement below must see what was committed while we waited for the locks,
+    -- so pin the isolation level rather than relying on the server default.
+    void $ execute_ conn "set transaction isolation level read committed"
+    migrationLock logger conn base
+    (reverse <$> existingEventTableVersions conn base) >>= \case
+        [] -> createEventTable' conn (eventTableNameFor base codeVersion)
+        dbVersion : previousVersions -> do
+            when (dbVersion > codeVersion) . throwM $ DatabaseAheadOfCode base dbVersion codeVersion
+            when (dbVersion < baseVersion) . throwM $
+                DatabaseBelowBaseVersion base dbVersion baseVersion
+            for_ (take 1 previousVersions) $ \prevVersion -> do
+                let prevName :: EventTableName
+                    prevName = eventTableNameFor base prevVersion
+                query
+                    conn
+                    "select exists (select 1 from pg_catalog.pg_trigger \
+                    \where tgrelid = to_regclass(quote_ident(?)) and tgname = 'retired' \
+                    \and tgenabled in ('O', 'A'))"
+                    (Only prevName)
+                    >>= \case
+                        [Only True] -> pure ()
+                        [Only False] -> throwM $ IncompleteMigration prevName (eventTableNameFor base dbVersion)
+                        unexpected -> fail $ "Unexpected retirement query result: " <> show unexpected
+            for_ (dropWhile ((<= dbVersion) . fst) (eventTableSteps et)) migrateStep
   where
     conn :: Connection
     conn = trans ^. field @"connectionResource" . field @"resource"
 
-    tableExists :: IO Bool
-    tableExists =
-        query
-            conn
-            "select exists (select * from information_schema.tables where table_schema='public' and table_name=?)"
-            (Only $ getEventTableName et)
-            >>= \case
-                [Only found] -> pure found
-                unexpected -> fail $ "Unexpected table query result: " <> show unexpected
+    base :: EventTableBaseName
+    baseVersion :: EventTableVersion
+    (base, baseVersion) = eventTableBase et
 
-    migrate :: IO ()
-    migrate = case et of
-        InitialVersion _ -> createTable
-        MigrateUsing mig prevEt -> do
-            -- Ensure migrations are done up until the previous table
-            runMigrations logger trans prevEt
-            -- Drain the previous table's writers, which hold this key shared,
-            -- and block new ones until the old table is retired.
-            exclusiveTableLock conn (getEventTableName prevEt)
-            t0 <- getCurrentTime
-            createTable
-            mig (getEventTableName prevEt) (getEventTableName et) conn
-            retireTable conn (getEventTableName prevEt)
-            t1 <- getCurrentTime
-            logSafely logger $ EventTableMigrationDuration (diffUTCTime t1 t0) (getEventTableName et)
+    codeVersion :: EventTableVersion
+    codeVersion = eventTableVersion et
 
-    createTable :: IO ()
-    createTable = do
-        let tableName = getEventTableName et
-        void $ createEventTable' conn tableName
+    migrateStep :: (EventTableVersion, EventMigration) -> IO ()
+    migrateStep (version, mig) = do
+        let prevName :: EventTableName
+            prevName = eventTableNameFor base (version - 1)
+
+            newName :: EventTableName
+            newName = eventTableNameFor base version
+        -- Drain the previous table's writers, which hold this key shared, and block new
+        -- ones until the old table is retired.
+        exclusiveTableLock conn prevName
+        t0 <- getCurrentTime
+        schema <- eventTableSchema conn prevName
+        createEventTableInSchema conn (Just schema) newName
+        mig prevName newName conn
+        stillInTransaction <- inWriteTransaction conn
+        unless stillInTransaction . throwM $ MigrationEndedTransaction newName
+        retireTable conn prevName
+        t1 <- getCurrentTime
+        logSafely logger $ EventTableMigrationDuration (diffUTCTime t1 t0) newName
 
 createPostgresPersistance
     :: forall event index model
@@ -314,8 +465,8 @@ createPostgresPersistance
     -> model
     -- ^ Initial model
     -> IO (PostgresEvent index model event)
-createPostgresPersistance pool rawEventTable app' seed' = do
-    eventTable <- evaluate (validateEventTableName rawEventTable)
+createPostgresPersistance pool eventTable app' seed' = do
+    validateEventTableName eventTable
     ref <- newIORef HM.empty
     defaultParseConcurrency <- max 1 <$> getNumCapabilities
     pure $
@@ -333,6 +484,8 @@ createPostgresPersistance pool rawEventTable app' seed' = do
                 e@(EventTableLockDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
                 EventTableMigrationDuration dt etName -> putStrLn $ "[DomainDriven] migration of " <> etName <> " completed in " <> show dt
                 e@(WaitForConnectionDuration dt _) -> when (dt > 0.5) $ putStrLn $ "[DomainDriven] " <> show e
+                WaitingForMigrationLock base ->
+                    putStrLn $ "[DomainDriven] waiting for migration lock on " <> base
             }
 
 -- | Default number of events fetched per Postgres cursor batch. Also sets the
@@ -468,7 +621,7 @@ withStreamReadTransaction pg = Stream.bracket startTrans rollbackTrans
   where
     startTrans :: m (PostgresEventTrans index model event)
     startTrans = liftIO $ do
-        void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
+        validateEventTableName (pg ^. field @"eventTableName")
         (connR, localPool) <- takeResource (connectionPool pg)
         t0 <- getCurrentTime
         let conn = Pool.resource connR
@@ -508,7 +661,7 @@ withPooledConnection
     -> (Connection -> IO a)
     -> IO a
 withPooledConnection pg f = do
-    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
+    validateEventTableName (pg ^. field @"eventTableName")
     t0 <- getCurrentTime
     withResource (connectionPool pg) $ \connR -> do
         t1 <- getCurrentTime
@@ -523,7 +676,7 @@ withIOTrans
     -> (PostgresEventTrans index model event -> IO a)
     -> IO a
 withIOTrans pg f = mask $ \restore -> do
-    void $ evaluate (validateEventTableName (pg ^. field @"eventTableName"))
+    validateEventTableName (pg ^. field @"eventTableName")
     (connR, localPool) <- do
         t0 <- getCurrentTime
         r@(acquiredConnR, acquiredLocalPool) <- takeResource (connectionPool pg)
@@ -766,7 +919,7 @@ exclusiveLock (OngoingTransaction connR _ _) etName index = do
         )
 
 -- | Command locks: the table key shared plus the index key exclusive.
--- Default to a five-second lock timeout, scoped to this transaction, because
+-- Default to a 60-second lock timeout, scoped to this transaction, because
 -- a nested command can wait behind a migration waiting for its outer command.
 -- Preserve any finite timeout configured on the connection.
 writerLocks :: IsPgIndex i => OngoingTransaction -> EventTableName -> i -> IO ()
@@ -777,7 +930,7 @@ writerLocks (OngoingTransaction connR _ _) etName index = do
             (Pool.resource connR)
             "select set_config('lock_timeout', \
             \case current_setting('lock_timeout') \
-            \when '0' then '5s' else current_setting('lock_timeout') end, true)"
+            \when '0' then '60s' else current_setting('lock_timeout') end, true)"
             :: IO [Only Text]
         )
     void
@@ -792,14 +945,25 @@ writerLocks (OngoingTransaction connR _ _) etName index = do
 -- | The whole-table lock: waits for every in-flight command on the table (they
 -- hold this key shared) and blocks new ones until the transaction ends.
 exclusiveTableLock :: Connection -> EventTableName -> IO ()
-exclusiveTableLock conn etName =
+exclusiveTableLock = advisoryXactLock
+
+-- | Take the exclusive transaction-level advisory lock for a text key, waiting for it.
+advisoryXactLock :: Connection -> String -> IO ()
+advisoryXactLock conn key =
     void
         ( query
             conn
             "select pg_advisory_xact_lock(hashtextextended(?, 0))"
-            (Only etName)
+            (Only key)
             :: IO [Only ()]
         )
+
+-- | Like 'advisoryXactLock', but gives up at once if the key is held by someone else.
+tryAdvisoryXactLock :: Connection -> String -> IO Bool
+tryAdvisoryXactLock conn key =
+    query conn "select pg_try_advisory_xact_lock(hashtextextended(?, 0))" (Only key) >>= \case
+        [Only acquired] -> pure acquired
+        unexpected -> fail $ "Unexpected lock query result: " <> show unexpected
 
 withLockLogging
     :: HasCallStack => PostgresEventTrans i m e -> IO () -> IO a -> IO a

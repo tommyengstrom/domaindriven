@@ -54,7 +54,7 @@ class ReadModel p => WriteModel p where
 
     -- | Apply a command and persist its events.
     -- Commands cannot recurse on the same index; failed writes leave the cache
-    -- unchanged. PostgreSQL commands default to a five-second @lock_timeout@
+    -- unchanged. PostgreSQL commands default to a 60-second @lock_timeout@
     -- unless the connection configures a finite timeout. A nested command can
     -- time out when a migration is waiting for its outer command to finish.
     transactionalUpdate

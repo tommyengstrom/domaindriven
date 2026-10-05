@@ -92,6 +92,7 @@ import Servant.Server.Internal
     , addBodyCheck
     , delayedFail
     , delayedFailFatal
+    , err500
     , err415
     , mkContextWithErrorFormatter
     , withRequest
@@ -245,7 +246,7 @@ instance
                 case Vault.lookup bodyCacheKey (vault request) of
                     Just existing -> pure existing
                     Nothing ->
-                        error "ReqBodyField: body cache was not installed"
+                        delayedFailFatal err500
             decodedBody <- liftIO (readBodyValue decoder request cache)
             case decodedBody >>= parseEither
                 ( withObject "request body" $

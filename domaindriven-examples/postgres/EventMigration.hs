@@ -41,7 +41,10 @@ migrate prevEtName etName conn = do
         etName
         fixEvent
 
+-- | The migration chain, newest first. Each 'MigrateTo' states the version it produces;
+-- 'TableName' names the oldest version this code still knows about. The current table
+-- is @counter_events_v2@.
 eventTable :: EventTable
 eventTable =
-    MigrateUsing migrate
-        $ InitialVersion "counter_events"
+    MigrateTo 2 migrate
+        $ TableName "counter_events" 1

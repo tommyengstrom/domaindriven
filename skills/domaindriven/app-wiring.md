@@ -2,33 +2,34 @@
 
 How to wire up effects, backends, configuration, and tests.
 
-## Effects Type Alias
+## Handler Constraints
 
-Define an `Effects` type alias constraining the effect stack. Import Effectful's `(:>)` qualified to avoid collision with Servant's `(:>)`:
+Spell out the effects each handler uses in its own signature; do not bundle them in a type alias, which would stop GHC from reporting unused constraints. Import Effectful's `(:>)` qualified to avoid collision with Servant's `(:>)`:
 
 ```haskell
 import DomainDriven (Aggregate, GenId, Projection, genId)
 import Effectful qualified
-import Effectful.Error.Static (Error)
+import Effectful.Error.Static (Error, throwError)
 
-type Effects es =
-    ( Projection LibraryDomain Effectful.:> es
-    , Aggregate LibraryDomain Effectful.:> es
-    , Error ServerError Effectful.:> es
-    , GenId Effectful.:> es
-    )
-```
+libraryServer
+    :: ( Projection LibraryDomain Effectful.:> es
+       , Aggregate LibraryDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => LibraryApi (AsServerT (Eff es))
 
-Then use it in handler signatures:
-
-```haskell
-myHandler :: Effects es => LibraryApi (AsServerT (Eff es))
-
-createBook :: Effects es => CreateBook -> Eff es Book
+createBook
+    :: ( Aggregate LibraryDomain Effectful.:> es
+       , Error ServerError Effectful.:> es
+       , GenId Effectful.:> es
+       )
+    => CreateBook -> Eff es Book
 createBook cmd = do
     bid <- BookId <$> genId
-    runTransaction @LibraryDomain \_model ->
+    result <- runTransaction @LibraryDomain \_model ->
         pure (lookupBookPure bid, [wrapBookE bid BookAdded{title = cmd.title, author = cmd.author}])
+    either throwError pure result
 ```
 
 `GenId` keeps application ID generation testable without exposing `IOE` throughout handler code. The concrete runner stack still contains `IOE`, because the `Aggregate`, `Projection`, and production `GenId` interpreters perform IO.
@@ -62,7 +63,7 @@ runEffectStack m =
 **Key rules:**
 
 - `Error ServerError` must be peeled *after* domain effects so that transaction callbacks can throw servant errors.
-- Keep `IOE` in the concrete `AppM` stack, but omit it from application `Effects` constraints unless a handler performs unrelated IO directly. Interpret `GenId` with `runGenId` immediately before `runEff`.
+- Keep `IOE` in the concrete `AppM` stack, but omit it from handler constraints unless a handler performs unrelated IO directly. Interpret `GenId` with `runGenId` immediately before `runEff`.
 
 ## `AnyWriteModel` — Backend Polymorphism
 

@@ -14,6 +14,7 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
 import GHC.Generics
+import GHC.TypeError (Unsatisfiable, unsatisfiable)
 import GHC.TypeLits
 import Prelude
 
@@ -125,7 +126,7 @@ instance
     gshapeWidening = gwidenConstructors @x @y
 
 instance
-    TypeError
+    Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -142,7 +143,7 @@ instance
         )
     => GShapeWidening 'False sourceNames targetNames x y source target
     where
-    gshapeWidening = error "unreachable"
+    gshapeWidening = unsatisfiable
 
 class GWidenConstructors x y source target where
     gwidenConstructors :: source x -> target x
@@ -252,7 +253,7 @@ instance
 instance
     {-# OVERLAPPABLE #-}
     forall x y f1 f2 datatypeName1 datatypeName2 a1 b1 c1 a2 b2 c2
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -273,7 +274,7 @@ instance
         (M1 D ('MetaData datatypeName1 a1 b1 c1) f1)
         (M1 D ('MetaData datatypeName2 a2 b2 c2) f2)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Matching constructor names with same structure
 instance
@@ -290,7 +291,7 @@ instance
 instance
     {-# OVERLAPPABLE #-}
     forall x y f1 f2 name b1 c1 b2 c2
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -311,13 +312,13 @@ instance
         (M1 C ('MetaCons name b1 c1) f1)
         (M1 C ('MetaCons name b2 c2) f2)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Different constructor names
 instance
     {-# OVERLAPPABLE #-}
     forall x y f1 f2 cName1 cName2 b1 c1 b2 c2
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -337,7 +338,7 @@ instance
         (M1 C ('MetaCons cName1 b1 c1) f1)
         (M1 C ('MetaCons cName2 b2 c2) f2)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 instance
     GShapeCoercible x y f1 f2
@@ -353,7 +354,7 @@ instance
 instance
     {-# OVERLAPPABLE #-}
     forall x y f1 f2 name1 name2 a1 b1 c1 a2 b2 c2
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -374,7 +375,7 @@ instance
         (M1 S ('MetaSel name1 a1 b1 c1) f1)
         (M1 S ('MetaSel name2 a2 b2 c2) f2)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 instance
     (GShapeCoercible x y a1 a2, GShapeCoercible x y b1 b2)
@@ -393,7 +394,7 @@ instance
 instance
     {-# OVERLAPPABLE #-}
     forall x y c name b p f rest
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -410,13 +411,13 @@ instance
         )
     => GShapeCoercible x y (M1 C ('MetaCons name b p) f) (c :+: rest)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Sum type vs single constructor (right to left)
 instance
     {-# OVERLAPPABLE #-}
     forall x y c name b p f rest
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -432,7 +433,7 @@ instance
         )
     => GShapeCoercible x y (c :+: rest) (M1 C ('MetaCons name b p) f)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 instance GShapeCoercible x y U1 U1 where
     gscoerce = id
@@ -441,7 +442,7 @@ instance GShapeCoercible x y U1 U1 where
 instance
     {-# OVERLAPPABLE #-}
     forall x y name a b c t
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -456,13 +457,13 @@ instance
         )
     => GShapeCoercible x y U1 (M1 S ('MetaSel name a b c) t)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Better error for field vs U1 mismatch
 instance
     {-# OVERLAPPABLE #-}
     forall x y name a b c t
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -479,13 +480,13 @@ instance
         )
     => GShapeCoercible x y (M1 S ('MetaSel name a b c) t) U1
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Instance for U1 vs product (fields)
 instance
     {-# OVERLAPPABLE #-}
     forall x y a b
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -500,13 +501,13 @@ instance
         )
     => GShapeCoercible x y U1 (a :*: b)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Instance for product vs U1
 instance
     {-# OVERLAPPABLE #-}
     forall x y a b
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -521,13 +522,13 @@ instance
         )
     => GShapeCoercible x y (a :*: b) U1
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Instance for single field vs product (multiple fields)
 instance
     {-# OVERLAPPABLE #-}
     forall x y s meta f rest
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -542,13 +543,13 @@ instance
         )
     => GShapeCoercible x y (M1 S meta f) (s :*: rest)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 -- Instance for product vs single field
 instance
     {-# OVERLAPPABLE #-}
     forall x y s meta f rest
-     . TypeError
+     . Unsatisfiable
         ( 'Text "Cannot shapeCoerce between types:"
             ':$$: 'Text "  From: " ':<>: 'ShowType x
             ':$$: 'Text "  To: " ':<>: 'ShowType y
@@ -563,7 +564,7 @@ instance
         )
     => GShapeCoercible x y (s :*: rest) (M1 S meta f)
     where
-    gscoerce = error "unreachable"
+    gscoerce = unsatisfiable
 
 instance GShapeCoercible x y (M1 S s (Rec0 ())) U1 where
     gscoerce _ = U1
