@@ -79,6 +79,8 @@ library
   build-depends:
       base >=4.19
     , containers
+    , hashable >=1.5
+    , unordered-containers
 
 test-suite shape-coerce-test
   import: default_opts

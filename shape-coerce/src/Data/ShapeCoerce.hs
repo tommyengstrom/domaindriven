@@ -10,9 +10,16 @@ module Data.ShapeCoerce
     )
 where
 
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HM
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HS
+import Data.Hashable (Hashable)
 import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
+import Data.Set (Set)
+import Data.Set qualified as Set
 import GHC.Generics
 import GHC.TypeError (Unsatisfiable, unsatisfiable)
 import GHC.TypeLits
@@ -39,6 +46,15 @@ instance
 
 instance (ShapeCoercible a c, ShapeCoercible b d, Ord c) => ShapeCoercible (Map a b) (Map c d) where
     shapeCoerce = M.mapKeys shapeCoerce . M.map shapeCoerce
+
+instance (ShapeCoercible a c, ShapeCoercible b d, Hashable c) => ShapeCoercible (HashMap a b) (HashMap c d) where
+    shapeCoerce = HM.mapKeys shapeCoerce . HM.map shapeCoerce
+
+instance (ShapeCoercible a b, Ord b) => ShapeCoercible (Set a) (Set b) where
+    shapeCoerce = Set.map shapeCoerce
+
+instance (ShapeCoercible a b, Hashable b) => ShapeCoercible (HashSet a) (HashSet b) where
+    shapeCoerce = HS.map shapeCoerce
 
 instance {-# OVERLAPPING #-} ShapeCoercible a a where
     shapeCoerce = id
