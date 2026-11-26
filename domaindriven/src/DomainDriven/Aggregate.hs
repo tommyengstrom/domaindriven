@@ -4,11 +4,12 @@
 module DomainDriven.Aggregate where
 
 import Data.Kind (Type)
-import Data.Type.Equality
 import DomainDriven.Domain
 import DomainDriven.Persistance.Class (NoIndex (..))
 import Effectful
-import Effectful.TH
+import Effectful.Dispatch.Dynamic (send)
+import GHC.Stack (HasCallStack)
+import Prelude ((.))
 
 -- | The new Aggregate effect with a single domain parameter
 data Aggregate (domain :: Type) :: Effect where
@@ -25,17 +26,23 @@ data Aggregate (domain :: Type) :: Effect where
 
 type instance DispatchOf (Aggregate domain) = 'Dynamic
 
-$(makeEffect ''Aggregate)
+runTransactionI
+    :: forall domain es a model event index
+     . ( HasCallStack
+       , Aggregate domain :> es
+       , IsDomain domain model event index
+       )
+    => index
+    -> (model -> Eff es (model -> a, [event]))
+    -> Eff es a
+runTransactionI index = send . RunTransactionI @domain index
 
 runTransaction
-    :: forall domain es a
-     . Aggregate domain :> es
-    => DomainIndex domain ~ NoIndex
-    => ( DomainModel domain -> Eff
-            es
-            ( DomainModel domain -> a
-            , [DomainEvent domain]
-            )
+    :: forall domain es a model event
+     . ( HasCallStack
+       , Aggregate domain :> es
+       , IsDomain domain model event NoIndex
        )
+    => (model -> Eff es (model -> a, [event]))
     -> Eff es a
-runTransaction = runTransactionI NoIndex
+runTransaction = runTransactionI @domain NoIndex

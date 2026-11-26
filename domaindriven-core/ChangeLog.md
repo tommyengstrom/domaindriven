@@ -2,6 +2,18 @@
 
 ## 0.7.0
 
+- Switched the build from Stackage Nightly 2026-08-10 to Nightly 2026-11-25
+  (effectful-core 2.7.1.2, effectful-plugin 2.2.0.0).
+- **Breaking:** `getModel`, `getModelI`, `getEventList`, `getEventListI`,
+  `runTransaction`, `runTransactionI`, `runProjection` and `runAggregate` now
+  relate the domain to its model, event and index through the new
+  `IsDomain domain model event index` class instead of `DomainModel`,
+  `DomainEvent` and `DomainIndex` equalities. effectful-plugin 2.2 no longer
+  infers the domain of an effect when equalities mention it, so the old
+  signatures required a type application at every call site. Code that is
+  polymorphic in the domain needs an `IsDomain` constraint to call these, or can
+  `send` the effect constructors directly. The domain is still the first type
+  argument; the remaining type variables changed.
 - **Breaking:** parameterize PostgreSQL index values and remove
   `IsPgIndex.toQuery`; reject index values containing NUL bytes.
 - **Breaking:** derive advisory lock keys in PostgreSQL: commands hold the

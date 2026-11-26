@@ -47,9 +47,7 @@ runProjection
     :: forall backend domain es a
      . ( IOE :> es
        , ReadModel backend
-       , P.Model backend ~ DomainModel domain
-       , P.Event backend ~ DomainEvent domain
-       , P.Index backend ~ DomainIndex domain
+       , IsDomain domain (P.Model backend) (P.Event backend) (P.Index backend)
        )
     => backend
     -> Eff (Projection domain : es) a
@@ -67,9 +65,7 @@ runAggregate
     :: forall backend domain es a
      . ( IOE :> es
        , WriteModel backend
-       , P.Model backend ~ DomainModel domain
-       , P.Event backend ~ DomainEvent domain
-       , P.Index backend ~ DomainIndex domain
+       , IsDomain domain (P.Model backend) (P.Event backend) (P.Index backend)
        )
     => backend
     -> Eff (Aggregate domain : es) a
@@ -115,7 +111,7 @@ runSubAggregateI
 runSubAggregateI mapIndex projectModel injectEvent = interpret $ \env -> \case
     RunTransactionI childIndex childTransaction ->
         localSeqUnlift env $ \unlift ->
-            runTransactionI @parent (mapIndex childIndex) $ \parentModel -> do
+            send . RunTransactionI @parent (mapIndex childIndex) $ \parentModel -> do
                 let childModel = projectModel parentModel
                 (mkResult, childEvents) <-
                     unlift (childTransaction childModel)
@@ -149,10 +145,10 @@ runSubProjectionI
     -> Eff es a
 runSubProjectionI mapIndex projectModel projectEvent = interpret $ \_ -> \case
     GetModelI childIndex ->
-        projectModel <$> getModelI @parent (mapIndex childIndex)
+        projectModel <$> send (GetModelI @parent (mapIndex childIndex))
     GetEventListI childIndex ->
         mapMaybe (traverse projectEvent)
-            <$> getEventListI @parent (mapIndex childIndex)
+            <$> send (GetEventListI @parent (mapIndex childIndex))
 
 -- | Reinterpret adjacent child 'Aggregate' and 'Projection' effects through
 -- their parent effects.

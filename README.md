@@ -13,7 +13,7 @@ The core idea is to do synchronous event sourcing with locks and thereby provide
 
 ## `servant-reqbody-field` dependency graphs
 
-The root project follows Stackage Nightly 2026-08-10, which selects
+The root project follows Stackage Nightly 2026-11-25, which selects
 `insert-ordered-containers-0.3.0`. It therefore uses the `servant-openapi3` fork
 pinned in `cabal.project` for compatibility with that version.
 

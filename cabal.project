@@ -5,9 +5,9 @@ packages:
   domaindriven-examples/
   servant-reqbody-field/
 
--- Use Stackage Nightly 2026-08-10 as the main package source
-import: https://www.stackage.org/nightly-2026-08-10/cabal.config
-index-state: 2026-08-10T00:00:00Z
+-- Use Stackage Nightly 2026-11-25 as the main package source
+import: https://www.stackage.org/nightly-2026-11-25/cabal.config
+index-state: 2026-11-25T00:00:00Z
 
 with-compiler: ghc-9.12.4
 
